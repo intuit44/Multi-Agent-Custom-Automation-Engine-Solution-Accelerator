@@ -1,0 +1,15 @@
+﻿{
+  "name": "agent975-tsx-analyzer",
+  "version": "1.0.0",
+  "description": "TSX Component Analyzer Agent",
+  "main": "handler.js",
+  "scripts": {
+    "start": "func start",
+    "test": "echo \"No tests yet...\""
+  },
+  "dependencies": {
+    "@azure/functions": "^4.0.0",
+    "@azure/identity": "^4.10.2",
+    "@azure/keyvault-secrets": "^4.10.0"
+  }
+}
