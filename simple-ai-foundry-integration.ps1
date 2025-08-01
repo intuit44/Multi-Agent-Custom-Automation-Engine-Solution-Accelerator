@@ -1,134 +1,229 @@
+# agents.yaml
+# Configuración de agentes Codex con integración AI Foundry
 
-# simple-ai-foundry-integration.ps1
-# Adaptado para uso con AIProjectClient de Azure (Node.js)
+agents:
+# ===== AGENTES PRINCIPALES CODEX =====
+- name: Architect_BoatRental
+repository: https://github.com/intuit44/BoatBooking
+branch: main
+paths:
+- README.md
+- package.json
+- shared/
+- scripts/
+- .gitignore
+- .prettierrc
+- .codegpt/agents.yaml
+- ai-foundry-agents.yaml
+- AGENTS.md
+description: >
+Agente principal encargado de la arquitectura general del proyecto, coordinación entre módulos,
+estructura de carpetas, convenciones de código, estrategia de versiones, seguridad global y decisiones de infraestructura.
+Tiene acceso a los archivos base del sistema y controla la coherencia entre agentes.
+ai_foundry_support:
+- ArchitectureAnalyzer
+capabilities:
+- project_structure
+- dependency_management
+- ci_cd_configuration
+- cross_module_coordination
 
-param(
-    [string]$TargetPath = "C:\ProyectosSimbolicos\boat-rental-app\Multi-Agent-Custom-Automation-Engine-Solution-Accelerator"
-)
+- name: Mobile_App_Agent
+repository: https://github.com/intuit44/BoatBooking
+branch: main
+paths:
+- mobile-app/
+description: >
+Agente especializado en el desarrollo móvil con React Native + Expo.
+Encargado del rendimiento, navegación, Redux Toolkit, UI responsive, integración con APIs, subida de imágenes,
+validación de formularios, y soporte multiplataforma (Android, iOS, Web).
+Responsable de detectar errores de tipado y renderizado en la app móvil.
+ai_foundry_support:
+- ReadTsxAgent
+- RefactorAgent
+- PerformanceOptimizer
+- TestingExpert
+capabilities:
+- react_native_development
+- expo_sdk_management
+- ui_ux_implementation
+- state_management
+- testing_mobile
 
-Write-Host "=== Integración AI Foundry (Node.js) ===" -ForegroundColor Cyan
+- name: AdminPanel_Agent
+repository: https://github.com/intuit44/BoatBooking
+branch: main
+paths:
+- admin-panel/
+description: >
+Agente responsable del panel administrativo web creado con Next.js + Material UI.
+Su función incluye gestionar vistas protegidas, SSR, formularios de administración,
+dashboards de control y seguridad del lado del cliente.
+Se enfoca en experiencia del administrador, manejo de sesiones y filtros de datos.
+ai_foundry_support:
+- RefactorAgent
+- TestingExpert
+capabilities:
+- nextjs_development
+- material_ui_implementation
+- ssr_configuration
+- admin_features
 
-# Validar ruta
-if (-not (Test-Path $TargetPath)) {
-    Write-Host "❌ Error: No existe $TargetPath" -ForegroundColor Red
-    exit 1
-}
+- name: Backend_Agent
+repository: https://github.com/intuit44/BoatBooking
+branch: main
+paths:
+- backend/
+- amplify/
+description: >
+Agente experto en el backend serverless. Gestiona funciones Lambda (TypeScript), GraphQL con AppSync,
+DynamoDB, autenticación con Cognito, subida a S3, validación con Joi, despliegue con Serverless Framework
+y flujos CI/CD. Se encarga también de la seguridad del backend y la conexión con servicios de AWS.
+ai_foundry_support:
+- RefactorAgent
+- PerformanceOptimizer
+- TestingExpert
+capabilities:
+- aws_amplify_v6
+- graphql_development
+- lambda_functions
+- database_design
+- authentication
 
-# Crear .codegpt/contexto
-$contextDir = "$TargetPath\.codegpt"
-if (-not (Test-Path $contextDir)) {
-    New-Item -ItemType Directory -Path $contextDir -Force | Out-Null
-}
+# ===== AGENTES EXTERNOS AI FOUNDRY =====
+- name: ReadTsxAgent
+external: true
+platform: ai-foundry
+endpoint: https://boatrentalfoundry-dev.openai.azure.com/openai/deployments/read_tsx_agent/chat/completions?api-version=2023-12-01-preview
+auth_token: ${FOUNDRY_AUTH_TOKEN}
+integration_with:
+- Mobile_App_Agent
+description: >
+Análisis profundo de componentes TSX, soporte para Mobile_App_Agent
 
-$context = @{
-    timestamp = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
-    version = "1.0.0"
-    project = "booking-agents"
-    agent = "Agent975"
-    endpoint = "https://boatRentalFoundry-dev.services.ai.azure.com"
-    method = "AIProjectClient (Node.js)"
-}
+- name: RefactorAgent
+external: true
+platform: ai-foundry
+endpoint: https://boatrentalfoundry-dev.openai.azure.com/openai/deployments/refactor_agent/chat/completions?api-version=2023-12-01-preview
+auth_token: ${FOUNDRY_AUTH_TOKEN}
+integration_with:
+- Mobile_App_Agent
+- Backend_Agent
+description: >
+Refactorización compleja, funciones grandes y optimización
 
-$contextPath = "$contextDir\agents.context.json"
-$context | ConvertTo-Json -Depth 5 | Out-File -FilePath $contextPath -Encoding UTF8
+- name: PerformanceOptimizer
+external: true
+platform: ai-foundry
+endpoint: https://boatrentalfoundry-dev.openai.azure.com/openai/deployments/performance_optimizer/chat/completions?api-version=2023-12-01-preview
+auth_token: ${FOUNDRY_AUTH_TOKEN}
+integration_with:
+- Mobile_App_Agent
+- Backend_Agent
+description: >
+Optimización de performance, análisis de bundle y queries, soporte para Mobile_App_Agent y Backend_Agent
 
-Write-Host "✅ Contexto creado en $contextPath" -ForegroundColor Green
+- name: ArchitectureAnalyzer
+external: true
+platform: ai-foundry
+endpoint: https://boatrentalfoundry-dev.openai.azure.com/openai/deployments/architecture_analyzer/chat/completions?api-version=2023-12-01-preview
+auth_token: ${FOUNDRY_AUTH_TOKEN}
+integration_with:
+- Architect_BoatRental
+description: >
+Análisis de arquitectura, dependencias y escalabilidad, soporte para Architect_BoatRental
 
-# Crear archivo run-agent975.mjs
-Write-Host "`n2️⃣ Creando script Node.js..." -ForegroundColor Yellow
+- name: TestingExpert
+external: true
+platform: ai-foundry
+endpoint: https://boatrentalfoundry-dev.openai.azure.com/openai/deployments/testing_expert/chat/completions?api-version=2023-12-01-preview
+auth_token: ${FOUNDRY_AUTH_TOKEN}
+integration_with:
+- Mobile_App_Agent
+- Backend_Agent
+- AdminPanel_Agent
+description: >
+Generación y análisis avanzado de tests, cobertura y mocks, soporte para todos los agentes principales
 
-$scriptContent = @'
-import { AIProjectClient } from "@azure/ai-projects";
-import { DefaultAzureCredential } from "@azure/identity";
+# ===== CONFIGURACIÓN DE INTEGRACIÓN =====
+integration_config:
+# Cuándo invocar agentes de AI Foundry
+auto_invoke_rules:
+- condition: "file_size > 500_lines"
+action: "suggest_ai_foundry_analysis"
+      
+- condition: "complexity_score > 15"
+action: "auto_invoke_refactor_agent"
+      
+- condition: "test_coverage < 70%"
+action: "auto_invoke_testing_expert"
+      
+- condition: "performance_regression_detected"
+action: "auto_invoke_performance_optimizer"
 
-async function runAgentConversation() {
-  const project = new AIProjectClient(
-    "https://boatRentalFoundry-dev.services.ai.azure.com/api/projects/booking-agents",
-    new DefaultAzureCredential()
-  );
+# Comunicación entre agentes
+communication_protocol:
+primary_channel: "codex_internal"
+secondary_channel: "azure_service_bus"
+fallback: "webhook"
 
-  const agent = await project.agents.getAgent("asst_jjH5up8ROP1hF0sRYoNZyFNQ");
-  console.log(`Retrieved agent: ${agent.name}`);
+# Flujo de trabajo híbrido
+workflow:
+1_initial_analysis: "codex_agent"
+2_complex_tasks: "ai_foundry_agent"
+3_implementation: "codex_agent"
+4_validation: "both"
 
-  const thread = await project.agents.threads.create();
-  console.log(`Created thread, ID: ${thread.id}`);
+# ===== CASOS DE USO PARA AI FOUNDRY =====
+ai_foundry_use_cases:
+high_priority:
+- "Refactorización de componentes con más de 300 líneas"
+- "Optimización de queries GraphQL complejas"
+- "Análisis de arquitectura para nuevos features"
+- "Generación de tests para código legacy"
+    
+medium_priority:
+- "Análisis de performance de componentes"
+- "Detección de code smells"
+- "Sugerencias de mejoras de accesibilidad"
+    
+low_priority:
+- "Formateo de código"
+- "Actualización de documentación"
+- "Renombrado de variables"
 
-  const message = await project.agents.messages.create(thread.id, "user", "Hello Agent");
-  console.log(`Created message, ID: ${message.id}`);
+# ===== MÉTRICAS Y MONITOREO =====
+monitoring:
+track_metrics:
+- agent_response_time
+- task_completion_rate
+- ai_foundry_invocation_count
+- cost_per_task
+    
+alerts:
+- type: "rate_limit_approaching"
+threshold: 80
+notify: "architect_boat_rental"
+      
+- type: "complex_task_detected"
+threshold: "complexity > 20"
+action: "suggest_ai_foundry"
 
-  let run = await project.agents.runs.create(thread.id, agent.id);
-
-  while (run.status === "queued" || run.status === "in_progress") {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    run = await project.agents.runs.get(thread.id, run.id);
-  }
-
-  if (run.status === "failed") {
-    console.error(`Run failed: `, run.lastError);
-  }
-
-  console.log(`Run completed with status: ${run.status}`);
-
-  const messages = await project.agents.messages.list(thread.id, { order: "asc" });
-
-  for await (const m of messages) {
-    const content = m.content.find((c) => c.type === "text" && "text" in c);
-    if (content) {
-      console.log(`${m.role}: ${content.text.value}`);
-    }
-  }
-}
-
-runAgentConversation().catch((error) => {
-  console.error("An error occurred:", error);
-});
-'@
-
-$scriptPath = "$TargetPath\run-agent975.mjs"
-$scriptContent | Out-File -FilePath $scriptPath -Encoding UTF8
-Write-Host "✅ Script JavaScript creado en $scriptPath" -ForegroundColor Green
-
-# Crear README
-Write-Host "`n3️⃣ Generando README..." -ForegroundColor Yellow
-
-$readme = @"
-# Integración AI Foundry con Agent975
-
-## Archivos generados
-- `.codegpt/agents.context.json`
-- `run-agent975.mjs`
-
-## Requisitos
-
-```bash
-npm install @azure/ai-projects @azure/identity
-az login
-```
-
-## Uso
-
-```bash
-node run-agent975.mjs
-```
-
-Este script:
-
-1. Carga el agente `Agent975` desde Azure AI Foundry
-2. Crea un hilo y un mensaje inicial ("Hello Agent")
-3. Ejecuta la conversación y espera su respuesta
-4. Muestra los mensajes del asistente en orden
-"@
-
-$readmePath = "$TargetPath\AI_FOUNDRY_README.md"
-$readme | Out-File -FilePath $readmePath -Encoding UTF8
-Write-Host "✅ README actualizado" -ForegroundColor Green
-
-# Resumen
-Write-Host "`n🎯 Archivos generados:" -ForegroundColor Cyan
-Write-Host "  - .codegpt\agents.context.json"
-Write-Host "  - run-agent975.mjs"
-Write-Host "  - AI_FOUNDRY_README.md"
-
-Write-Host "`nEjecuta:" -ForegroundColor Yellow
-Write-Host "  cd $TargetPath"
-Write-Host "  node run-agent975.mjs"
+# ===== CONFIGURACIÓN DE AZURE =====
+azure_config:
+ai_foundry:
+endpoint: "https://boatrentalfoundry-dev.openai.azure.com/openai/deployments/gpt-35-turbo-instruct/completions?api-version=2022-12-01"
+api_version: "2023-12-01-preview"
+deployments:
+- name: "gpt-35-turbo-instruct"
+purpose: "quick_analysis"
+rate_limit: 1000
+- name: "gpt-4"
+purpose: "complex_refactoring"
+rate_limit: 500
+        
+azure_functions:
+- name: "read-tsx-agent"
+url: "read-tsx-agent-fda2h6g7gtc2h5c9.eastus-01.azurewebsites.net"
+status: "active"
+purpose: "tsx_analysis"

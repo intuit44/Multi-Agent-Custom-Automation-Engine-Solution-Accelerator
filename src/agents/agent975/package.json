@@ -1,7 +1,7 @@
-﻿{
-  "name": "agent975-tsx-analyzer",
+{
+  "name": "boat-rental-app",
   "version": "1.0.0",
-  "description": "TSX Component Analyzer Agent",
+  "description": "",
   "main": "handler.js",
   "scripts": {
     "start": "func start",

@@ -1,0 +1,14 @@
+{
+  "name": "agent975",
+  "version": "1.0.0",
+  "description": "Agente para análisis TSX con AI Foundry",
+  "type": "module",
+  "scripts": {
+    "start": "node run-agent975.mjs",
+    "run-agent975": "node run-agent975.mjs"
+  },
+  "dependencies": {
+    "@azure/ai-projects": "^1.0.0-beta.10",
+    "@azure/identity": "^4.10.2"
+  }
+}

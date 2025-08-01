@@ -20,13 +20,7 @@ agents:
       Agente principal encargado de la arquitectura general del proyecto, coordinación entre módulos,
       estructura de carpetas, convenciones de código, estrategia de versiones, seguridad global y decisiones de infraestructura.
       Tiene acceso a los archivos base del sistema y controla la coherencia entre agentes.
-    ai_foundry_support:
-      - ArchitectureAnalyzer
-    capabilities:
-      - project_structure
-      - dependency_management
-      - ci_cd_configuration
-      - cross_module_coordination
+
 
   - name: Mobile_App_Agent
     repository: https://github.com/intuit44/BoatBooking
@@ -79,17 +73,22 @@ agents:
       Agente experto en el backend serverless. Gestiona funciones Lambda (TypeScript), GraphQL con AppSync,
       DynamoDB, autenticación con Cognito, subida a S3, validación con Joi, despliegue con Serverless Framework
       y flujos CI/CD. Se encarga también de la seguridad del backend y la conexión con servicios de AWS.
-    ai_foundry_support:
-      - RefactorAgent
-      - PerformanceOptimizer
-      - TestingExpert
-    capabilities:
-      - aws_amplify_v6
-      - graphql_development
-      - lambda_functions
-      - database_design
-      - authentication
 
+  - name: Agent975
+    description: >
+      Agente simbólico conectado a Azure AI Foundry para pruebas de conexión,
+      ejecución y trazabilidad desde run-agent975.mjs. Se usa como plantilla
+      base para crear otros agentes conectados a proyectos en AI Studio.
+    entry: "src/agents/agent975/run-agent975.mjs"
+    context: ".codegpt/agents.context.json"
+    platform: "local"
+    capabilities:
+      - "agent_execution"
+      - "connectivity_testing"
+      - "ai_project_client_usage"
+    integration_with:
+      - "Architect_BoatRental"
+    
   # ===== AGENTES EXTERNOS AI FOUNDRY =====
   - name: ReadTsxAgent
     external: true
@@ -144,6 +143,29 @@ agents:
       - AdminPanel_Agent
     description: >
       Generación y análisis avanzado de tests, cobertura y mocks, soporte para todos los agentes principales
+
+  - name: azure-foundry-agent
+    path: "."
+    tags:
+      - "azure"
+      - "ai-foundry"
+      - "gpt-35-turbo-instruct"
+      - "agent"
+    include:
+      - ".env"
+      - "*.yaml"
+      - "*.json"
+    azure_config:
+      deployment_name: "gpt-35-turbo-instruct"
+      model_name: "gpt-35-turbo-instruct"
+      model_version: "0914"
+      endpoint: "https://boatrentalfoundry-dev.openai.azure.com/"
+      api_version: "2023-12-01-preview"
+      rate_limits:
+        tokens_per_minute: 1000
+        requests_per_minute: 6
+      deployment_type: "Standard"
+      lifecycle_status: "GenerallyAvailable"
 
 # ===== CONFIGURACIÓN DE INTEGRACIÓN =====
 integration_config:
@@ -221,9 +243,10 @@ azure_config:
       - name: "gpt-4"
         purpose: "complex_refactoring"
         rate_limit: 500
-        
+
   azure_functions:
     - name: "read-tsx-agent"
       url: "read-tsx-agent-fda2h6g7gtc2h5c9.eastus-01.azurewebsites.net"
       status: "active"
       purpose: "tsx_analysis"
+
