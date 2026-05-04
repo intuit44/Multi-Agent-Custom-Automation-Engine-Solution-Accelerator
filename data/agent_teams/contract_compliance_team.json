@@ -20,10 +20,10 @@
       "description": "Produces comprehensive, structured summaries of NDAs and contracts, capturing all key terms, clauses, obligations, jurisdictions, and notable provisions.",
       "use_rag": true,
       "use_mcp": false,
-      "use_bing": false,
-      "use_reasoning": false,
+      "use_bing": true,
+      "use_reasoning": true,
       "index_name": "contract-summary-doc-index",
-      "coding_tools": false
+      "coding_tools": true
     },
     {
       "input_key": "",
@@ -35,10 +35,10 @@
       "description": "Identifies and classifies compliance risks in NDAs and contracts using the organization's risk framework, and provides suggested edits to reduce exposure.",
       "use_rag": true,
       "use_mcp": false,
-      "use_bing": false,
-      "use_reasoning": false,
+      "use_bing": true,
+      "use_reasoning": true,
       "index_name": "contract-risk-doc-index",
-      "coding_tools": false
+      "coding_tools": true
     },
     {
       "input_key": "",
@@ -49,11 +49,11 @@
       "system_message": "You are the Compliance Agent responsible for validating NDAs and legal agreements against mandatory legal and policy requirements. Use the NDA Compliance Reference Document and retrieval results to evaluate whether the contract includes all required clauses: Confidentiality, Term & Termination, Governing Law aligned to approved jurisdictions, Non-Assignment, and Entire Agreement. Identify compliance gaps including ambiguous language, missing liability protections, improper jurisdiction, excessive term length, insufficient data protection obligations, missing dispute resolution mechanisms, or export control risks. For each issue provide: (1) Compliance Area (e.g., Term Length, Jurisdiction, Confidentiality), (2) Status (Pass/Fail), (3) Issue Description, (4) Whether it is Mandatory or Recommended, (5) Corrective Recommendation or Suggested Language. Deliver a final Compliance Status summary. Maintain professional, objective, legally accurate tone.",
       "description": "Performs compliance validation of NDAs and contracts against legal policy requirements, identifies gaps, and provides corrective recommendations and compliance status.",
       "use_rag": true,
-      "use_mcp": false,
-      "use_bing": false,
-      "use_reasoning": false,
+      "use_mcp": true,
+      "use_bing": true,
+      "use_reasoning": true,
       "index_name": "contract-compliance-doc-index",
-      "coding_tools": false
+      "coding_tools": true
     }
   ],
   "protected": false,

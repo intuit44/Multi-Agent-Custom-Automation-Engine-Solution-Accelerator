@@ -168,6 +168,8 @@ class TeamService:
     async def save_team_configuration(self, team_config: TeamConfiguration) -> str:
         """
         Save team configuration to the database.
+        If a document with the same team_id already exists it is replaced (UPSERT),
+        otherwise a new document is created.
 
         Args:
             team_config: TeamConfiguration object to save
@@ -179,12 +181,23 @@ class TeamService:
             if self.memory_context is None:
                 raise ValueError("Memory context is not initialized")
 
-            # Use the specific add_team method from cosmos memory context
-            await self.memory_context.add_team(team_config)
+            # Check whether a document with this id already exists.
+            # If it does, use update_team (upsert_item) to replace it;
+            # otherwise use add_team (create_item) to insert a new one.
+            # This prevents duplicate documents when uploading with ?team_id=.
+            existing = await self.memory_context.get_team(team_config.id)
+            if existing is not None:
+                await self.memory_context.update_team(team_config)
+                self.logger.info(
+                    "Updated (upserted) existing team configuration with ID: %s",
+                    team_config.id,
+                )
+            else:
+                await self.memory_context.add_team(team_config)
+                self.logger.info(
+                    "Created new team configuration with ID: %s", team_config.id
+                )
 
-            self.logger.info(
-                "Successfully saved team configuration with ID: %s", team_config.id
-            )
             return team_config.id
 
         except Exception as e:

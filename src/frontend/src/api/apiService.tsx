@@ -22,6 +22,7 @@ const API_ENDPOINTS = {
     PLANS: '/v4/plans',
     PLAN: '/v4/plan',
     PLAN_APPROVAL: '/v4/plan_approval',
+    RESUME_PLAN: '/v4/resume_plan',
     HUMAN_CLARIFICATION: '/v4/user_clarification',
     USER_BROWSER_LANGUAGE: '/user_browser_language',
     AGENT_MESSAGE: '/v4/agent_message',
@@ -209,6 +210,16 @@ export class APIService {
             console.log('✅ Plan approval successful:', response);
             return response;
         });
+    }
+
+    /**
+     * Resume orchestration for an orphaned in_progress plan (m_plan is null).
+     * Called by PlanPage when it detects a plan stuck without steps.
+     */
+    async triggerPlanOrchestration(planId: string): Promise<void> {
+        console.log('🔄 Re-triggering orchestration for plan:', planId);
+        await apiClient.post(API_ENDPOINTS.RESUME_PLAN, { plan_id: planId });
+        console.log('✅ Orchestration re-triggered for plan:', planId);
     }
 
 

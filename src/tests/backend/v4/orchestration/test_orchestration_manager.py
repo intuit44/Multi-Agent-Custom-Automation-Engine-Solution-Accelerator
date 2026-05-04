@@ -729,7 +729,9 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         # Execute orchestration
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Verify streaming callback was called (for AgentRunUpdateEvent)
@@ -747,7 +749,9 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         with self.assertRaises(ValueError) as context:
             await self.orchestration_manager.run_orchestration(
-                user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+                user_id=self.test_user_id,
+                session_id=self.test_session_id,
+                input_task=input_task,
             )
 
         self.assertIn("Orchestration not initialized", str(context.exception))
@@ -767,7 +771,9 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         with self.assertRaises(Exception):
             await self.orchestration_manager.run_orchestration(
-                user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+                user_id=self.test_user_id,
+                session_id=self.test_session_id,
+                input_task=input_task,
             )
 
         # Verify error status was sent
@@ -798,7 +804,9 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
         input_task.description = "Test task"
 
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Verify histories were cleared
@@ -824,7 +832,9 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
         input_task.description = "Test task"
 
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Verify clear method was called
@@ -849,7 +859,9 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         # Should not raise exception - clearing failures are handled gracefully
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Verify workflow still executed
@@ -873,7 +885,9 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         # Should not raise exception - event processing errors are handled
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Reset side effect for other tests
@@ -892,7 +906,9 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             asyncio.run(
                 self.orchestration_manager.run_orchestration(
-                    user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+                    user_id=self.test_user_id,
+                    session_id=self.test_session_id,
+                    input_task=input_task,
                 )
             )
 
@@ -911,7 +927,9 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
         input_task = "Simple string task"
 
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Verify workflow was called with the string
@@ -937,7 +955,9 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
         # and trying to send error status, which will also fail, but shouldn't raise
         try:
             await self.orchestration_manager.run_orchestration(
-                user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+                user_id=self.test_user_id,
+                session_id=self.test_session_id,
+                input_task=input_task,
             )
         except Exception as e:
             # The method may still raise the original WebSocket error
@@ -1003,7 +1023,9 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         # Should process all events without errors
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Verify streaming callback was called (for output event with AgentResponseUpdate data)
@@ -1176,7 +1198,9 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         # Should process without raising an exception
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Should have sent status update for final result
@@ -1204,7 +1228,9 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         # Should handle mixed list without error
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         connection_config.send_status_update_async.assert_called()
@@ -1227,7 +1253,9 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
         input_task.description = "Test object output"
 
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         connection_config.send_status_update_async.assert_called()
@@ -1248,7 +1276,9 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
         input_task.description = "Test unknown type output"
 
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         connection_config.send_status_update_async.assert_called()
@@ -1268,7 +1298,9 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
         input_task.description = "Test empty list output"
 
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Empty list should still result in a status update being sent
@@ -1289,7 +1321,7 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
         # Make the workflow raise the HITL cancellation exception
         async def _raise_cancel(*_a, **_kw):
             raise Exception("Plan execution cancelled by user")  # noqa: TRY002
-            yield  # noqa: unreachable – makes this an async generator  # type: ignore[misc]
+            yield  # noqa: unreachable – makes this an async generator
 
         mock_workflow.run = _raise_cancel
         mock_workflow.executors = {}
@@ -1301,7 +1333,9 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         # Should NOT raise
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Verify a cancellation message was sent
@@ -1320,7 +1354,7 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         async def _raise_cancel(*_a, **_kw):
             raise Exception("Plan execution cancelled by user")  # noqa: TRY002
-            yield  # type: ignore[misc]
+            yield
 
         mock_workflow.run = _raise_cancel
         mock_workflow.executors = {}
@@ -1335,7 +1369,9 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         # Should still NOT raise despite send failure
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, session_id=self.test_session_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Clean up side_effect so it doesn't leak to subsequent tests

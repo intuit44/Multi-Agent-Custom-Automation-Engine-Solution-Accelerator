@@ -6,7 +6,7 @@ Handles Azure OpenAI, MCP, and environment setup (agent_framework version).
 import asyncio
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from agent_framework import ChatOptions
 from agent_framework.azure import AzureOpenAIChatClient
@@ -57,9 +57,9 @@ class AzureConfig:
         Create ChatOptions analogous to previous OpenAIChatPromptExecutionSettings.
         """
         return ChatOptions(
-            max_output_tokens=4000,
+            max_tokens=4000,
             temperature=0.1,
-        )  # type: ignore[call-overload]
+        )
 
 
 class MCPConfig:
@@ -88,6 +88,9 @@ class OrchestrationConfig:
     def __init__(self):
         # Previously Dict[str, MagenticOrchestration]; now generic workflow objects from MagenticBuilder.build()
         self.orchestrations: Dict[str, Any] = {}  # user_id -> workflow instance
+        self.agent_wrappers: Dict[
+            str, List[Any]
+        ] = {}  # user_id -> list of lifecycle-managed agent wrappers (for proper close)
         self.plans: Dict[str, MPlan] = {}  # plan_id -> plan details
         self.approvals: Dict[
             str, Optional[bool]

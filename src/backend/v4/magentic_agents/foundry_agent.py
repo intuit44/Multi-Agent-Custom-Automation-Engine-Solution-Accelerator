@@ -12,7 +12,7 @@ except ImportError:
     try:
         from agent_framework_azure_ai._client import AzureAIProjectAgentOptions
     except (ImportError, ModuleNotFoundError):
-        AzureAIProjectAgentOptions = ChatOptions  # type: ignore[misc,assignment]
+        AzureAIProjectAgentOptions = ChatOptions
 
 from azure.ai.projects.models import (
     AISearchIndexResource,
@@ -209,6 +209,14 @@ class FoundryAgentTemplate(AzureAgentBase):
                 )
                 raise ValueError(
                     "model_deployment_name must be provided to create Azure AI Search agent."
+                )
+
+            if self.project_client is None:
+                self.logger.error(
+                    "project_client is None; cannot create Azure AI Search agent."
+                )
+                raise ValueError(
+                    "project_client must be initialized to create Azure AI Search agent."
                 )
 
             enhanced_instructions = (

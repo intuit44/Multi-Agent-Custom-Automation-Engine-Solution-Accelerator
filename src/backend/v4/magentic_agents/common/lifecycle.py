@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import inspect
 import logging
 from contextlib import AsyncExitStack
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from agent_framework import Agent, MCPStreamableHTTPTool
 from agent_framework.azure import AzureOpenAIResponsesClient
-from agent_framework_azure_ai import AzureAIClient
+from agent_framework_azure_ai import AzureAIClient, AzureAIProjectAgentOptions
 from azure.ai.agents.aio import AgentsClient
 from azure.ai.projects.models import PromptAgentDefinition
 
@@ -106,34 +107,68 @@ class MCPEnabledBase:
         if self._stack is None:
             return
         try:
-            # Attempt to close the underlying agent/client if it exposes close()
-            if self._agent and hasattr(self._agent, "close"):
+            # 1. Close the underlying AzureAIClient / ResponsesClient (main network resource)
+            _agent_close = getattr(self._agent, "close", None) if self._agent else None
+            if callable(_agent_close):
                 try:
-                    await self._agent.close()  # AzureAIClient has async close
+                    result = _agent_close()
+                    if inspect.isawaitable(result):
+                        await result
                 except Exception as exc:
-                    # Best-effort close; log failure but continue teardown
                     self.logger.warning(
-                        "Error while closing underlying agent %s: %s",
-                        type(self._agent).__name__ if self._agent else "Unknown",
+                        "Error closing AzureAIClient for agent %s: %s",
+                        self.agent_name,
                         exc,
-                        exc_info=True,
                     )
-            # Unregister from registry if present
+
+            # 2. Close AgentsClient (aiohttp-based REST client for Foundry API calls)
+            if self.client and hasattr(self.client, "close"):
+                try:
+                    await self.client.close()
+                except Exception as exc:
+                    self.logger.debug(
+                        "AgentsClient close error (non-critical): %s", exc
+                    )
+
+            # 3. Release the AsyncExitStack (includes MCP tool context).
+            # The MCP cancel scope was created in the task that called open().
+            # If close() runs from a DIFFERENT task (e.g. force-rebuild), AnyIO
+            # raises a cancel-scope violation.  We catch it — the important
+            # network resources above were already released.
+            if self._stack:
+                try:
+                    await self._stack.aclose()
+                except Exception as exc:
+                    self.logger.debug(
+                        "Stack release notice for agent '%s' (resources already closed): %s",
+                        self.agent_name,
+                        exc,
+                    )
+
+            # 4. Close credential token cache
+            if self.creds and hasattr(self.creds, "close"):
+                try:
+                    await self.creds.close()
+                except Exception as exc:
+                    self.logger.debug("Credential close error (non-critical): %s", exc)
+
+        finally:
+            # 5. Unregister from global registry (safe, non-blocking operation)
             try:
                 agent_registry.unregister_agent(self)
             except Exception as exc:
-                # Best-effort unregister; log and continue teardown
-                self.logger.warning(
-                    "Failed to unregister agent %s from agent_registry: %s",
-                    type(self).__name__,
+                self.logger.debug(
+                    "Agent unregister error (non-critical) for '%s': %s",
+                    self.agent_name,
                     exc,
-                    exc_info=True,
                 )
-            await self._stack.aclose()
-        finally:
+
+            # Null all references so GC does not attempt a second close
             self._stack = None
             self.mcp_tool = None
             self._agent = None
+            self.client = None
+            self.creds = None
 
     # Context manager
     async def __aenter__(self) -> "MCPEnabledBase":
@@ -152,7 +187,7 @@ class MCPEnabledBase:
         """Subclasses must build self._agent here."""
         raise NotImplementedError
 
-    def get_chat_client(self) -> AzureAIClient:
+    def get_chat_client(self) -> "AzureAIClient[AzureAIProjectAgentOptions]":
         """Return AzureAIClient for agents WITHOUT runtime tools (e.g. Azure Search path).
 
         Uses agent_name with use_latest_version=True to get the latest agent version.
@@ -162,7 +197,7 @@ class MCPEnabledBase:
         For agents with runtime tools, use get_responses_client() instead.
         """
         if self._agent and self._agent.client:
-            return self._agent.client  # type: ignore
+            return cast("AzureAIClient[AzureAIProjectAgentOptions]", self._agent.client)
         chat_client = AzureAIClient(
             project_endpoint=self.project_endpoint,
             agent_name=self.agent_name,
@@ -262,7 +297,9 @@ class MCPEnabledBase:
         This ID is only used locally for the ChatAgent wrapper instance.
         """
         id = generate_assistant_id()
-        self.logger.info("Generated new agent ID: %s", id)
+        self.logger.debug(
+            "Generated local wrapper ID: %s (not a new Azure Foundry agent)", id
+        )
         return id
 
     async def _prepare_mcp_tool(self) -> None:
@@ -373,9 +410,12 @@ class AzureAgentBase(MCPEnabledBase):
         """
         try:
             # Close underlying client via base close
-            if self._agent and hasattr(self._agent, "close"):
+            _agent_close = getattr(self._agent, "close", None) if self._agent else None
+            if callable(_agent_close):
                 try:
-                    await self._agent.close()
+                    result = _agent_close()
+                    if inspect.isawaitable(result):
+                        await result
                 except Exception as exc:
                     logging.warning(
                         "Failed to close underlying agent %r: %s",
@@ -406,9 +446,12 @@ class AzureAgentBase(MCPEnabledBase):
                         exc,
                         exc_info=True,
                     )
-            if self.creds:
+            _creds_close = getattr(self.creds, "close", None) if self.creds else None
+            if callable(_creds_close):
                 try:
-                    await self.creds.close()
+                    result = _creds_close()
+                    if inspect.isawaitable(result):
+                        await result
                 except Exception as exc:
                     logging.warning(
                         "Failed to close credentials %r: %s",

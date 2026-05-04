@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypePrism from "rehype-prism";
@@ -32,6 +32,16 @@ interface Message {
 // Response can be either string (legacy) or Message object with _meta
 type MessageResponse = string | Message;
 
+/** Imperative handle exposed via ref — allows parent to push messages externally (e.g. from WebSocket). */
+export interface ChatHandle {
+  /** Append a new message to the chat list. */
+  pushMessage: (msg: { role: string; content: string; _meta?: Message['_meta'] }) => void;
+  /** Update the content of the last message (used for WS streaming chunks). */
+  updateLastMessage: (updater: (prev: string) => string) => void;
+  /** Clear all messages. */
+  clearMessages: () => void;
+}
+
 interface ChatProps {
   userId: string;
   children?: React.ReactNode;
@@ -49,23 +59,38 @@ interface ChatProps {
   onClearHistory?: (userId: string) => void;
 }
 
-const Chat: React.FC<ChatProps> = ({
-  userId,
-  children,
-  onSendMessage,
-  onSaveMessage,
-  onLoadHistory,
-  onClearHistory,
-}) => {
+const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
+  {
+    userId,
+    children,
+    onSendMessage,
+    onSaveMessage,
+    onLoadHistory,
+    onClearHistory,
+  },
+  ref
+) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [inputHeight, setInputHeight] = useState(0);
-  const [availableWidgets, setAvailableWidgets] = useState<any[]>([]);
+  const [, setAvailableWidgets] = useState<any[]>([]);
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputContainerRef = useRef<HTMLDivElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    pushMessage: (msg) => setMessages((prev) => [...prev, { role: msg.role, content: msg.content, _meta: msg._meta }]),
+    updateLastMessage: (updater) =>
+      setMessages((prev) => {
+        if (prev.length === 0) return prev;
+        const updated = [...prev];
+        updated[updated.length - 1] = { ...updated[updated.length - 1], content: updater(updated[updated.length - 1].content) };
+        return updated;
+      }),
+    clearMessages: () => setMessages([]),
+  }));
 
   // MCP Discovery: Load available widgets proactively
   useEffect(() => {
@@ -233,62 +258,6 @@ const Chat: React.FC<ChatProps> = ({
     <div className="chat-container">
       <div className="messages" ref={messagesContainerRef}>
         <div className="message-wrapper">
-        {/* Proactive Discovery: Quick Widgets panel */}
-        {messages.length === 0 && availableWidgets.length > 0 && (
-          <div style={{
-            padding: '16px',
-            marginBottom: '16px',
-            borderRadius: '12px',
-            background: 'linear-gradient(135deg, #f0f4ff 0%, #e8f0fe 100%)',
-            border: '1px solid #d0daf0',
-          }}>
-            <div style={{ fontSize: '14px', fontWeight: 600, color: '#1a1a1a', marginBottom: '12px' }}>
-              🧩 Available Widgets
-            </div>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {availableWidgets
-                .filter((w: any) => w.proactive !== false)
-                .map((w: any, i: number) => (
-                  <button
-                    key={i}
-                    onClick={() => {
-                      // For proactive widgets, render directly via WidgetFrame
-                      const widgetMsg: Message = {
-                        role: 'assistant',
-                        content: w.description || w.title,
-                        _meta: { ui: { resourceUri: w.resource_uri, fallback: 'markdown' } },
-                      };
-                      setMessages((prev) => [...prev, widgetMsg]);
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '8px 14px',
-                      borderRadius: '8px',
-                      border: '1px solid #c7d2e0',
-                      background: '#ffffff',
-                      cursor: 'pointer',
-                      fontSize: '13px',
-                      color: '#374151',
-                      transition: 'box-shadow 0.15s ease',
-                      boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.12)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.06)')}
-                  >
-                    <span>{w.icon || '🔧'}</span>
-                    <span>{w.title}</span>
-                  </button>
-                ))}
-            </div>
-            {availableWidgets.some((w: any) => w.proactive === false) && (
-              <div style={{ marginTop: '8px', fontSize: '12px', color: '#6b7280' }}>
-                💡 More widgets available via AI — try asking about products!
-              </div>
-            )}
-          </div>
-        )}
         {messages.map((msg, index) => (
           <div key={index} className={`message ${msg.role}`}>
             <Body1>
@@ -354,6 +323,13 @@ const Chat: React.FC<ChatProps> = ({
         </Tag>
       )}
 
+      {/* Plan-specific overlays: approval buttons, clarification banners, spinners */}
+      {children && (
+        <div className="chat-children-slot">
+          {children}
+        </div>
+      )}
+
       <div ref={inputContainerRef} style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ display: 'flex', width: '100%', maxWidth: '768px', margin: '0px 16px' }}>
           <ChatInput
@@ -392,6 +368,8 @@ const Chat: React.FC<ChatProps> = ({
 
     </div>
   );
-};
+});
+
+Chat.displayName = 'Chat';
 
 export default Chat;

@@ -116,7 +116,6 @@ def build_agent_message_from_agent_message_response(
 
 
 class PlanService:
-
     @staticmethod
     async def handle_plan_approval(
         human_feedback: messages.PlanApprovalResponse, user_id: str
@@ -151,6 +150,9 @@ class PlanService:
                     orchestration_config.plans[human_feedback.m_plan_id] = mplan
                     if plan:
                         plan.overall_status = PlanStatus.approved
+                        plan.approved = (
+                            True  # keep boolean field consistent with overall_status
+                        )
                         plan.m_plan = mplan.model_dump()
                         await memory_store.update_plan(plan)
                     else:

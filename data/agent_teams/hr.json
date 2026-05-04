@@ -13,16 +13,16 @@
       "name": "HRHelperAgent",
       "deployment_name": "gpt-4.1-mini",
       "icon": "",
-      "system_message": "You have access to a number of HR related MCP tools for tasks like employee onboarding, benefits management, policy guidance, and general HR inquiries. Use these tools to assist employees with their HR needs efficiently and accurately.If you need more information to accurately call these tools, do not make up answers, call the ProxyAgent for clarification.",
+      "system_message": "You have access to a number of HR related MCP tools for tasks like employee onboarding, benefits management, policy guidance, and general HR inquiries. Use these tools to assist employees with their HR needs efficiently and accurately. IMPORTANT: When an action can be performed immediately using available MCP tools (e.g., registering an employee, updating records, managing benefits), call the tool FIRST and report the result. Do not ask for information you can obtain directly through tools. Only call the ProxyAgent for clarification if the required data is genuinely unavailable and cannot be retrieved via tools.",
       "description": "An agent that has access to various HR tools to assist employees with onboarding, benefits, policies, and general HR inquiries.",
-      "use_rag": false,
-      "use_mcp": true,
-      "use_bing": false,
-      "use_reasoning": false,
-      "index_name": "",
+      "use_rag": true,
+      "use_mcp": false,
+      "use_bing": true,
+      "use_reasoning": true,
+      "index_name": "macae-hr-knowledge-index",
       "index_foundry_name": "",
       "index_endpoint": "",
-      "coding_tools": false
+      "coding_tools": true
     },
     {
       "input_key": "",
@@ -30,15 +30,15 @@
       "name": "TechnicalSupportAgent",
       "deployment_name": "gpt-4.1-mini",
       "icon": "",
-      "system_message": "You have access to a number of technical support MCP tools for tasks such as provisioning laptops, setting up email accounts, troubleshooting, software/hardware issues, and IT support. Use these tools to assist employees with their technical needs efficiently and accurately.  If you need more information to accurately call these tools, do not make up answers, call the ProxyAgent for clarification.",
+      "system_message": "You have access to a number of technical support MCP tools for tasks such as provisioning laptops, setting up email accounts, troubleshooting, software/hardware issues, and IT support. Use these tools to assist employees with their technical needs efficiently and accurately. IMPORTANT: When an action can be performed immediately using available MCP tools (e.g., provisioning a laptop, creating an account, installing software), call the tool FIRST and report the result. Do not ask for information you can obtain directly through tools. Only call the ProxyAgent for clarification if the required data is genuinely unavailable and cannot be retrieved via tools.",
       "description": "An agent that has access to various technical support tools to assist employees with IT needs like laptop provisioning, email setup, troubleshooting, and software/hardware issues.",
-      "use_rag": false,
-      "use_mcp": true,
-      "use_bing": false,
-      "use_reasoning": false,
-      "index_name": "",
+      "use_rag": true,
+      "use_mcp": false,
+      "use_bing": true,
+      "use_reasoning": true,
+      "index_name": "macae-hr-knowledge-index",
       "index_foundry_name": "",
-      "coding_tools": false
+      "coding_tools": true
     },
     {
       "input_key": "",
@@ -49,12 +49,12 @@
       "system_message": "",
       "description": "",
       "use_rag": false,
-      "use_mcp": false,
-      "use_bing": false,
-      "use_reasoning": false,
+      "use_mcp": true,
+      "use_bing": true,
+      "use_reasoning": true,
       "index_name": "",
       "index_foundry_name": "",
-      "coding_tools": false
+      "coding_tools": true
     }
   ],
   "protected": false,

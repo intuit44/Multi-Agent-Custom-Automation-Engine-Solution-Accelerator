@@ -17,7 +17,6 @@ import {
 import type {
     ChatMessage,
     ChatSessionSummary,
-    ChatSessionFull,
 } from '../lib/types';
 
 /** Callbacks for streaming chat responses. */
@@ -95,6 +94,73 @@ export class ChatService {
 
         chatSessions.set(sid, msgs);
         return response;
+    }
+
+    /**
+     * Stream a chat response as an AsyncIterable<string>.
+     *
+     * Adapts the callback-based sendMessageStream API to the AsyncIterable<string>
+     * contract expected by Chat.tsx coral onSendMessage.
+     *
+     * Behaviour:
+     *   - Yields each LLM token as a plain string chunk.
+     *   - On plan_created the generator stops; the navigate callback handles routing.
+     *   - On error the generator yields an error string and closes.
+     */
+    static streamAsAsyncIterable(
+        message: string,
+        sessionId: string | undefined,
+        onPlanCreated?: (planId: string) => void,
+        onSessionId?: (sid: string) => void,
+    ): AsyncIterable<string> {
+        return {
+            [Symbol.asyncIterator](): AsyncIterator<string> {
+                // Queue of resolved chunks; resolve/reject hooks for the consumer.
+                const queue: string[] = [];
+                let done = false;
+                let error: unknown = null;
+                let notify: (() => void) | null = null;
+
+                const push = (chunk: string) => {
+                    queue.push(chunk);
+                    notify?.();
+                };
+                const finish = () => { done = true; notify?.(); };
+                const fail   = (e: unknown) => { error = e; done = true; notify?.(); };
+
+                // Fire the SSE connection — don't await; run in background.
+                ChatService.sendMessageStream(message, sessionId, {
+                    onToken:       (token) => push(token),
+                    onIntent:      (data)  => { if (data.session_id) onSessionId?.(data.session_id); },
+                    onToolActivity:(data)  => {
+                        // Surface tool-call activity as a minimal UI hint.
+                        if (data.activity === 'calling') push(`\n_🔧 Calling **${data.tool}**${data.server ? ` on \`${data.server}\`` : ''}…_\n`);
+                    },
+                    onPlanCreated: (planId) => { onPlanCreated?.(planId); finish(); },
+                    onDone:        () => finish(),
+                    onError:       (msg) => fail(new Error(msg)),
+                }).catch(fail);
+
+                return {
+                    next(): Promise<IteratorResult<string>> {
+                        // Fast-path: data already queued or terminal state.
+                        if (error) return Promise.reject(error);
+                        if (queue.length > 0) return Promise.resolve({ value: queue.shift()!, done: false });
+                        if (done) return Promise.resolve({ value: '', done: true });
+                        // Slow-path: nothing ready yet — park until push/finish/fail.
+                        // notify is assigned once per call; no loop variable capture issue.
+                        return new Promise<IteratorResult<string>>((resolve, reject) => {
+                            notify = () => {
+                                notify = null;
+                                if (error) { reject(error); return; }
+                                if (queue.length > 0) { resolve({ value: queue.shift()!, done: false }); return; }
+                                resolve({ value: '', done: true });
+                            };
+                        });
+                    },
+                };
+            },
+        };
     }
 
     /**

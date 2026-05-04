@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Spinner, Text } from "@fluentui/react-components";
 import { PlanDataService } from "../services/PlanDataService";
-import { ProcessedPlanData, WebsocketMessageType, MPlanData, AgentMessageData, AgentMessageType, ParsedUserClarification, AgentType, PlanStatus, TeamConfig } from "../models";
+import { ProcessedPlanData, WebsocketMessageType, MPlanData, AgentMessageData, AgentMessageType, ParsedUserClarification, AgentType, PlanStatus, TeamConfig, StreamMessage } from "../models";
 import PlanChat from "../components/content/PlanChat";
 import PlanPanelRight from "../components/content/PlanPanelRight";
 import PlanPanelLeft from "../components/content/PlanPanelLeft";
@@ -18,7 +18,7 @@ import Octo from "../coral/imports/Octopus.png";
 import LoadingMessage, { loadingMessages } from "../coral/components/LoadingMessage";
 import webSocketService from "../services/WebSocketService";
 import { APIService } from "../api/apiService";
-import { StreamMessage, StreamingPlanUpdate } from "../models";
+import { ChatService } from "../services/ChatService";
 import { usePlanCancellationAlert } from "../hooks/usePlanCancellationAlert";
 import PlanCancellationDialog from "../components/common/PlanCancellationDialog";
 import "../styles/PlanPage.css"
@@ -49,12 +49,11 @@ const PlanPage: React.FC = () => {
     const [showApprovalButtons, setShowApprovalButtons] = useState<boolean>(true);
     const [continueWithWebsocketFlow, setContinueWithWebsocketFlow] = useState<boolean>(false);
     const [selectedTeam, setSelectedTeam] = useState<TeamConfig | null>(null);
-    // WebSocket connection state
-    const [wsConnected, setWsConnected] = useState<boolean>(false);
-    const [streamingMessages, setStreamingMessages] = useState<StreamingPlanUpdate[]>([]);
     const [streamingMessageBuffer, setStreamingMessageBuffer] = useState<string>("");
     const [showBufferingText, setShowBufferingText] = useState<boolean>(false);
     const [agentMessages, setAgentMessages] = useState<AgentMessageData[]>([]);
+    // Accumulates WS streaming buffer content for final processAgentMessage call
+    const wsStreamingBufferRef = useRef<string>("");
     const formatErrorMessage = useCallback((content: string): string => {
         // Split content by newlines and add proper indentation
         const lines = content.split('\n');
@@ -187,11 +186,10 @@ const PlanPage: React.FC = () => {
         setShowProcessingPlanSpinner(false);
         setShowApprovalButtons(true);
         setContinueWithWebsocketFlow(false);
-        setWsConnected(false);
-        setStreamingMessages([]);
         setStreamingMessageBuffer("");
         setShowBufferingText(false);
         setAgentMessages([]);
+        wsStreamingBufferRef.current = "";
     }, [
         setInput,
         setPlanData,
@@ -206,26 +204,21 @@ const PlanPage: React.FC = () => {
         setShowProcessingPlanSpinner,
         setShowApprovalButtons,
         setContinueWithWebsocketFlow,
-        setWsConnected,
-        setStreamingMessages,
         setStreamingMessageBuffer,
         setShowBufferingText,
-        setAgentMessages
+        setAgentMessages,
     ]);
+
 
     // Auto-scroll helper
     const scrollToBottom = useCallback(() => {
         setTimeout(() => {
-            if (messagesContainerRef.current) {
-                //messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-                messagesContainerRef.current?.scrollTo({
-                    top: messagesContainerRef.current.scrollHeight,
-                    behavior: "smooth",
-                });
-            }
+            messagesContainerRef.current?.scrollTo({
+                top: messagesContainerRef.current.scrollHeight,
+                behavior: "smooth",
+            });
         }, 100);
     }, []);
-
 
     //WebsocketMessageType.PLAN_APPROVAL_REQUEST
     useEffect(() => {
@@ -271,24 +264,19 @@ const PlanPage: React.FC = () => {
     //(WebsocketMessageType.AGENT_MESSAGE_STREAMING
     useEffect(() => {
         const unsubscribe = webSocketService.on(WebsocketMessageType.AGENT_MESSAGE_STREAMING, (streamingMessage: any) => {
-
-            //console.log('📋 Streaming Message', streamingMessage);
-            // if is final true clear buffer and add final message to agent messages
             const line = PlanDataService.simplifyHumanClarification(streamingMessage.data.content);
+            wsStreamingBufferRef.current += line;
             setShowBufferingText(true);
             setStreamingMessageBuffer(prev => prev + line);
-            //scrollToBottom();
-
         });
 
         return () => unsubscribe();
-    }, [scrollToBottom]);
+    }, []);
 
     //WebsocketMessageType.USER_CLARIFICATION_REQUEST
     useEffect(() => {
         const unsubscribe = webSocketService.on(WebsocketMessageType.USER_CLARIFICATION_REQUEST, (clarificationMessage: any) => {
             console.log('📋 Clarification Message', clarificationMessage);
-            console.log('📋 Current plan data User clarification', planData);
             if (!clarificationMessage) {
                 console.warn('⚠️ clarification message missing data:', clarificationMessage);
                 return;
@@ -297,21 +285,20 @@ const PlanPage: React.FC = () => {
                 agent: AgentType.GROUP_CHAT_MANAGER,
                 agent_type: AgentMessageType.AI_AGENT,
                 timestamp: clarificationMessage.timestamp || Date.now(),
-                steps: [],   // intentionally always empty
-                next_steps: [],  // intentionally always empty
+                steps: [],
+                next_steps: [],
                 content: clarificationMessage.data.question || '',
                 raw_data: clarificationMessage.data || '',
             } as AgentMessageData;
-            console.log('✅ Parsed clarification message:', agentMessageData);
             setClarificationMessage(clarificationMessage.data as ParsedUserClarification | null);
             setAgentMessages(prev => [...prev, agentMessageData]);
             setShowBufferingText(false);
+            setStreamingMessageBuffer('');
+            wsStreamingBufferRef.current = '';
             setShowProcessingPlanSpinner(false);
             setSubmittingChatDisableInput(false);
             scrollToBottom();
-            // Persist the agent message
             processAgentMessage(agentMessageData, planData);
-
         });
 
         return () => unsubscribe();
@@ -320,12 +307,10 @@ const PlanPage: React.FC = () => {
     useEffect(() => {
         const unsubscribe = webSocketService.on(WebsocketMessageType.AGENT_TOOL_MESSAGE, (toolMessage: any) => {
             console.log('📋 Tool Message', toolMessage);
-            // scrollToBottom()
-
         });
 
         return () => unsubscribe();
-    }, [scrollToBottom]);
+    }, []);
 
 
     //WebsocketMessageType.FINAL_RESULT_MESSAGE
@@ -333,7 +318,6 @@ const PlanPage: React.FC = () => {
         const unsubscribe = webSocketService.on(WebsocketMessageType.FINAL_RESULT_MESSAGE, (finalMessage: any) => {
             console.log('📋 Final Result Message', finalMessage);
             if (!finalMessage) {
-
                 console.warn('⚠️ Final result message missing data:', finalMessage);
                 return;
             }
@@ -341,79 +325,50 @@ const PlanPage: React.FC = () => {
                 agent: AgentType.GROUP_CHAT_MANAGER,
                 agent_type: AgentMessageType.AI_AGENT,
                 timestamp: Date.now(),
-                steps: [],   // intentionally always empty
-                next_steps: [],  // intentionally always empty
+                steps: [],
+                next_steps: [],
                 content: "🎉🎉 " + (finalMessage.data?.content || ''),
                 raw_data: finalMessage,
             } as AgentMessageData;
 
-
-            console.log('✅ Parsed final result message:', agentMessageData);
-            // we ignore the terminated message
             if (finalMessage?.data?.status === PlanStatus.COMPLETED) {
-
                 setShowBufferingText(true);
                 setShowProcessingPlanSpinner(false);
                 setAgentMessages(prev => [...prev, agentMessageData]);
                 setSelectedTeam(planData?.team || null);
-                // Re-enable input so the user can ask follow-up questions or start
-                // a new task directly from PlanPage without navigating away.
                 setSubmittingChatDisableInput(false);
                 scrollToBottom();
-                // Persist the agent message
-                const is_final = true;
                 if (planData?.plan) {
                     planData.plan.overall_status = PlanStatus.COMPLETED;
                     setPlanData({ ...planData });
                 }
-
-                // Wait for the agent message to be processed and persisted
-                // The processAgentMessage function will handle refreshing the task list
                 webSocketService.disconnect();
-                processAgentMessage(agentMessageData, planData, is_final, streamingMessageBuffer);
-
+                const capturedBuffer = wsStreamingBufferRef.current;
+                wsStreamingBufferRef.current = '';
+                processAgentMessage(agentMessageData, planData, true, capturedBuffer);
             }
-
-
         });
 
         return () => unsubscribe();
-    }, [scrollToBottom, planData, processAgentMessage, streamingMessageBuffer, setSelectedTeam]);
+    }, [scrollToBottom, planData, processAgentMessage, setSelectedTeam]);
 
     // WebsocketMessageType.ERROR_MESSAGE
     useEffect(() => {
         const unsubscribe = webSocketService.on(WebsocketMessageType.ERROR_MESSAGE, (errorMessage: any) => {
-            console.log('❌ Received ERROR_MESSAGE:', errorMessage);
-            console.log('❌ Error message data:', errorMessage?.data);
-
-            // Try multiple ways to extract the error message
             let errorContent = "An unexpected error occurred. Please try again later.";
-
-            // Check for double-nested data structure
             if (errorMessage?.data?.data?.content) {
-                const content = errorMessage.data.data.content.trim();
-                if (content.length > 0) {
-                    errorContent = content;
-                }
+                const c = errorMessage.data.data.content.trim();
+                if (c.length > 0) errorContent = c;
             } else if (errorMessage?.data?.content) {
-                const content = errorMessage.data.content.trim();
-                if (content.length > 0) {
-                    errorContent = content;
-                }
+                const c = errorMessage.data.content.trim();
+                if (c.length > 0) errorContent = c;
             } else if (errorMessage?.content) {
-                const content = errorMessage.content.trim();
-                if (content.length > 0) {
-                    errorContent = content;
-                }
+                const c = errorMessage.content.trim();
+                if (c.length > 0) errorContent = c;
             } else if (typeof errorMessage === 'string') {
-                const content = errorMessage.trim();
-                if (content.length > 0) {
-                    errorContent = content;
-                }
+                const c = errorMessage.trim();
+                if (c.length > 0) errorContent = c;
             }
-
-            console.log('❌ Final error content to display:', errorContent);
-
             const errorAgentMessage: AgentMessageData = {
                 agent: 'system',
                 agent_type: AgentMessageType.SYSTEM_AGENT,
@@ -423,7 +378,6 @@ const PlanPage: React.FC = () => {
                 content: formatErrorMessage(errorContent),
                 raw_data: errorMessage || '',
             };
-
             setAgentMessages(prev => [...prev, errorAgentMessage]);
             setShowProcessingPlanSpinner(false);
             setShowBufferingText(false);
@@ -438,8 +392,6 @@ const PlanPage: React.FC = () => {
     //WebsocketMessageType.AGENT_MESSAGE
     useEffect(() => {
         const unsubscribe = webSocketService.on(WebsocketMessageType.AGENT_MESSAGE, (agentMessage: any) => {
-            console.log('📋 Agent Message', agentMessage)
-            console.log('📋 Current plan data', planData);
             const agentMessageData = agentMessage.data as AgentMessageData;
             if (agentMessageData) {
                 agentMessageData.content = PlanDataService.simplifyHumanClarification(agentMessageData?.content);
@@ -448,11 +400,10 @@ const PlanPage: React.FC = () => {
                 scrollToBottom();
                 processAgentMessage(agentMessageData, planData);
             }
-
         });
 
         return () => unsubscribe();
-    }, [scrollToBottom, planData, processAgentMessage]); //onPlanReceived, scrollToBottom
+    }, [scrollToBottom, planData, processAgentMessage]);
 
     // Loading message rotation effect
     useEffect(() => {
@@ -485,15 +436,11 @@ const PlanPage: React.FC = () => {
             connectWebSocket();
 
             const handleConnectionChange = (connected: boolean) => {
-                setWsConnected(connected);
                 console.log('🔗 WebSocket connection status:', connected);
             };
 
             const handleStreamingMessage = (message: StreamMessage) => {
                 console.log('📨 Received streaming message:', message);
-                if (message.data && message.data.plan_id) {
-                    setStreamingMessages(prev => [...prev, message.data]);
-                }
             };
 
             const handlePlanApprovalResponse = (message: StreamMessage) => {
@@ -539,28 +486,46 @@ const PlanPage: React.FC = () => {
                 console.log("Fetching plan with ID:", planId);
                 planResult = await PlanDataService.fetchPlanData(planId, useCache);
                 console.log("Plan data fetched:", planResult);
-                if (planResult?.plan?.overall_status === PlanStatus.IN_PROGRESS) {
-                    setShowApprovalButtons(true);
+                const isInProgress = planResult?.plan?.overall_status === PlanStatus.IN_PROGRESS;
 
+                if (isInProgress) {
+                    setShowApprovalButtons(true);
+                    // Connect WebSocket so infrastructure events are received.
+                    setContinueWithWebsocketFlow(true);
+
+                    // Orphan recovery: plan is in_progress but backend never sent m_plan
+                    // (e.g. page refreshed mid-orchestration). Re-trigger the workflow.
+                    if (!planResult?.mplan) {
+                        console.warn('⚠️ Plan in_progress but m_plan is null — re-triggering orchestration.');
+                        try {
+                            await apiService.triggerPlanOrchestration(planId);
+                            console.log('✅ Orchestration re-triggered for plan:', planId);
+                        } catch (triggerErr) {
+                            console.warn('⚠️ Could not re-trigger orchestration (non-fatal):', triggerErr);
+                        }
+                    }
                 } else {
                     setShowApprovalButtons(false);
-                    setWaitingForPlan(false);
                 }
-                if (planResult?.plan?.overall_status !== PlanStatus.COMPLETED) {
-                    setContinueWithWebsocketFlow(true);
-                } else {
-                    // Plan already completed — enable input for follow-up messages.
-                    setSubmittingChatDisableInput(false);
+
+                if (planResult?.mplan) {
+                    setPlanApprovalRequest(planResult.mplan);
                 }
                 if (planResult?.messages) {
                     setAgentMessages(planResult.messages);
                 }
-                if (planResult?.mplan) {
-                    setPlanApprovalRequest(planResult.mplan);
-                }
                 if (planResult?.streaming_message && planResult.streaming_message.trim() !== "") {
+                    wsStreamingBufferRef.current = planResult.streaming_message;
                     setStreamingMessageBuffer(planResult.streaming_message);
                     setShowBufferingText(true);
+                }
+                const isCompleted = planResult?.plan?.overall_status === PlanStatus.COMPLETED;
+                if (isCompleted) {
+                    setWaitingForPlan(false);
+                    setSubmittingChatDisableInput(false);
+                } else if (planResult?.mplan) {
+                    setWaitingForPlan(false);
+                    setSubmittingChatDisableInput(true);
                 }
                 setPlanData(planResult);
                 return planResult;
@@ -632,28 +597,29 @@ const PlanPage: React.FC = () => {
             setProcessingApproval(false);
         }
     }, [planApprovalRequest, showToast, planData?.plan?.id, dismissToast, navigate]);
-    // ── Unified chat submission handler ──────────────────────────────────────
-    // Two modes share the same input:
-    //   1. Clarification mode  — when a USER_CLARIFICATION_REQUEST is pending.
-    //      Sends the answer directly to the plan via /user_clarification.
-    //   2. Unified message mode — when no clarification is pending.
-    //      Routes through /chat/message/stream (intent router):
-    //        • CONVERSATIONAL / MCP_QUERY → response rendered inline as agent msg.
-    //        • TASK (plan_created event)   → navigates to the new plan.
+    // ── Unified chat submission dispatcher ──────────────────────────────────────
+    // Mode 1: Clarification — calls submitClarification, updates agentMessages
+    // Mode 2: Normal       — streams via ChatService.streamAsAsyncIterable into agentMessages
     const handleOnchatSubmit = useCallback(
         async (chatInput: string) => {
-            if (!chatInput.trim()) {
-                showToast("Please enter a message", "error");
-                return;
-            }
+            if (!chatInput.trim()) return;
             setInput("");
 
-            // ── Mode 1: Clarification ────────────────────────────────────────
+            // ── Mode 1: Clarification intercept ────────────────────────────
             if (clarificationMessage) {
                 if (!planData?.plan) return;
+                const userMsg: AgentMessageData = {
+                    agent: 'human',
+                    agent_type: AgentMessageType.HUMAN_AGENT,
+                    timestamp: Date.now(),
+                    steps: [],
+                    next_steps: [],
+                    content: chatInput,
+                    raw_data: chatInput,
+                };
+                setAgentMessages(prev => [...prev, userMsg]);
                 setSubmittingChatDisableInput(true);
                 const toastId = showToast("Submitting clarification", "progress");
-
                 try {
                     await PlanDataService.submitClarification({
                         request_id: clarificationMessage.request_id || "",
@@ -661,40 +627,20 @@ const PlanPage: React.FC = () => {
                         plan_id: planData.plan.id,
                         m_plan_id: planApprovalRequest?.id || "",
                     });
-
                     dismissToast(toastId);
                     showToast("Clarification submitted successfully", "success");
-
-                    const humanMsg: AgentMessageData = {
-                        agent: 'human',
-                        agent_type: AgentMessageType.HUMAN_AGENT,
-                        timestamp: Date.now(),
-                        steps: [],
-                        next_steps: [],
-                        content: chatInput,
-                        raw_data: chatInput,
-                    } as AgentMessageData;
-
-                    setAgentMessages(prev => [...prev, humanMsg]);
                     setClarificationMessage(null);
-                    setSubmittingChatDisableInput(true);
                     setShowProcessingPlanSpinner(true);
-                    scrollToBottom();
-                } catch (error: any) {
-                    setShowProcessingPlanSpinner(false);
+                } catch {
                     dismissToast(toastId);
-                    setSubmittingChatDisableInput(false);
                     showToast("Failed to submit clarification", "error");
+                    setSubmittingChatDisableInput(false);
                 }
                 return;
             }
 
-            // ── Mode 2: Unified SSE stream (conversational OR new task) ──────
-            // The session_id from the current plan keeps history continuous
-            // across chat turns and plan executions.
+            // ── Mode 2: Normal — route through IntentRouter SSE ────────────
             const sessionId = planData?.plan?.session_id || "";
-
-            // Show the user's message immediately in the agent messages list.
             const userMsg: AgentMessageData = {
                 agent: 'human',
                 agent_type: AgentMessageType.HUMAN_AGENT,
@@ -703,82 +649,47 @@ const PlanPage: React.FC = () => {
                 next_steps: [],
                 content: chatInput,
                 raw_data: chatInput,
-            } as AgentMessageData;
+            };
             setAgentMessages(prev => [...prev, userMsg]);
             setSubmittingChatDisableInput(true);
             setShowProcessingPlanSpinner(true);
+            scrollToBottom();
 
-            // Placeholder for the streaming assistant response.
-            const assistantPlaceholder: AgentMessageData = {
+            // Add streaming placeholder
+            const placeholder: AgentMessageData = {
                 agent: AgentType.GROUP_CHAT_MANAGER,
                 agent_type: AgentMessageType.AI_AGENT,
-                timestamp: Date.now() + 1,
+                timestamp: Date.now(),
                 steps: [],
                 next_steps: [],
                 content: '',
                 raw_data: '',
-            } as AgentMessageData;
-            setAgentMessages(prev => [...prev, assistantPlaceholder]);
-            scrollToBottom();
+            };
+            setAgentMessages(prev => [...prev, placeholder]);
 
             let accumulated = '';
-
             try {
-                await apiService.sendChatMessageStream(
-                    { message: chatInput, session_id: sessionId },
-                    {
-                        onToken: (token) => {
-                            accumulated += token;
-                            // Update the last message (the assistant placeholder) in place.
-                            setAgentMessages(prev =>
-                                prev.map((m, idx) =>
-                                    idx === prev.length - 1
-                                        ? { ...m, content: accumulated }
-                                        : m
-                                )
-                            );
-                            scrollToBottom();
-                        },
-                        onIntent: () => { /* intent label — no UI action needed */ },
-                        onDone: () => {
-                            setShowProcessingPlanSpinner(false);
-                            setSubmittingChatDisableInput(false);
-                        },
-                        onPlanCreated: (newPlanId) => {
-                            // Intent router detected a task — navigate to the new plan.
-                            // The session_id is shared so history remains continuous.
-                            navigate(`/plan/${newPlanId}`);
-                        },
-                        onRedirect: (newPlanId) => {
-                            // Legacy fallback — same behaviour.
-                            navigate(`/plan/${newPlanId}`);
-                        },
-                        onToolActivity: () => { /* tool indicators already shown via streaming */ },
-                        onError: (err) => {
-                            setShowProcessingPlanSpinner(false);
-                            setSubmittingChatDisableInput(false);
-                            showToast(err || "Failed to get response", "error");
-                            // Remove the empty placeholder on error.
-                            setAgentMessages(prev => prev.filter((_, idx) => idx !== prev.length - 1));
-                        },
-                    }
-                );
-            } catch (error: any) {
+                for await (const token of ChatService.streamAsAsyncIterable(
+                    chatInput,
+                    sessionId,
+                    (newPlanId) => navigate(`/plan/${newPlanId}`),
+                )) {
+                    accumulated += token;
+                    const snap = accumulated;
+                    setAgentMessages(prev =>
+                        prev.map((m, i) => i === prev.length - 1 ? { ...m, content: snap } : m)
+                    );
+                    scrollToBottom();
+                }
+            } catch (e: any) {
+                showToast(e?.message || "Failed to send message", "error");
+                setAgentMessages(prev => prev.filter((_, i) => i !== prev.length - 1));
+            } finally {
                 setShowProcessingPlanSpinner(false);
                 setSubmittingChatDisableInput(false);
-                showToast("Failed to send message", "error");
-                setAgentMessages(prev => prev.filter((_, idx) => idx !== prev.length - 1));
             }
         },
-        [
-            clarificationMessage,
-            planData,
-            planApprovalRequest,
-            showToast,
-            dismissToast,
-            scrollToBottom,
-            navigate,
-        ]
+        [clarificationMessage, planData, planApprovalRequest, showToast, dismissToast, navigate, scrollToBottom],
     );
 
 
@@ -873,34 +784,28 @@ const PlanPage: React.FC = () => {
                         </>
                     ) : (
                         <>
-
-                            <ContentToolbar
-                                panelTitle="Multi-Agent Planner"
-                            >
+                            <ContentToolbar panelTitle="Multi-Agent Planner">
                                 <InspectorLink />
                             </ContentToolbar>
 
                             <PlanChat
                                 planData={planData}
-                                OnChatSubmit={handleOnchatSubmit}
                                 loading={loading}
-                                setInput={setInput}
-                                submittingChatDisableInput={submittingChatDisableInput}
-                                input={input}
-                                streamingMessages={streamingMessages}
-                                wsConnected={wsConnected}
-                                planApprovalRequest={planApprovalRequest}
-                                waitingForPlan={waitingForPlan}
                                 messagesContainerRef={messagesContainerRef}
+                                input={input}
+                                setInput={setInput}
+                                agentMessages={agentMessages}
                                 streamingMessageBuffer={streamingMessageBuffer}
                                 showBufferingText={showBufferingText}
-                                agentMessages={agentMessages}
+                                submittingChatDisableInput={submittingChatDisableInput}
+                                waitingForPlan={waitingForPlan}
                                 showProcessingPlanSpinner={showProcessingPlanSpinner}
                                 showApprovalButtons={showApprovalButtons}
                                 processingApproval={processingApproval}
+                                planApprovalRequest={planApprovalRequest}
+                                OnChatSubmit={handleOnchatSubmit}
                                 handleApprovePlan={handleApprovePlan}
                                 handleRejectPlan={handleRejectPlan}
-
                             />
                         </>
                     )}

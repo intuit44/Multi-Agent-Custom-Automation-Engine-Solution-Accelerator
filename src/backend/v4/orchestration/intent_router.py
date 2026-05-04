@@ -95,6 +95,7 @@ class IntentRouter:
     async def classify_async(
         message: str,
         previous_intent: Optional[str] = None,
+        agent_response: Optional[str] = None,
     ) -> IntentResult:
         """Classify using LLM as the sole decision maker.
 
@@ -103,6 +104,11 @@ class IntentRouter:
             previous_intent: The intent of the last assistant message in this
                 session.  Passed as structured context so the LLM can
                 maintain session lane continuity.
+            agent_response: The response already produced by ChatMCPAgent
+                (which queried the KB).  When provided, the classifier sees
+                the grounded context — full history, customer data, contracts,
+                etc. — and can decide correctly whether the request warrants
+                a multi-agent plan.
         """
         if not message or not message.strip():
             return IntentResult(
@@ -124,12 +130,15 @@ class IntentRouter:
                 credential=DefaultAzureCredential(),
             )
 
-            # Build the user payload with session context
+            # Build the user payload with agent context + session continuity
             user_text = message.strip()
-            if previous_intent:
+            if agent_response:
                 user_text = (
-                    f"PREVIOUS_INTENT: {previous_intent}\nUSER_MESSAGE: {user_text}"
+                    f"AGENT_RESPONSE (from KB-backed ChatMCPAgent):\n{agent_response.strip()}\n\n"
+                    f"USER_MESSAGE: {user_text}"
                 )
+            if previous_intent:
+                user_text = f"PREVIOUS_INTENT: {previous_intent}\n{user_text}"
 
             messages = [
                 Message(role="system", text=_SYSTEM_PROMPT),

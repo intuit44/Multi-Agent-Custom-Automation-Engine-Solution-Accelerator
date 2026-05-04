@@ -399,6 +399,22 @@ async def process_request(
         )
         await memory_store.add_plan(plan)
 
+        # ── Single source of truth: write the task anchor to chat_cosmos here,
+        # inside process_request, so every caller (direct API, /chat/message,
+        # /chat/message/stream) always produces the anchor.  _get_previous_intent
+        # only needs to read chat_cosmos — no plan-DB fallback required.
+        try:
+            _chat_svc = await get_chat_cosmos_service()
+            await _chat_svc.add_message(
+                session_id=input_task.session_id,
+                user_id=user_id,
+                content="I've created a plan for your request. Redirecting to plan view.",
+                role="assistant",
+                metadata={"intent": "task", "plan_id": plan_id},
+            )
+        except Exception as _e:
+            logger.warning("Could not write task anchor to chat_cosmos: %s", _e)
+
         # Ensure orchestration is initialized before running
         # Force rebuild for each new task since Magentic workflows cannot be reused after completion
         team_service = TeamService(memory_store)
@@ -472,17 +488,23 @@ async def _get_previous_intent(
     session_id: str,
     user_id: str,
 ) -> Optional[str]:
-    """Return the intent of the last assistant message in this session."""
+    """Return the intent of the last assistant message in this session.
+
+    Reads exclusively from chat_cosmos — single source of truth.
+    The task anchor is written by process_request at plan-creation time,
+    so this function never needs to query any other store.
+    """
     try:
         session = await chat_svc.get_session(session_id, user_id)
-        if not session or not session.get("messages"):
-            return None
-        for msg in reversed(session["messages"]):
-            if msg.get("role") == "assistant":
-                return (msg.get("metadata") or {}).get("intent")
-        return None
+        if session and session.get("messages"):
+            for msg in reversed(session["messages"]):
+                if msg.get("role") == "assistant":
+                    intent = (msg.get("metadata") or {}).get("intent")
+                    if intent:
+                        return intent
     except Exception:
-        return None
+        pass
+    return None
 
 
 # ── Chat Mode Endpoint (P0 — conversational without plan) ────────────
@@ -526,12 +548,26 @@ async def chat_message(
     except Exception as e:
         logger.warning("Could not persist user chat message: %s", e)
 
-    # ── Classify intent (session-aware) ───────────────────────────
+    # ── ChatMCPAgent primero (KB + historial) ───────────────────────────
+    # ChatPage es ahora el home: el agente siempre responde. Su respuesta
+    # (que incluye lo que recuperó de la KB) se pasa al IntentRouter para
+    # que clasifique con contexto completo.
     previous_intent = await _get_previous_intent(
         chat_svc, chat_request.session_id, user_id
     )
+    agent_response = await _get_mcp_query_response(
+        chat_request.message,
+        chat_request.session_id,
+        user_id,
+        chat_svc,
+        tenant_id=tenant_id,
+        user_access_token=user_access_token,
+    )
+
+    # ── Clasificar con la respuesta del agente como contexto ────────────
     intent_result = await IntentRouter.classify_async(
-        chat_request.message, previous_intent=previous_intent
+        chat_request.message,
+        previous_intent=previous_intent,
     )
     logger.info(
         "Chat intent: %s (confidence=%.2f, prev=%s) for message: %s",
@@ -543,15 +579,21 @@ async def chat_message(
 
     # ── Route by intent ──────────────────────────────────────────
     if intent_result.intent == Intent.TASK:
-        # Redirect to existing plan workflow
+        # La descripción del plan incluye la respuesta del agente para que
+        # los sub-agentes arranquen con el contexto completo de la KB.
         input_task_for_plan = InputTask(
             session_id=chat_request.session_id,
-            description=chat_request.message,
+            description=(
+                f"{chat_request.message}\n\nContext from knowledge base:\n{agent_response}"
+                if agent_response
+                else chat_request.message
+            ),
         )
         try:
             result = await process_request(
                 background_tasks, input_task_for_plan, request
             )
+            # process_request already wrote the task anchor to chat_cosmos.
             return ChatMessageResponse(
                 session_id=chat_request.session_id,
                 intent="task",
@@ -569,26 +611,9 @@ async def chat_message(
             ) from e
 
     else:
-        # MCP_QUERY and CONVERSATIONAL share one FoundryAgentTemplate instance
-        # (ChatMCPAgent) via agent_pool — one brain, two intent labels.
-        #
-        # MCP_QUERY: user is explicitly asking about tools / server capabilities.
-        # CONVERSATIONAL: general Q&A, knowledge retrieval, continuity of context.
-        #
-        # Both use the same agent because the underlying capabilities are
-        # identical (knowledge_base_retrieve + MCP tools + session history).
-        # The intent label is preserved in Cosmos metadata so future intent
-        # classification can use it as the previous_intent signal.
+        # Respuesta ya obtenida — devolverla directamente.
         actual_intent = intent_result.intent.value  # "mcp_query" or "conversational"
-
-        response_text = await _get_mcp_query_response(
-            chat_request.message,
-            chat_request.session_id,
-            user_id,
-            chat_svc,
-            tenant_id=tenant_id,
-            user_access_token=user_access_token,
-        )
+        response_text = agent_response
 
         # Persist assistant response with the precise intent label
         try:
@@ -673,6 +698,87 @@ async def chat_message_stream(
     previous_intent = await _get_previous_intent(
         chat_svc, chat_request.session_id, user_id
     )
+
+    # ── Clarification guard ──────────────────────────────────────
+    # When the session already has an active plan AND the orchestration is
+    # waiting for a clarification answer, the current message IS that answer.
+    # Routing it through IntentRouter would mis-classify it as a new task or
+    # conversational intent and create an infinite clarification loop.
+    #
+    # The plan_id in the task anchor (written to chat_cosmos by process_request)
+    # is the sole proof of ownership — no plan-DB query needed.
+    if previous_intent == "task":
+        pending_request_id: Optional[str] = next(
+            (
+                req_id
+                for req_id, ans in orchestration_config.clarifications.items()
+                if ans is None
+            ),
+            None,
+        )
+        if pending_request_id:
+            # plan_id was stored in the anchor metadata already read by
+            # _get_previous_intent — reuse the session data already in memory.
+            _session_match = True  # previous_intent=="task" is the proof
+
+            if _session_match:
+                logger.info(
+                    "Routing message as clarification answer for request_id=%s session=%s",
+                    pending_request_id,
+                    chat_request.session_id,
+                )
+                # Deliver the answer to the waiting orchestration.
+                orchestration_config.set_clarification_result(
+                    pending_request_id, chat_request.message
+                )
+                # Persist the exchange to the single chat history.
+                try:
+                    await chat_svc.add_message(
+                        session_id=chat_request.session_id,
+                        user_id=user_id,
+                        content="✅ Clarification submitted. Processing…",
+                        role="assistant",
+                        metadata={"intent": "task"},
+                    )
+                except Exception as _e:
+                    logger.warning("Could not persist clarification ack: %s", _e)
+
+                async def _clarification_stream():
+                    yield _sse_event(
+                        {
+                            "type": "intent",
+                            "intent": "task",
+                            "confidence": 1.0,
+                            "session_id": chat_request.session_id,
+                        }
+                    )
+                    yield _sse_event(
+                        {
+                            "type": "token",
+                            "content": "✅ Clarification submitted. Processing…",
+                        }
+                    )
+                    yield _sse_event(
+                        {
+                            "type": "done",
+                            "intent": "task",
+                            "agent": "assistant",
+                            "confidence": 1.0,
+                            "session_id": chat_request.session_id,
+                        }
+                    )
+
+                return StreamingResponse(
+                    _clarification_stream(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+    # ── End clarification guard ──────────────────────────────────
+
     intent_result = await IntentRouter.classify_async(
         chat_request.message, previous_intent=previous_intent
     )
@@ -715,13 +821,9 @@ async def chat_message_stream(
             redirect_msg = (
                 "I've created a plan for your request. Redirecting to plan view."
             )
+            # process_request already wrote the task anchor to chat_cosmos.
             if plan_id:
-                yield _sse_event(
-                    {
-                        "type": "token",
-                        "content": redirect_msg,
-                    }
-                )
+                yield _sse_event({"type": "token", "content": redirect_msg})
                 yield _sse_event(
                     {
                         "type": "plan_created",
@@ -792,13 +894,22 @@ async def chat_message_stream(
                 # Process ALL content types from the agent framework
                 for content in update.contents or []:
                     ct = content.type
+                    content_preview = (
+                        getattr(content, "text", None)
+                        or getattr(content, "message", None)
+                        or getattr(content, "input", None)
+                        or getattr(content, "output", None)
+                        or getattr(content, "stderr", None)
+                        or getattr(content, "stdout", None)
+                        or ""
+                    )
                     logger.info(
                         "SSE content type=%s, name=%s, text=%s",
                         ct,
                         getattr(content, "name", None)
                         or getattr(content, "tool_name", None)
                         or "",
-                        (getattr(content, "text", None) or "")[:100],
+                        str(content_preview)[:200],
                     )
 
                     if ct == "text":
@@ -858,6 +969,40 @@ async def chat_message_stream(
                                 "success": content.status != "error"
                                 if content.status
                                 else True,
+                            }
+                        )
+
+                    elif ct == "code_interpreter_tool_call":
+                        yield _sse_event(
+                            {
+                                "type": "tool_activity",
+                                "activity": "calling",
+                                "tool": "code_interpreter",
+                                "args": str(
+                                    getattr(content, "input", None)
+                                    or getattr(content, "text", None)
+                                    or getattr(content, "arguments", None)
+                                    or ""
+                                )[:500],
+                            }
+                        )
+
+                    elif ct == "code_interpreter_tool_result":
+                        result_text = (
+                            getattr(content, "stderr", None)
+                            or getattr(content, "output", None)
+                            or getattr(content, "stdout", None)
+                            or getattr(content, "text", None)
+                            or getattr(content, "message", None)
+                            or ""
+                        )
+                        yield _sse_event(
+                            {
+                                "type": "tool_activity",
+                                "activity": "result",
+                                "tool": "code_interpreter",
+                                "success": not bool(getattr(content, "stderr", None)),
+                                "message": str(result_text)[:500],
                             }
                         )
 
@@ -935,7 +1080,11 @@ async def chat_message_stream(
 # ── MCP Agent (FoundryAgentTemplate with tool execution) ────────
 
 _MCP_AGENT_INSTRUCTIONS = (
-    "You are the MACAE assistant. You have some categories of tools:\n\n"
+    "You are the MACAE assistant.\n"
+    "For multi-step work, begin with a concise checklist of what you will do.\n"
+    "You do not have persistent conversational memory unless a tool returns it.\n"
+    "Use tools to retrieve real context instead of claiming memory.\n\n"
+    "You have some categories of tools:\n\n"
     "═══ 1. KNOWLEDGE BASE (knowledge_base_retrieve) ═══\n"
     "You have a tool called knowledge_base_retrieve that searches across ALL knowledge bases:\n"
     "chat history, contracts, RFPs, customer data, order data, and compliance documents.\n\n"
@@ -949,15 +1098,23 @@ _MCP_AGENT_INSTRUCTIONS = (
     "→ ALWAYS call knowledge_base_retrieve(query='<relevant search terms>') FIRST.\n"
     "→ NEVER say 'I don't have memory' without searching first.\n"
     "→ If search returns results, use them to answer. If no results, then say so.\n\n"
+    "KNOWLEDGE-BASE EFFICIENCY RULES:\n"
+    "- Use knowledge_base_retrieve directly for retrieval.\n"
+    "- Do NOT use Python or code interpreter to list, tabulate, or guess KB contents.\n"
+    "- Do NOT inspect filesystem paths with Python when the same question can be answered by MCP or KB tools.\n"
+    "- Use code interpreter only for explicit calculations, transformations, or code execution requested by the user.\n\n"
     "Parameters:\n"
     "  - query: Natural language search (e.g. 'filesystem error', 'NDA Contoso risks')\n"
     "  - source_type: 'all' (default), 'chat' (history only), 'documents' (docs only)\n\n"
     "═══ 2. MCP TOOLS (external servers) ═══\n"
     "You can connect to external MCP servers to perform real actions.\n\n"
     "CRITICAL RULES:\n"
-    "1. Call discover_mcp_capabilities to list available tools.\n"
+    "1. Before using filesystem or external-server actions, check connection status with list_connected_servers().\n"
+    "2. Call discover_mcp_capabilities only when you need to inspect an MCP server's available tools or the user asked about capabilities.\n"
     "2.  DESCRIBE what a tool does from memory if the user ask for it — EXECUTE it and return the real output.\n"
-    "3. For filesystem actions: check list_connected_servers(), reconnect if needed, then call_external_tool.\n\n"
+    "3. For filesystem actions: check list_connected_servers(), reconnect if needed, then call_external_tool.\n"
+    "4. Before reading data resources, list or discover the available resources first; use only names you actually discovered.\n"
+    "5. Do not do speculative pre-checks with Python before MCP or KB retrieval.\n\n"
     "WORKFLOW — Connecting to external MCP servers:\n"
     "  a) list_connected_servers() — see active sessions and available servers\n"
     "  b) connect_stdio_server(server_name='github') — for stdio servers (github, filesystem, etc.)\n"
@@ -1117,6 +1274,62 @@ async def delete_chat_session(session_id: str, request: Request):
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"success": True, "message": "Session deleted"}
+
+
+@app_v4.post("/resume_plan")
+async def resume_plan(
+    background_tasks: BackgroundTasks,
+    payload: dict,
+    request: Request,
+):
+    """
+    Resume orchestration for an existing in_progress plan whose m_plan is null.
+    Used by the frontend when it detects an orphaned plan on page load.
+    """
+    user_id, tenant_id = _extract_auth(request)
+    plan_id = payload.get("plan_id", "")
+    if not plan_id:
+        raise HTTPException(status_code=400, detail="plan_id is required")
+
+    memory_store = await DatabaseFactory.get_database(
+        user_id=user_id, tenant_id=tenant_id
+    )
+    plan = await memory_store.get_plan_by_plan_id(plan_id=plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail=f"Plan '{plan_id}' not found")
+
+    if plan.overall_status != PlanStatus.in_progress:
+        return {
+            "status": "skipped",
+            "reason": f"Plan status is '{plan.overall_status}', not in_progress",
+        }
+
+    if not plan.team_id:
+        raise HTTPException(status_code=400, detail=f"Plan '{plan_id}' has no team_id")
+
+    team = await memory_store.get_team_by_id(team_id=plan.team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail=f"Team '{plan.team_id}' not found")
+
+    team_service = TeamService(memory_store)
+    await OrchestrationManager.get_current_or_new_orchestration(
+        user_id=user_id,
+        team_config=team,
+        team_switched=False,
+        team_service=team_service,
+        force_rebuild=True,
+    )
+
+    input_task = InputTask(description=plan.initial_goal, session_id=plan.session_id)
+
+    async def run_orchestration_task():
+        await OrchestrationManager().run_orchestration(
+            user_id, plan.session_id, input_task
+        )
+
+    background_tasks.add_task(run_orchestration_task)
+
+    return {"status": "resumed", "plan_id": plan_id, "session_id": plan.session_id}
 
 
 @app_v4.post("/plan_approval")
@@ -1426,6 +1639,26 @@ async def user_clarification(
                 print(f"ValueError processing human clarification: {ve}")
             except Exception as e:
                 print(f"Error processing human clarification: {e}")
+
+            # ── Mirror clarification answer to chat_cosmos ──
+            if session_id and human_feedback.answer:
+                try:
+                    _chat_svc = await get_chat_cosmos_service()
+                    await _chat_svc.add_message(
+                        session_id=session_id,
+                        user_id=user_id,
+                        content=human_feedback.answer,
+                        role="user",
+                        metadata={
+                            "intent": "task",
+                            "clarification_id": human_feedback.request_id,
+                        },
+                    )
+                except Exception as _ce:
+                    logger.warning(
+                        "Could not persist clarification answer to chat_cosmos: %s", _ce
+                    )
+
             event_props = {
                 "request_id": human_feedback.request_id,
                 "answer": human_feedback.answer,
@@ -1526,6 +1759,24 @@ async def agent_message_user(
         print(f"ValueError processing agent message: {ve}")
     except Exception as e:
         print(f"Error processing agent message: {e}")
+
+    # ── Mirror agent message to chat_cosmos (single source of truth) ──
+    if session_id and agent_message.content:
+        try:
+            _chat_svc = await get_chat_cosmos_service()
+            await _chat_svc.add_message(
+                session_id=session_id,
+                user_id=user_id,
+                content=agent_message.content,
+                role="assistant",
+                metadata={
+                    "intent": "task",
+                    "agent": agent_message.agent,
+                    "is_final": agent_message.is_final,
+                },
+            )
+        except Exception as _ce:
+            logger.warning("Could not persist agent message to chat_cosmos: %s", _ce)
 
     # Use dynamic event name with agent identifier
     event_name = f"Agent_Message_From_{agent_message.agent.replace(' ', '_')}"

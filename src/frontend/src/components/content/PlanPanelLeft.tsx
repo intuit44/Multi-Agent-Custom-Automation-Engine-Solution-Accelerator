@@ -13,15 +13,10 @@ import {
 import {
   Chat20Regular,
   ChatAdd20Regular,
-  Delete20Regular,
-  ErrorCircle20Regular,
 } from "@fluentui/react-icons";
-import TaskList from "./TaskList";
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { Plan, PlanPanelLefProps, Task, UserInfo } from "@/models";
-import { apiService } from "@/api";
-import { TaskService } from "@/services";
+import { useNavigate } from "react-router-dom";
+import { PlanPanelLefProps, UserInfo } from "@/models";
 import { ChatService } from "@/services/ChatService";
 import ContosoLogo from "../../coral/imports/ContosoLogo";
 import "../../styles/PlanPanelLeft.css";
@@ -47,12 +42,7 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
 }) => {
   const { dispatchToast } = useToastController("toast");
   const navigate = useNavigate();
-  const { planId } = useParams<{ planId: string }>();
 
-  const [completedTasks, setCompletedTasks] = useState<Task[]>([]);
-  const [plans, setPlans] = useState<Plan[] | null>(null);
-  const [plansLoading, setPlansLoading] = useState<boolean>(false);
-  const [plansError, setPlansError] = useState<Error | null>(null);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(
     getUserInfoGlobal()
   );
@@ -62,99 +52,29 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
   const [localSelectedTeam, setLocalSelectedTeam] = useState<TeamConfig | null>(null);
   const selectedTeam = parentSelectedTeam || localSelectedTeam;
 
-  const loadPlansData = useCallback(async (forceRefresh = false) => {
+
+  // Fetch recent chats — refresh when reloadTasks fires
+  const loadRecentChats = useCallback(async () => {
     try {
-      console.log("Loading plans, forceRefresh:", forceRefresh);
-      setPlansLoading(true);
-      setPlansError(null);
-      const plansData = await apiService.getPlans(undefined, !forceRefresh); // Invert forceRefresh for useCache
-      setPlans(plansData);
-      
-      // Reset the reload flag after successful load
-      if (forceRefresh && restReload) {
-        restReload();
-      }
-    } catch (error) {
-      console.log("Failed to load plans:", error);
-      setPlansError(
-        error instanceof Error ? error : new Error("Failed to load plans")
-      );
-      
-      // Reset the reload flag even on error to prevent infinite loops
-      if (forceRefresh && restReload) {
-        restReload();
-      }
-    } finally {
-      setPlansLoading(false);
-    }
-  }, [restReload]);
+      const sessions = await ChatService.getRecentSessions();
+      setRecentChats(sessions);
+    } catch {}
+  }, []);
 
-
-  // Fetch plans
-
-
+  // Mount-only init (loadRecentChats is stable — empty useCallback deps)
   useEffect(() => {
-    loadPlansData();
     setUserInfo(getUserInfoGlobal());
-    // Load recent chat sessions
-    ChatService.getRecentSessions()
-      .then((sessions) => setRecentChats(sessions))
-      .catch(() => {});
-  }, [loadPlansData, setUserInfo]);
-
+    loadRecentChats();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
-    console.log("Reload tasks changed:", reloadTasks);
     if (reloadTasks) {
-      loadPlansData(true); // Force refresh when reloadTasks is true
+      loadRecentChats();
+      if (restReload) restReload();
     }
-  }, [loadPlansData, setUserInfo, reloadTasks]);
-  useEffect(() => {
-    if (plans) {
-      const { completed } =
-        TaskService.transformPlansToTasks(plans);
-      setCompletedTasks(completed);
-    }
-  }, [plans]);
+  }, [reloadTasks, loadRecentChats, restReload]);
 
-  useEffect(() => {
-    if (plansError) {
-      dispatchToast(
-        <Toast>
-          <ToastTitle>
-            <ErrorCircle20Regular />
-            Failed to load tasks
-          </ToastTitle>
-          <ToastBody>{plansError.message}</ToastBody>
-        </Toast>,
-        { intent: "error" }
-      );
-    }
-  }, [plansError, dispatchToast]);
-
-  // Get the session_id that matches the current URL's planId
-  const selectedTaskId =
-    plans?.find((plan) => plan.id === planId)?.session_id ?? null;
-
-  const handleTaskSelect = useCallback(
-    (taskId: string) => {
-      const performNavigation = () => {
-        const selectedPlan = plans?.find(
-          (plan: Plan) => plan.session_id === taskId
-        );
-        if (selectedPlan) {
-          navigate(`/plan/${selectedPlan.id}`);
-        }
-      };
-
-      if (onNavigationWithAlert) {
-        onNavigationWithAlert(performNavigation);
-      } else {
-        performNavigation();
-      }
-    },
-    [plans, navigate, onNavigationWithAlert]
-  );
 
   const handleLogoClick = useCallback(() => {
     const performNavigation = () => {
@@ -170,8 +90,6 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
 
   const handleTeamSelect = useCallback(
     (team: TeamConfig | null) => {
-      // Use parent's team select handler if provided, otherwise use local state
-      loadPlansData();
       if (onTeamSelect) {
         onTeamSelect(team);
       } else {
@@ -201,7 +119,7 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
         }
       }
     },
-    [onTeamSelect, dispatchToast, loadPlansData]
+    [onTeamSelect, dispatchToast]
   );
 
   return (
@@ -253,15 +171,6 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
           </div>
           <Body1Strong>New task</Body1Strong>
         </div>
-
-        <br />
-        <TaskList
-          completedTasks={completedTasks}
-          onTaskSelect={handleTaskSelect}
-          loading={plansLoading}
-          selectedTaskId={selectedTaskId ?? undefined}
-          isLoadingTeam={isLoadingTeam}
-        />
 
         {/* ── Recent Chats ─────────────────────────────────── */}
         {recentChats.length > 0 && (

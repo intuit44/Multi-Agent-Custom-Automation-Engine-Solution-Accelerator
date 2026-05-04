@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
     Spinner
 } from '@fluentui/react-components';
@@ -24,8 +24,11 @@ const HomePage: React.FC = () => {
     const [selectedTeam, setSelectedTeam] = useState<TeamConfig | null>(null);
     const [isLoadingTeam, setIsLoadingTeam] = useState<boolean>(true);
     const [reloadLeftList, setReloadLeftList] = useState<boolean>(true);
+    const initCalledRef = useRef(false);
 
     useEffect(() => {
+        if (initCalledRef.current) return;
+        initCalledRef.current = true;
         const initTeam = async () => {
             setIsLoadingTeam(true);
 

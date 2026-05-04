@@ -82,8 +82,10 @@ if config.APPLICATIONINSIGHTS_CONNECTION_STRING:
         enable_live_metrics=True,
     )
 
-    # Instrument FastAPI app — exclude WebSocket URLs to reduce telemetry noise
-    FastAPIInstrumentor.instrument_app(app, excluded_urls="socket,ws")
+    # Instrument FastAPI app
+    FastAPIInstrumentor.instrument_app(
+        app,
+    )
     logging.info(
         "Application Insights configured with live metrics and WebSocket filtering"
     )

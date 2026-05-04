@@ -13,16 +13,16 @@
       "name": "ProductAgent",
       "deployment_name": "gpt-4.1-mini",
       "icon": "",
-      "system_message": "You are a Product agent. You have access to MCP tools which allow you to obtain knowledge about products, product management, development, and compliance guidelines. When asked to call one of these tools, you should summarize back what was done.",
+      "system_message": "You are a Product agent. You have access to MCP tools which allow you to obtain knowledge about products, product management, development, and compliance guidelines. IMPORTANT: When an action can be performed immediately using available MCP tools (e.g., querying product data, checking compliance, retrieving product specs), call the tool FIRST and report the result. Do not ask for information you can obtain directly through tools. When asked to call one of these tools, you should summarize back what was done.",
       "description": "This agent specializes in product management, development, and related tasks. It can provide information about products, manage inventory, handle product launches, analyze sales data, and coordinate with other teams like marketing and tech support.",
-      "use_rag": false,
-      "use_mcp": true,
-      "use_bing": false,
-      "use_reasoning": false,
-      "index_name": "",
+      "use_rag": true,
+      "use_mcp": false,
+      "use_bing": true,
+      "use_reasoning": true,
+      "index_name": "macae-marketing-knowledge-index",
       "index_foundry_name": "",
       "index_endpoint": "",
-      "coding_tools": false
+      "coding_tools": true
     },
     {
       "input_key": "",
@@ -30,15 +30,15 @@
       "name": "MarketingAgent",
       "deployment_name": "gpt-4.1-mini",
       "icon": "",
-      "system_message": "You are a Marketing agent. You have access to a number of HR related MCP tools for tasks like campaign development, content creation, and market analysis. You help create effective marketing campaigns, analyze market data, and develop promotional content for products and services.",
+      "system_message": "You are a Marketing agent. You have access to a number of MCP tools for tasks like campaign development, content creation, and market analysis. You help create effective marketing campaigns, analyze market data, and develop promotional content for products and services. IMPORTANT: When an action can be performed immediately using available MCP tools (e.g., retrieving market data, analyzing campaigns, generating content), call the tool FIRST and report the result. Do not ask for information you can obtain directly through tools.",
       "description": "This agent specializes in marketing, campaign management, and analyzing market data.",
-      "use_rag": false,
-      "use_mcp": true,
+      "use_rag": true,
+      "use_mcp": false,
       "use_bing": false,
-      "use_reasoning": false,
-      "index_name": "",
+      "use_reasoning": true,
+      "index_name": "macae-marketing-knowledge-index",
       "index_foundry_name": "",
-      "coding_tools": false
+      "coding_tools": true
     },
     {
       "input_key": "",
@@ -49,12 +49,12 @@
       "system_message": "",
       "description": "",
       "use_rag": false,
-      "use_mcp": false,
-      "use_bing": false,
-      "use_reasoning": false,
+      "use_mcp": true,
+      "use_bing": true,
+      "use_reasoning": true,
       "index_name": "",
       "index_foundry_name": "",
-      "coding_tools": false
+      "coding_tools": true
     }
   ],
   "protected": false,

@@ -55,7 +55,7 @@ class ChatCosmosService:
             return
 
         endpoint = config.COSMOSDB_ENDPOINT
-        credential = config.get_azure_credentials()
+        credential = config.get_azure_credential_async()
         db_name = config.COSMOSDB_DATABASE
 
         if not endpoint or not db_name:
@@ -120,6 +120,8 @@ class ChatCosmosService:
         }
 
         try:
+            if self._container is None:
+                return self._fallback_session(user_id, session_name)
             await self._container.upsert_item(doc)
             logger.info("Created chat session %s for user %s", session_id, user_id)
             return doc
@@ -137,6 +139,8 @@ class ChatCosmosService:
             return None
 
         try:
+            if self._container is None:
+                return None
             item = await self._container.read_item(
                 item=session_id,
                 partition_key=user_id,
@@ -158,6 +162,9 @@ class ChatCosmosService:
             return []
 
         try:
+            if self._container is None:
+                return []
+
             query = (
                 "SELECT c.id, c.user_id, c.session_name, c.message_count, "
                 "c.created_at, c.updated_at, c.last_message_at, c.is_active "
@@ -191,8 +198,10 @@ class ChatCosmosService:
         """Delete a chat session."""
         if not await self._ensure():
             return False
-
         try:
+            if self._container is None:
+                return False
+
             await self._container.delete_item(
                 item=session_id,
                 partition_key=user_id,
@@ -220,6 +229,9 @@ class ChatCosmosService:
         Pattern: read → append → upsert (same as customer-chatbot).
         """
         if not await self._ensure():
+            return None
+
+        if self._container is None:
             return None
 
         try:
@@ -284,6 +296,7 @@ class ChatCosmosService:
 
             try:
                 import asyncio
+
                 from common.services.search_index_service import (
                     get_search_index_service,
                 )

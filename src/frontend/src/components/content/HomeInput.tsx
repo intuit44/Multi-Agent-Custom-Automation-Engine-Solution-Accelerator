@@ -129,9 +129,9 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
         dismissToast(id);
 
         if (redirectPlan) {
-          // TASK intent → redirect to plan
+          // TASK intent → same /chat/:sessionId, ChatPage activates plan mode inline
           showToast("Plan created!", "success");
-          navigate(`/plan/${redirectPlan}`);
+          navigate(`/chat/${sessionId}`, { state: { initialPlanId: redirectPlan } });
         } else {
           // CONVERSATIONAL / MCP → open chat page with the response already generated
           const initialMessages = [
@@ -205,7 +205,7 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
       <div className="home-input-content">
         <div className="home-input-center-content">
           <div className="home-input-title-wrapper">
-            <Title2>How can I help?</Title2>
+            <Title2>How can I help you?</Title2>
           </div>
 
           {/* Legal Disclaimer for Contract Compliance Review Team */}

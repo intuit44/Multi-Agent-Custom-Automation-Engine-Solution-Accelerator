@@ -261,20 +261,38 @@ class OrchestrationManager:
                     user_id,
                     reason,
                 )
-                # Close prior agents (same logic as old version)
-                for agent in getattr(current, "_participants", {}).values():
+                # Close prior lifecycle-managed agent wrappers.
+                # Each close() is scheduled as an independent asyncio Task so it
+                # runs in the CURRENT event-loop context (same loop, new task).
+                # This avoids the AnyIO cancel-scope violation that occurs when
+                # close() is called inline from a different coroutine chain than
+                # the one that opened the agent.  We gather all tasks and await
+                # them together to ensure cleanup finishes before rebuilding.
+                prior_wrappers = orchestration_config.agent_wrappers.pop(user_id, [])
+
+                async def _close_wrapper(agent) -> None:
                     agent_name = getattr(
                         agent, "agent_name", getattr(agent, "name", "")
                     )
-                    if agent_name != "ProxyAgent":
-                        close_method = getattr(agent, "close", None)
-                        if callable(close_method):
-                            try:
-                                if inspect.iscoroutinefunction(close_method):
-                                    await close_method()
-                                cls.logger.debug("Closed agent '%s'", agent_name)
-                            except Exception as e:
-                                cls.logger.error("Error closing agent: %s", e)
+                    close_method = getattr(agent, "close", None)
+                    if callable(close_method) and inspect.iscoroutinefunction(
+                        close_method
+                    ):
+                        try:
+                            await close_method()
+                            cls.logger.debug("Closed agent wrapper '%s'", agent_name)
+                        except Exception as e:
+                            cls.logger.warning(
+                                "Non-fatal error closing agent wrapper '%s': %s",
+                                agent_name,
+                                e,
+                            )
+
+                if prior_wrappers:
+                    close_tasks = [
+                        asyncio.ensure_future(_close_wrapper(a)) for a in prior_wrappers
+                    ]
+                    await asyncio.gather(*close_tasks, return_exceptions=True)
 
             factory = MagenticAgentFactory(team_service=team_service)
             try:
@@ -295,6 +313,8 @@ class OrchestrationManager:
                     agents, team_config, team_service.memory_context, user_id
                 )
                 orchestration_config.orchestrations[user_id] = workflow
+                # Store wrappers for proper cleanup on next rebuild
+                orchestration_config.agent_wrappers[user_id] = agents
             except Exception as e:
                 cls.logger.error(
                     "Failed to initialize orchestration for user '%s': %s", user_id, e
@@ -384,6 +404,13 @@ class OrchestrationManager:
         task_text = getattr(input_task, "description", str(input_task))
         self.logger.debug("Task: %s", task_text)
 
+        # ── Stamp session_id on ProxyAgent instances so they can write to chat_cosmos ──
+        from v4.magentic_agents.proxy_agent import ProxyAgent as _ProxyAgent
+
+        for _agent in orchestration_config.agent_wrappers.get(user_id, []):
+            if isinstance(_agent, _ProxyAgent):
+                _agent.session_id = session_id
+
         # ── Chat context injection DISABLED ─────────────────────────────────
         # Previously injected the last N chat messages as context for Plan agents.
         # This caused contamination: Plan agents saw debug conversations,
@@ -396,6 +423,11 @@ class OrchestrationManager:
         agent_call_counts: dict = {}
         # Buffer streamed text per-agent so we can emit a complete AGENT_MESSAGE
         agent_stream_buffers: dict[str, str] = {}
+        # Set of agents currently between a RequestSentEvent and a ResponseReceivedEvent.
+        # Only chunks from agents in this set are forwarded to the UI; chunks arriving outside
+        # this window (e.g. broadcast synchronisation with should_respond=False) are silently
+        # discarded, eliminating the duplicate-message noise without fighting the SDK.
+        agents_actively_responding: set[str] = set()
 
         try:
             # Execute workflow using run() with stream=True
@@ -446,6 +478,14 @@ class OrchestrationManager:
                                     "Agent '%s' called %d times", agent_name, call_num
                                 )
 
+                            # Open the response window: clear any residual buffer from a
+                            # previous round and mark this agent as the active speaker.
+                            # Only chunks received while an agent is in this set will be
+                            # forwarded to the UI; broadcast-sync chunks (should_respond=False)
+                            # arrive outside this window and are silently discarded.
+                            agent_stream_buffers.pop(agent_name, None)
+                            agents_actively_responding.add(agent_name)
+
                         elif isinstance(event.data, GroupChatResponseReceivedEvent):
                             agent_name = event.data.participant_name
                             self.logger.info(
@@ -453,6 +493,9 @@ class OrchestrationManager:
                                 event.data.round_index,
                                 agent_name,
                             )
+                            # Close the response window: no more chunks for this agent
+                            # should reach the UI until the next RequestSentEvent.
+                            agents_actively_responding.discard(agent_name)
                             # Flush accumulated streaming content as a complete AGENT_MESSAGE
                             buffered = agent_stream_buffers.pop(agent_name, "")
                             if buffered:
@@ -497,27 +540,44 @@ class OrchestrationManager:
                             type(output_data).__name__,
                         )
 
-                        # Streaming chunk from an agent executor
+                        # Streaming chunk from an agent executor.
+                        # Only process chunks for agents that are within a formal
+                        # RequestSent → ResponseReceived window.  Chunks emitted by
+                        # the SDK's internal broadcast (should_respond=False) arrive
+                        # outside that window and are discarded here, preventing the
+                        # duplicate-message problem without altering SDK behaviour.
                         if isinstance(output_data, AgentResponseUpdate) and executor_id:
-                            chunk_text = output_data.text or ""
-                            if chunk_text:
-                                agent_stream_buffers[executor_id] = (
-                                    agent_stream_buffers.get(executor_id, "")
-                                    + chunk_text
-                                )
-                            try:
-                                await streaming_agent_response_callback(
+                            self.logger.debug(
+                                "[OUTPUT] executor_id='%s' actively_responding=%s",
+                                executor_id,
+                                agents_actively_responding,
+                            )
+                            if executor_id not in agents_actively_responding:
+                                self.logger.debug(
+                                    "[OUTPUT] Discarding broadcast chunk from '%s' "
+                                    "(outside active-response window)",
                                     executor_id,
-                                    output_data,
-                                    False,
-                                    user_id,
                                 )
-                            except Exception as e:
-                                self.logger.error(
-                                    "Error in streaming callback for agent %s: %s",
-                                    executor_id,
-                                    e,
-                                )
+                            else:
+                                chunk_text = output_data.text or ""
+                                if chunk_text:
+                                    agent_stream_buffers[executor_id] = (
+                                        agent_stream_buffers.get(executor_id, "")
+                                        + chunk_text
+                                    )
+                                try:
+                                    await streaming_agent_response_callback(
+                                        executor_id,
+                                        output_data,
+                                        False,
+                                        user_id,
+                                    )
+                                except Exception as e:
+                                    self.logger.error(
+                                        "Error in streaming callback for agent %s: %s",
+                                        executor_id,
+                                        e,
+                                    )
                         # Final workflow output (list[Message] or Message)
                         elif isinstance(output_data, Message):
                             final_output = output_data.text or ""
