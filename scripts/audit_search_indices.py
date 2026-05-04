@@ -54,6 +54,8 @@ DOCUMENT_INDICES = [
     "macae-rfp-compliance-index",
     "macae-rfp-risk-index",
     "macae-rfp-summary-index",
+    "macae-hr-knowledge-index",
+    "macae-marketing-knowledge-index",
 ]
 CHAT_INDEX = "chat-history-index"
 ALL_INDICES = DOCUMENT_INDICES + [CHAT_INDEX]
@@ -68,20 +70,34 @@ INDEX_ROLES = {
     "macae-rfp-compliance-index": "ChatMCPAgent + Magentic (RFP Compliance)",
     "macae-rfp-risk-index": "ChatMCPAgent + Magentic (RFP Risk)",
     "macae-rfp-summary-index": "ChatMCPAgent + Magentic (RFP Summary)",
+    "macae-hr-knowledge-index": "HRHelperAgent + TechnicalSupportAgent (HR Team)",
+    "macae-marketing-knowledge-index": "ProductAgent + MarketingAgent (Marketing Team)",
     CHAT_INDEX: "ChatMCPAgent — memoria de sesiones (todos los agentes)",
 }
 
 # Shape esperado de un documento real en cada índice
-# clave = nombre del campo, valor = tipo Edm esperado
+# Doc indices canónicos: id, title, content, source_blob, indexed_at, content_vector.
+# content_vector es retrievable=False — no aparecerá en results, pero lo incluimos
+# para no marcarlo como "extra" si algún índice histórico lo expusiera.
+_DOC_CANONICAL_SHAPE = [
+    "id",
+    "title",
+    "content",
+    "source_blob",
+    "indexed_at",
+    "content_vector",
+]
 EXPECTED_DOC_SHAPE: dict[str, list[str]] = {
-    "contract-compliance-doc-index": ["id", "content", "title"],
-    "contract-risk-doc-index": ["id", "content", "title"],
-    "contract-summary-doc-index": ["id", "content", "title"],
-    "macae-retail-customer-index": ["id", "content"],
-    "macae-retail-order-index": ["id", "content"],
-    "macae-rfp-compliance-index": ["id", "content", "title"],
-    "macae-rfp-risk-index": ["id", "content", "title"],
-    "macae-rfp-summary-index": ["id", "content", "title"],
+    "contract-compliance-doc-index": _DOC_CANONICAL_SHAPE,
+    "contract-risk-doc-index": _DOC_CANONICAL_SHAPE,
+    "contract-summary-doc-index": _DOC_CANONICAL_SHAPE,
+    "macae-retail-customer-index": _DOC_CANONICAL_SHAPE,
+    "macae-retail-order-index": _DOC_CANONICAL_SHAPE,
+    "macae-rfp-compliance-index": _DOC_CANONICAL_SHAPE,
+    "macae-rfp-risk-index": _DOC_CANONICAL_SHAPE,
+    "macae-rfp-summary-index": _DOC_CANONICAL_SHAPE,
+    "macae-hr-knowledge-index": _DOC_CANONICAL_SHAPE,
+    "macae-marketing-knowledge-index": _DOC_CANONICAL_SHAPE,
     CHAT_INDEX: [
         "id",
         "session_id",
@@ -127,7 +143,9 @@ def validate_index(name: str, schema: dict) -> list[str]:
     vs = schema.get("vectorSearch", {})
     profiles = vs.get("profiles", [])
     algos = vs.get("algorithms", [])
+    vectorizers = vs.get("vectorizers", []) or []
     hnsw_algos = [a["name"] for a in algos if a.get("kind") == "hnsw"]
+    vectorizer_names = [v.get("name") for v in vectorizers if v.get("name")]
     if not hnsw_algos:
         issues.append("  ❌ vectorSearch: no hay algoritmo 'hnsw' configurado")
     if not profiles:
@@ -138,6 +156,27 @@ def validate_index(name: str, schema: dict) -> list[str]:
                 issues.append(
                     f"  ⚠️  vectorSearch profile '{p['name']}' apunta a algoritmo inexistente"
                 )
+
+    # 3b. vectorizers: debe haber al menos uno y un profile que lo referencie
+    if not vectorizers:
+        issues.append(
+            "  ⚠️  vectorSearch: sin 'vectorizers' — queries de texto puro no "
+            "podrán vectorizarse al vuelo"
+        )
+    else:
+        profile_vectorizers = [
+            p.get("vectorizer") for p in profiles if p.get("vectorizer")
+        ]
+        if not profile_vectorizers:
+            issues.append(
+                "  ⚠️  vectorSearch: ningún profile referencia un vectorizer"
+            )
+        else:
+            for pv in profile_vectorizers:
+                if pv not in vectorizer_names:
+                    issues.append(
+                        f"  ⚠️  profile.vectorizer '{pv}' no existe en vectorizers"
+                    )
 
     # 4. semantic: debe apuntar a 'content'
     sem = schema.get("semantic", {})

@@ -11,11 +11,14 @@ Prereqs (already done):
     ✅ Cosmos DB with chat_sessions container
 
 Steps executed:
+    0. Migrate 10 doc indices to canonical schema (id filterable, vectorizer,
+       source_blob, indexed_at). Idempotente: skip si ya canónico, crea si no
+       existe, o dump→DELETE→recreate→re-upload si está desalineado.
     1. Upgrade 8 existing indices → add content_vector + vectorSearch + semantic config
-    2. Create chat-history-index for message-level RAG
-    3. Backfill embeddings for existing 27 documents
-    4. Backfill all chat messages from Cosmos DB → chat-history-index
-    4b. Create macae-hr-knowledge-index and macae-marketing-knowledge-index (empty)
+       (legacy, casi no-op tras Step 0).
+    2. Create or upgrade chat-history-index (idempotente; añade vectorizer si falta).
+    3. Backfill embeddings for documents sin content_vector.
+    4. Backfill all chat messages from Cosmos DB → chat-history-index.
     5. Create Cosmos datasource + embedding skillset + continuous indexer (PT5M schedule)
        Self-healing layer for the push fire-and-forget path in chat_cosmos_service.
 """
@@ -102,6 +105,18 @@ VECTOR_SEARCH_CONFIG = {
         {
             "name": "vector-profile",
             "algorithm": "hnsw-algo",
+            "vectorizer": "aoai-vectorizer",
+        }
+    ],
+    "vectorizers": [
+        {
+            "name": "aoai-vectorizer",
+            "kind": "azureOpenAI",
+            "azureOpenAIParameters": {
+                "resourceUri": OPENAI_ENDPOINT,
+                "deploymentId": EMBEDDING_DEPLOYMENT,
+                "modelName": EMBEDDING_DEPLOYMENT,
+            },
         }
     ],
 }
@@ -148,8 +163,12 @@ CHAT_SEMANTIC_CONFIG = {
 
 
 def build_doc_index_schema(name: str) -> dict:
-    """Schema base para índices de documentos (HR/Marketing). Mismo shape que
-    los índices legacy upgradeados (id/title/content/content_vector)."""
+    """Schema canónico para los 10 índices de documentos.
+
+    Campos: id (filterable), title, content, source_blob, indexed_at,
+    content_vector. vectorSearch HNSW + Azure OpenAI vectorizer.
+    semantic config 'default' (titleField=title, content=[content]).
+    """
     return {
         "name": name,
         "fields": [
@@ -173,6 +192,21 @@ def build_doc_index_schema(name: str) -> dict:
                 "type": "Edm.String",
                 "searchable": True,
                 "filterable": False,
+                "retrievable": True,
+            },
+            {
+                "name": "source_blob",
+                "type": "Edm.String",
+                "searchable": False,
+                "filterable": True,
+                "retrievable": True,
+            },
+            {
+                "name": "indexed_at",
+                "type": "Edm.DateTimeOffset",
+                "searchable": False,
+                "filterable": True,
+                "sortable": True,
                 "retrievable": True,
             },
             {
@@ -354,6 +388,18 @@ class AzureClients:
             logger.error("Create index failed: HTTP %s — %s", resp.status, body[:500])
             return False
 
+    async def delete_index(self, name: str) -> bool:
+        headers = await self._search_headers()
+        url = f"{SEARCH_ENDPOINT}/indexes/{name}?api-version={SEARCH_API}"
+        async with self._session.delete(url, headers=headers) as resp:
+            if resp.status in (200, 204, 404):
+                return True
+            body = await resp.text()
+            logger.error(
+                "DELETE index %s failed: HTTP %s — %s", name, resp.status, body[:500]
+            )
+            return False
+
     async def search_docs(
         self, index_name: str, search: str = "*", top: int = 1000
     ) -> list:
@@ -459,6 +505,106 @@ class AzureClients:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Step 0: Migrate doc indices to canonical schema
+# ─── Recorre los 10 índices de documentos. Si el índice no existe,
+# ─── lo crea con schema canónico. Si existe pero no cumple (id no
+# ─── filterable, sin vectorizer, sin source_blob/indexed_at, etc.),
+# ─── dump → DELETE → recreate canónico → re-upload (sin vector — los
+# ─── vectores se regeneran en Step 3). Si ya cumple, skip. Idempotente.
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _doc_index_is_canonical(schema: dict) -> bool:
+    """Verifica si un schema cumple el contrato canónico actual."""
+    fields_by_name = {f["name"]: f for f in schema.get("fields", [])}
+
+    # 1. id presente, key y filterable
+    id_field = fields_by_name.get("id")
+    if not id_field or not id_field.get("key") or not id_field.get("filterable"):
+        return False
+
+    # 2. campos canónicos presentes
+    for required in ("title", "content", "source_blob", "indexed_at", "content_vector"):
+        if required not in fields_by_name:
+            return False
+
+    # 3. vectorSearch con vectorizer + profile que lo referencia
+    vs = schema.get("vectorSearch") or {}
+    vectorizers = vs.get("vectorizers") or []
+    profiles = vs.get("profiles") or []
+    if not vectorizers or not any(p.get("vectorizer") for p in profiles):
+        return False
+
+    # 4. semantic config con titleField + contentFields=[content]
+    sem = schema.get("semantic") or {}
+    if not sem.get("configurations"):
+        return False
+
+    return True
+
+
+async def migrate_doc_indices_to_canonical(clients: AzureClients) -> int:
+    """Lleva los 10 doc indices al schema canónico. Idempotente."""
+    target_indices = list(EXISTING_INDICES) + list(NEW_DOC_INDICES)
+    migrated = 0
+
+    for idx_name in target_indices:
+        logger.info("  Checking: %s", idx_name)
+        existing = await clients.get_index(idx_name)
+
+        # Caso A: no existe → crear con schema canónico
+        if not existing:
+            schema = build_doc_index_schema(idx_name)
+            if await clients.create_index(schema):
+                logger.info("    ✅ Created (canonical schema, empty)")
+                migrated += 1
+            else:
+                logger.error("    ❌ Failed to create %s", idx_name)
+            continue
+
+        # Caso B: ya canónico → skip
+        if _doc_index_is_canonical(existing):
+            logger.info("    Already canonical ✅")
+            migrated += 1
+            continue
+
+        # Caso C: existe pero no canónico → dump, delete, recreate, re-upload
+        logger.info("    Not canonical — dumping docs before recreation...")
+        docs = await clients.search_docs(idx_name)
+        logger.info("    Dumped %d docs", len(docs))
+
+        # Sanitizar: quitar @search.* y content_vector (se regenera en Step 3)
+        sanitized: List[Dict[str, Any]] = []
+        for d in docs:
+            clean = {k: v for k, v in d.items() if not k.startswith("@") and k != "content_vector"}
+            if "id" in clean:
+                clean["@search.action"] = "mergeOrUpload"
+                sanitized.append(clean)
+
+        if not await clients.delete_index(idx_name):
+            logger.error("    ❌ DELETE failed — abortando migración de %s", idx_name)
+            continue
+
+        schema = build_doc_index_schema(idx_name)
+        if not await clients.create_index(schema):
+            logger.error("    ❌ Recreate failed for %s", idx_name)
+            continue
+
+        if sanitized:
+            if await clients.upload_docs(idx_name, sanitized):
+                logger.info("    ✅ Migrated and re-uploaded %d docs (sin vector)", len(sanitized))
+            else:
+                logger.error("    ❌ Re-upload failed for %s", idx_name)
+                continue
+        else:
+            logger.info("    ✅ Migrated (no docs to re-upload)")
+
+        migrated += 1
+
+    return migrated
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Step 1: Upgrade existing indices
 # ═══════════════════════════════════════════════════════════════════
 
@@ -503,7 +649,12 @@ async def upgrade_existing_indices(clients: AzureClients) -> int:
 
 
 async def create_chat_history_index(clients: AzureClients) -> bool:
-    """Create chat-history-index for message-level RAG."""
+    """Create or upgrade chat-history-index. Idempotente.
+
+    Fresh deploy → crea con vectorizer ya incluido (vía VECTOR_SEARCH_CONFIG).
+    Migración → añade title field, vectorSearch.vectorizers + profile.vectorizer
+    si faltan, y refresca semantic config si está desalineado. Mismo PUT.
+    """
     existing = await clients.get_index("chat-history-index")
     if existing:
         logger.info("  chat-history-index already exists ✅")
@@ -524,6 +675,16 @@ async def create_chat_history_index(clients: AzureClients) -> bool:
             )
             updated = True
 
+        # Vectorizer check: si vectorSearch no tiene vectorizers o el profile
+        # no referencia uno, reemplazar el bloque entero por VECTOR_SEARCH_CONFIG
+        # canónico. vectorSearch es config nivel-índice, se modifica vía PUT.
+        vs = existing.get("vectorSearch") or {}
+        if not vs.get("vectorizers") or not any(
+            p.get("vectorizer") for p in (vs.get("profiles") or [])
+        ):
+            existing["vectorSearch"] = VECTOR_SEARCH_CONFIG
+            updated = True
+
         if needs_semantic_update:
             existing["semantic"] = CHAT_SEMANTIC_CONFIG
 
@@ -532,7 +693,7 @@ async def create_chat_history_index(clients: AzureClients) -> bool:
 
         if updated or needs_semantic_update:
             if await clients.put_index("chat-history-index", existing):
-                logger.info("  ✅ Updated chat-history-index schema/semantic config")
+                logger.info("  ✅ Updated chat-history-index (title/vectorizer/semantic)")
                 return True
             logger.error("  ❌ Failed to update chat-history-index")
             return False
@@ -702,35 +863,6 @@ async def backfill_chat_history(clients: AzureClients) -> int:
     await cosmos.close()
     logger.info("  ✅ Backfilled %d/%d messages", indexed, len(search_docs))
     return indexed
-
-
-# ═══════════════════════════════════════════════════════════════════
-# Step 4b: Create HR / Marketing knowledge indices (if missing)
-# ═══════════════════════════════════════════════════════════════════
-
-
-async def create_new_doc_indices(clients: AzureClients) -> int:
-    """Create empty knowledge indices for HR/Marketing if they don't exist.
-
-    These start empty — populate them via infra/scripts/index_datasets.py
-    pointing to the appropriate blob containers (hr-docs, marketing-docs).
-    """
-    created = 0
-    for idx_name in NEW_DOC_INDICES:
-        existing = await clients.get_index(idx_name)
-        if existing:
-            logger.info("  %s already exists ✅", idx_name)
-            created += 1
-            continue
-        schema = build_doc_index_schema(idx_name)
-        if await clients.create_index(schema):
-            logger.info(
-                "  ✅ Created %s (empty — populate with index_datasets.py)", idx_name
-            )
-            created += 1
-        else:
-            logger.error("  ❌ Failed to create %s", idx_name)
-    return created
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -905,6 +1037,12 @@ async def main():
     await clients.init_session()
 
     try:
+        # Step 0
+        logger.info("── Step 0: Migrate doc indices to canonical schema ───")
+        migrated = await migrate_doc_indices_to_canonical(clients)
+        total_doc_indices = len(EXISTING_INDICES) + len(NEW_DOC_INDICES)
+        logger.info("Result: %d/%d doc indices canonical\n", migrated, total_doc_indices)
+
         # Step 1
         logger.info("── Step 1: Upgrade existing indices ──────────────────")
         upgraded = await upgrade_existing_indices(clients)
@@ -925,15 +1063,6 @@ async def main():
         msgs_count = await backfill_chat_history(clients)
         logger.info("Result: %d messages indexed\n", msgs_count)
 
-        # Step 4b
-        logger.info("── Step 4b: Create HR/Marketing knowledge indices ────")
-        new_doc_count = await create_new_doc_indices(clients)
-        logger.info(
-            "Result: %d/%d HR/Marketing indices ready\n",
-            new_doc_count,
-            len(NEW_DOC_INDICES),
-        )
-
         # Step 5
         logger.info("── Step 5: DataSource + Indexer (Cosmos→chat-history) ─")
         indexer_ok = await setup_chat_indexer(clients)
@@ -943,16 +1072,14 @@ async def main():
         logger.info("=" * 60)
         logger.info("SUMMARY")
         logger.info("=" * 60)
-        logger.info("  Indices upgraded:     %d/%d", upgraded, len(EXISTING_INDICES))
-        logger.info("  Chat index created:   %s", "✅" if created else "❌")
+        logger.info("  Doc indices canonical: %d/%d", migrated, total_doc_indices)
+        logger.info("  Indices upgraded:      %d/%d", upgraded, len(EXISTING_INDICES))
+        logger.info("  Chat index created:    %s", "✅" if created else "❌")
+        logger.info("  Doc embeddings:        %d", docs_count)
+        logger.info("  Chat msgs indexed:     %d", msgs_count)
         logger.info(
-            "  HR/Mkt indices:       %d/%d", new_doc_count, len(NEW_DOC_INDICES)
-        )
-        logger.info("  Doc embeddings:       %d", docs_count)
-        logger.info("  Chat msgs indexed:    %d", msgs_count)
-        logger.info(
-            "  Total indices:        %d",
-            len(EXISTING_INDICES) + len(NEW_DOC_INDICES) + (1 if created else 0),
+            "  Total indices:         %d",
+            total_doc_indices + (1 if created else 0),
         )
         logger.info(
             "  Continuous indexer:   %s",
