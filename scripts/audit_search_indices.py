@@ -37,6 +37,22 @@ CHAT_DATASOURCE_NAME = "chat-sessions-cosmos-ds"
 CHAT_SKILLSET_NAME = "chat-history-skillset"
 CHAT_INDEXER_NAME = "chat-history-indexer"
 
+# --- Constantes para Step 6 (Coincidentes con setup_search_pipeline.py) ---
+DOC_BLOB_SKILLSET_NAME = "doc-blob-skillset"
+# Mapping índice → blob container (idéntico a DOC_INDEX_BLOB_MAP del setup script)
+DOC_INDEX_BLOB_MAP = {
+    "contract-compliance-doc-index": "contract-compliance-dataset",
+    "contract-risk-doc-index": "contract-risk-dataset",
+    "contract-summary-doc-index": "contract-summary-dataset",
+    "macae-rfp-compliance-index": "rfp-compliance-dataset",
+    "macae-rfp-risk-index": "rfp-risk-dataset",
+    "macae-rfp-summary-index": "rfp-summary-dataset",
+    "macae-retail-customer-index": "retail-dataset-customer",
+    "macae-retail-order-index": "retail-dataset-order",
+    "macae-hr-knowledge-index": "hr-knowledge-dataset",
+    "macae-marketing-knowledge-index": "marketing-knowledge-dataset",
+}
+
 # ── Requisitos mínimos por índice para FoundryIQ ─────────────────
 REQUIRED_FIELDS = {
     "content": {"searchable": True, "retrievable": True},
@@ -514,6 +530,142 @@ async def audit():
             print("  ✅  Step 5 completo — datasource, skillset e indexer correctos")
         print()
 
+        # ── Auditoría Step 6: blob → search continuous indexers ──────────
+        sep("═")
+        print("  STEP 6 — Blob → Search continuous indexers (10 doc indices)")
+        sep("═")
+        step6_issues: list[str] = []
+
+        # 1. Skillset compartido
+        async with session.get(
+            f"{SEARCH_ENDPOINT}/skillsets/{DOC_BLOB_SKILLSET_NAME}"
+            f"?api-version={SEARCH_API}",
+            headers=headers,
+        ) as sr:
+            if sr.status == 200:
+                ss = await sr.json()
+                skills = ss.get("skills", [])
+                embed_skills = [
+                    s for s in skills
+                    if s.get("@odata.type", "").endswith("AzureOpenAIEmbeddingSkill")
+                ]
+                print(
+                    f"  skillset '{DOC_BLOB_SKILLSET_NAME}': ✅  "
+                    f"({len(skills)} skill(s), {len(embed_skills)} embedding)"
+                )
+                if not embed_skills:
+                    step6_issues.append(
+                        "skillset: sin AzureOpenAIEmbeddingSkill — "
+                        "blobs entrarán sin content_vector"
+                    )
+            else:
+                print(
+                    f"  skillset '{DOC_BLOB_SKILLSET_NAME}': "
+                    f"❌ NO EXISTE (HTTP {sr.status})"
+                )
+                step6_issues.append(
+                    f"skillset '{DOC_BLOB_SKILLSET_NAME}' no encontrado"
+                )
+
+        # 2. Por cada índice: datasource + indexer + status de última corrida
+        status_icon = {
+            "success": "✅",
+            "transientFailure": "🟡",
+            "persistentFailure": "❌",
+            "inProgress": "⏳",
+        }
+        configured_count = 0
+        for idx_name, container_name in DOC_INDEX_BLOB_MAP.items():
+            ds_name = f"{idx_name}-blob-ds"
+            ix_name = f"{idx_name}-blob-indexer"
+
+            # Datasource
+            async with session.get(
+                f"{SEARCH_ENDPOINT}/datasources/{ds_name}"
+                f"?api-version={SEARCH_API}",
+                headers=headers,
+            ) as r:
+                ds_ok = r.status == 200
+                if not ds_ok:
+                    step6_issues.append(
+                        f"datasource '{ds_name}' faltante (HTTP {r.status})"
+                    )
+
+            # Indexer
+            async with session.get(
+                f"{SEARCH_ENDPOINT}/indexers/{ix_name}"
+                f"?api-version={SEARCH_API}",
+                headers=headers,
+            ) as r:
+                ix_ok = r.status == 200
+                if not ix_ok:
+                    step6_issues.append(
+                        f"indexer '{ix_name}' faltante (HTTP {r.status})"
+                    )
+
+            if not (ds_ok and ix_ok):
+                print(
+                    f"  • {idx_name:38s} ❌ "
+                    f"datasource={'✅' if ds_ok else '❌'} "
+                    f"indexer={'✅' if ix_ok else '❌'}"
+                )
+                continue
+
+            configured_count += 1
+
+            # Status de última corrida
+            async with session.get(
+                f"{SEARCH_ENDPOINT}/indexers/{ix_name}/status"
+                f"?api-version={SEARCH_API}",
+                headers=headers,
+            ) as r:
+                if r.status == 200:
+                    st = await r.json()
+                    last = st.get("lastResult") or {}
+                    status_val = last.get("status", "no-runs-yet")
+                    proc = last.get("itemsProcessed", 0)
+                    fail = last.get("itemsFailed", 0)
+                    err = (last.get("errorMessage") or "")[:80]
+                    icon = status_icon.get(status_val, "⏳")
+                    line = (
+                        f"  • {idx_name:38s} {icon} "
+                        f"{status_val:18s} proc={proc:3d} failed={fail:2d}"
+                    )
+                    if err:
+                        line += f"  err: {err}"
+                    print(line)
+                    if status_val == "persistentFailure":
+                        step6_issues.append(
+                            f"indexer '{ix_name}': persistentFailure — "
+                            f"{err or 'ver portal para detalles'}"
+                        )
+                    elif status_val == "transientFailure" and fail > 0:
+                        step6_issues.append(
+                            f"indexer '{ix_name}': transientFailure con "
+                            f"{fail} items fallidos — re-correr"
+                        )
+                else:
+                    print(
+                        f"  • {idx_name:38s} ⚠️  "
+                        f"status no disponible (HTTP {r.status})"
+                    )
+
+        print()
+        if step6_issues:
+            print(f"  ⚠️  Step 6: {len(step6_issues)} problema(s)")
+            for p in step6_issues:
+                print(f"     • {p}")
+            print(
+                "     → Re-ejecutar setup_search_pipeline.py "
+                "(Step 6 es idempotente)"
+            )
+        else:
+            print(
+                f"  ✅  Step 6 completo — skillset + {configured_count}/"
+                f"{len(DOC_INDEX_BLOB_MAP)} datasources/indexers, todos sin errores"
+            )
+        print()
+
         # ── Validación HR/Marketing: use_rag=true pero index_name="" ─────
         sep("═")
         print("  COHERENCIA agentes: use_rag vs index_name")
@@ -573,21 +725,29 @@ async def audit():
             print(f"  ❌  Agentes huérfanos (use_rag sin índice): {len(orphaned)}")
         print()
         if step5_issues:
-            print(f"  ⚠️  Step 5 (indexer continuo): {len(step5_issues)} problema(s)")
+            print(f"  ⚠️  Step 5 (Cosmos→chat indexer): {len(step5_issues)} problema(s)")
+        if step6_issues:
+            print(f"  ⚠️  Step 6 (Blob→doc indexers):   {len(step6_issues)} problema(s)")
         print()
-        if total_warn > 0 or total_missing > 0 or orphaned or step5_issues:
+        if (
+            total_warn > 0 or total_missing > 0
+            or orphaned or step5_issues or step6_issues
+        ):
             print("  Acciones recomendadas:")
-            if total_missing > 0 or total_warn > 0 or step5_issues:
+            if total_missing > 0 or total_warn > 0 or step5_issues or step6_issues:
                 print(
-                    "    • cd src/backend && .venv/bin/python ../../scripts/setup_search_pipeline.py"
+                    "    • cd src/backend && .venv/bin/python "
+                    "../../scripts/setup_search_pipeline.py"
                 )
             if orphaned:
                 print(
-                    "    • Revisar data/agent_teams/*.json — asignar index_name o desactivar use_rag"
+                    "    • Revisar data/agent_teams/*.json — "
+                    "asignar index_name o desactivar use_rag"
                 )
         else:
             print(
-                "  Todos los índices, agentes y el indexer continuo están correctamente configurados. ✅"
+                "  Todos los índices, agentes y los indexers continuos "
+                "(Step 5 + Step 6) están correctamente configurados. ✅"
             )
         sep("═")
 

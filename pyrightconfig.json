@@ -2,7 +2,8 @@
   "include": [
     "src/backend",
     "src/frontend",
-    "src/mcp_server"
+    "src/mcp_server",
+    "infra/scripts"
   ],
   "extraPaths": [
     "src/backend",

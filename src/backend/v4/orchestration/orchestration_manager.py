@@ -534,11 +534,20 @@ class OrchestrationManager:
                     elif event_type == "output":
                         executor_id = getattr(event, "executor_id", None)
                         output_data = event.data
-                        self.logger.info(
-                            "[OUTPUT] executor=%s data_type=%s",
-                            executor_id,
-                            type(output_data).__name__,
-                        )
+                        # Streaming AgentResponseUpdate chunks emit per-token —
+                        # log at DEBUG to avoid flooding INFO logs (hundreds per response).
+                        # Other output types (final results, etc.) keep INFO.
+                        _data_type_name = type(output_data).__name__
+                        if _data_type_name == "AgentResponseUpdate":
+                            self.logger.debug(
+                                "[OUTPUT] executor=%s data_type=%s",
+                                executor_id, _data_type_name,
+                            )
+                        else:
+                            self.logger.info(
+                                "[OUTPUT] executor=%s data_type=%s",
+                                executor_id, _data_type_name,
+                            )
 
                         # Streaming chunk from an agent executor.
                         # Only process chunks for agents that are within a formal

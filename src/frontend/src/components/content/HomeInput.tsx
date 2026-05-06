@@ -20,7 +20,8 @@ import ChatInput from "@/coral/modules/ChatInput";
 import InlineToaster, { useInlineToaster } from "../toast/InlineToaster";
 import PromptCard from "@/coral/components/PromptCard";
 import { Send } from "@/coral/imports/bundleicons";
-import { Clipboard20Regular } from "@fluentui/react-icons";
+import { Attach20Regular, Clipboard20Regular, Dismiss20Regular } from "@fluentui/react-icons";
+import { apiService } from "../../api/apiService";
 
 // Icon mapping function to convert string icons to FluentUI icons
 const getIconFromString = (
@@ -60,6 +61,25 @@ interface ExtendedQuickTask extends QuickTask {
 const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [input, setInput] = useState<string>("");
+  const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; file_id: string }>>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const result = await apiService.uploadChatFile(file);
+      setAttachedFiles(prev => [...prev, { name: file.name, file_id: result.file_id }]);
+    } catch (err) {
+      console.error("File upload failed:", err);
+    }
+    // Reset input so the same file can be re-selected
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const removeAttachedFile = (file_id: string) => {
+    setAttachedFiles(prev => prev.filter(f => f.file_id !== file_id));
+  };
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
@@ -102,8 +122,10 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
         const randomValues = crypto.getRandomValues(new Uint32Array(1));
         const sessionId = `chat_${Date.now()}_${randomValues[0]}`;
         const userMessage = input.trim();
+        const fileIds = attachedFiles.map(f => f.file_id);
 
         setInput("");
+        setAttachedFiles([]);
         if (textareaRef.current) {
           textareaRef.current.style.height = "auto";
         }
@@ -124,7 +146,7 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
           onRedirect: (planId) => { redirectPlan = planId; },
           onPlanCreated: (planId) => { redirectPlan = planId; },
           onError: (errorMsg) => { fullResponse = `Error: ${errorMsg}`; },
-        });
+        }, fileIds);
 
         dismissToast(id);
 
@@ -248,6 +270,50 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
             onEnter={handleSubmit}
             disabledChat={submitting}
           >
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.xlsx,.json,.txt,.pdf"
+              style={{ display: "none" }}
+              onChange={handleFileSelect}
+            />
+
+            {/* Attached file chips */}
+            {attachedFiles.length > 0 && (
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", padding: "4px 0" }}>
+                {attachedFiles.map(f => (
+                  <span
+                    key={f.file_id}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: "4px",
+                      background: "var(--colorNeutralBackground3)",
+                      borderRadius: "12px", padding: "2px 8px",
+                      fontSize: "12px", color: "var(--colorNeutralForeground1)",
+                    }}
+                  >
+                    📎 {f.name}
+                    <Button
+                      appearance="subtle"
+                      size="small"
+                      icon={<Dismiss20Regular />}
+                      onClick={() => removeAttachedFile(f.file_id)}
+                      style={{ minWidth: "auto", padding: "0", height: "16px", width: "16px" }}
+                    />
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Attach button */}
+            <Button
+              appearance="subtle"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={submitting}
+              icon={<Attach20Regular />}
+              aria-label="Attach file"
+            />
+
             <Button
               appearance="subtle"
               className="home-input-send-button"

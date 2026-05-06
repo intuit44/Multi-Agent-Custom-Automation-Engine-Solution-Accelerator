@@ -680,29 +680,9 @@ if [[ "$useCaseSelection" == "1" || "$useCaseSelection" == "all" || "$useCaseSel
     fi
     echo "Files uploaded successfully to blob storage."
 
-    # Run the Python script to index data
-    echo "Running the python script to index data for RFP Evaluation"
-    if $pythonCmd infra/scripts/index_datasets.py "$storageAccount" "$blobContainerForRFPSummary" "$aiSearch" "$aiSearchIndexForRFPSummary"; then
-        echo "Python script to index data for RFP Summary successfully executed."
-    else
-        echo "Error: Indexing python script execution failed for RFP Summary."
-        isSampleDataFailed=true
-    fi
-
-    if $pythonCmd infra/scripts/index_datasets.py "$storageAccount" "$blobContainerForRFPRisk" "$aiSearch" "$aiSearchIndexForRFPRisk"; then
-        echo "Python script to index data for RFP Risk successfully executed."
-    else
-        echo "Error: Indexing python script execution failed for RFP Risk."
-        isSampleDataFailed=true
-    fi
-
-    if $pythonCmd infra/scripts/index_datasets.py "$storageAccount" "$blobContainerForRFPCompliance" "$aiSearch" "$aiSearchIndexForRFPCompliance"; then
-        echo "Python script to index data for RFP Compliance successfully executed."
-    else
-        echo "Error: Indexing python script execution failed for RFP Compliance."
-        isSampleDataFailed=true
-    fi
-    echo "Python script to index data for RFP Evaluation successfully executed."
+    # Indexing is handled centrally by setup_search_pipeline.py at the end of this script.
+    # PDFs uploaded above will be indexed automatically by the continuous blob indexer (Step 6).
+    echo "RFP blobs uploaded — indexing will run via setup_search_pipeline.py."
 fi
 
 # Use Case 5 - Contract Compliance Review
@@ -743,29 +723,8 @@ if [[ "$useCaseSelection" == "5" || "$useCaseSelection" == "all" || "$useCaseSel
     fi
     echo "Files uploaded successfully to blob storage."
 
-    # Run the Python script to index data
-    echo "Running the python script to index data for Contract Compliance Review"
-    if $pythonCmd infra/scripts/index_datasets.py "$storageAccount" "$blobContainerForContractSummary" "$aiSearch" "$aiSearchIndexForContractSummary"; then
-        echo "Python script to index data for Contract Summary successfully executed."
-    else
-        echo "Error: Indexing python script execution failed for Contract Summary."
-        isSampleDataFailed=true
-    fi
-
-    if $pythonCmd infra/scripts/index_datasets.py "$storageAccount" "$blobContainerForContractRisk" "$aiSearch" "$aiSearchIndexForContractRisk"; then
-        echo "Python script to index data for Contract Risk successfully executed."
-    else
-        echo "Error: Indexing python script execution failed for Contract Risk."
-        isSampleDataFailed=true
-    fi
-
-    if $pythonCmd infra/scripts/index_datasets.py "$storageAccount" "$blobContainerForContractCompliance" "$aiSearch" "$aiSearchIndexForContractCompliance"; then
-        echo "Python script to index data for Contract Compliance successfully executed."
-    else
-        echo "Error: Indexing python script execution failed for Contract Compliance."
-        isSampleDataFailed=true
-    fi
-    echo "Python script to index data for Contract Compliance Review successfully executed."
+    # Indexing is handled centrally by setup_search_pipeline.py at the end of this script.
+    echo "Contract Compliance blobs uploaded — indexing will run via setup_search_pipeline.py."
 fi
 
 # Use Case 2 - Retail Customer Satisfaction
@@ -799,20 +758,22 @@ if [[ "$useCaseSelection" == "2" || "$useCaseSelection" == "all" || "$useCaseSel
     fi
     echo "Files uploaded successfully to blob storage."
 
-    # Run the Python script to index data
-    echo "Running the python script to index data for Retail Customer Satisfaction"
-    if ! $pythonCmd infra/scripts/index_datasets.py "$storageAccount" "retail-dataset-customer" "$aiSearch" "macae-retail-customer-index"; then
-        echo "Error: Indexing python script execution failed."
-        isSampleDataFailed=true
-        exit 1
-    fi
-    
-    if ! $pythonCmd infra/scripts/index_datasets.py "$storageAccount" "retail-dataset-order" "$aiSearch" "macae-retail-order-index"; then
-        echo "Error: Indexing python script execution failed."
-        isSampleDataFailed=true
-        exit 1
-    fi
-    echo "Python script to index data for Retail Customer Satisfaction successfully executed."
+    # Indexing is handled centrally by setup_search_pipeline.py at the end of this script.
+    echo "Retail blobs uploaded — indexing will run via setup_search_pipeline.py."
+fi
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Centralized AI Search pipeline configuration (replaces index_datasets.py)
+# Creates canonical schemas, vectorizers, semantic configs, and continuous
+# Blob/Cosmos indexers. Idempotent — safe to re-run.
+# ─────────────────────────────────────────────────────────────────────────
+echo "Configuring AI Search pipeline (canonical indices + continuous indexers)..."
+if (cd src/backend && .venv/bin/python ../../scripts/setup_search_pipeline.py); then
+    echo "AI Search pipeline configured successfully."
+else
+    echo "Error: AI Search pipeline configuration failed."
+    isSampleDataFailed=true
 fi
 
 

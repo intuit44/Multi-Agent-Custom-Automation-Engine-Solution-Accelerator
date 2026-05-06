@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(pip show *)",
-      "Bash(pkill -f \"uvicorn app:app\")"
+      "Bash(pkill -f \"uvicorn app:app\")",
+      "Bash(python -c ' *)"
     ]
   }
 }

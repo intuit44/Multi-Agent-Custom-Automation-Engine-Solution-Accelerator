@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
     Button,
     Tooltip,
@@ -41,31 +41,27 @@ const InspectorLink: React.FC = () => {
     const [status, setStatus] = useState<InspectorStatus | null>(null);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        const checkStatus = async () => {
-            try {
-                const response = await apiClient.get("/v4/mcp/inspector/status");
-                setStatus(response.data);
-            } catch {
-                setStatus({
-                    running: false,
-                    proxy_url: "http://localhost:16277",
-                    ui_url: "http://localhost:16274",
-                    ui_link:
-                        "http://localhost:16274/?transportType=streamable-http&url=http%3A%2F%2Flocalhost%3A9000%2Fmcp",
-                    message: "Inspector status unavailable",
-                });
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        checkStatus();
-
-        // Re-check every 30 seconds
-        const interval = setInterval(checkStatus, 30000);
-        return () => clearInterval(interval);
+    const checkStatus = useCallback(async () => {
+        try {
+            const response = await apiClient.get("/v4/mcp/inspector/status");
+            setStatus(response.data);
+        } catch {
+            setStatus({
+                running: false,
+                proxy_url: "http://localhost:16277",
+                ui_url: "http://localhost:16274",
+                ui_link:
+                    "http://localhost:16274/?transportType=streamable-http&url=http%3A%2F%2Flocalhost%3A9000%2Fmcp",
+                message: "Inspector status unavailable",
+            });
+        } finally {
+            setLoading(false);
+        }
     }, []);
+
+    useEffect(() => {
+        checkStatus();
+    }, [checkStatus]);
 
     const handleOpenInspector = () => {
         // Use ui_link from backend which already includes MCP_PROXY_AUTH_TOKEN

@@ -8,15 +8,18 @@ import {
   Tag,
   ToolbarDivider,
 } from "@fluentui/react-components";
+import { Attach20Regular, ChatDismiss20Regular, Dismiss20Regular, HeartRegular } from "@fluentui/react-icons";
 import { Copy, Send } from "../imports/bundleicons";
-import { ChatDismiss20Regular, HeartRegular } from "@fluentui/react-icons";
+import { apiClient } from "../../api/apiClient";
+import { APIService } from "../../api/apiService";
 import ChatInput from "./ChatInput";
 import WidgetFrame from "../components/WidgetFrame";
-import { apiClient } from "../../api/apiClient";
+import HeaderTools from "../components/Header/HeaderTools";
 import "./Chat.css";
 import "./prism-material-oceanic.css";
 // import { chatService } from "../services/chatService"; // TODO: Re-enable when chatService integration is complete
-import HeaderTools from "../components/Header/HeaderTools";
+
+const _apiService = new APIService();
 
 interface Message {
   role: string;
@@ -47,7 +50,8 @@ interface ChatProps {
   children?: React.ReactNode;
   onSendMessage?: (
     input: string,
-    history: Message[]
+    history: Message[],
+    fileIds?: string[]
   ) => AsyncIterable<MessageResponse> | Promise<MessageResponse>;
   onSaveMessage?: (
     userId: string,
@@ -76,9 +80,27 @@ const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [inputHeight, setInputHeight] = useState(0);
   const [, setAvailableWidgets] = useState<any[]>([]);
+  const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; file_id: string }>>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const result = await _apiService.uploadChatFile(file);
+      setAttachedFiles(prev => [...prev, { name: file.name, file_id: result.file_id }]);
+    } catch (err) {
+      console.error("File upload failed:", err);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const removeAttachedFile = (file_id: string) => {
+    setAttachedFiles(prev => prev.filter(f => f.file_id !== file_id));
+  };
 
   useImperativeHandle(ref, () => ({
     pushMessage: (msg) => setMessages((prev) => [...prev, { role: msg.role, content: msg.content, _meta: msg._meta }]),
@@ -173,13 +195,15 @@ const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
 
     const updatedMessages = [...messages, { role: "user", content: input }];
     setMessages(updatedMessages);
+    const currentFileIds = attachedFiles.map(f => f.file_id);
     setInput("");
+    setAttachedFiles([]);
     setIsTyping(true);
 
     try {
       if (onSendMessage) {
         setMessages([...updatedMessages, { role: "assistant", content: "" }]);
-        const response = onSendMessage(input, updatedMessages);
+        const response = onSendMessage(input, updatedMessages, currentFileIds.length > 0 ? currentFileIds : undefined);
 
         if (isAsyncIterable(response)) {
           for await (const chunk of response) {
@@ -336,8 +360,51 @@ const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
             value={input}
             onChange={setInput}
             onEnter={sendMessage}
-
           >
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.xlsx,.json,.txt,.pdf"
+              style={{ display: "none" }}
+              onChange={handleFileSelect}
+            />
+
+            {/* Attached file chips */}
+            {attachedFiles.length > 0 && (
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", padding: "4px 0" }}>
+                {attachedFiles.map(f => (
+                  <span
+                    key={f.file_id}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: "4px",
+                      background: "var(--colorNeutralBackground3)",
+                      borderRadius: "12px", padding: "2px 8px",
+                      fontSize: "12px", color: "var(--colorNeutralForeground1)",
+                    }}
+                  >
+                    📎 {f.name}
+                    <Button
+                      appearance="subtle"
+                      size="small"
+                      icon={<Dismiss20Regular />}
+                      onClick={() => removeAttachedFile(f.file_id)}
+                      style={{ minWidth: "auto", padding: "0", height: "16px", width: "16px" }}
+                    />
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Attach button */}
+            <Button
+              appearance="transparent"
+              onClick={() => fileInputRef.current?.click()}
+              icon={<Attach20Regular />}
+              aria-label="Attach file"
+              disabled={isTyping}
+            />
+
             <Button
               appearance="transparent"
               onClick={sendMessage}
@@ -355,9 +422,7 @@ const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
                   icon={<ChatDismiss20Regular />}
                   aria-label="Clear chat"
                   disabled={isTyping || messages.length === 0} />
-
               </HeaderTools>
-
             )}
 
           </ChatInput>

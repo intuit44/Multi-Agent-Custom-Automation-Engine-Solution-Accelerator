@@ -6,6 +6,7 @@ Handles Azure OpenAI, MCP, and environment setup (agent_framework version).
 import asyncio
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from agent_framework import ChatOptions
@@ -248,11 +249,39 @@ class OrchestrationConfig:
 
 
 class ConnectionConfig:
-    """Connection manager for WebSocket connections."""
+    """Connection manager for WebSocket connections.
+
+    Includes a short-lived pending buffer to handle the race condition where
+    orchestration emits status updates before the frontend WebSocket connects.
+    Messages are buffered per user_id and flushed on add_connection.
+    """
+
+    # Buffer config — kept conservative to avoid memory bloat
+    PENDING_TTL_SECONDS = 60      # drop messages older than this
+    PENDING_MAX_PER_USER = 100    # cap per-user buffer to prevent runaway
 
     def __init__(self):
         self.connections: Dict[str, WebSocket] = {}
         self.user_to_process: Dict[str, str] = {}
+        # Race-condition buffer: messages emitted while WS isn't connected yet.
+        # Schema: user_id -> list[(timestamp_float, message, message_type)]
+        self.pending_messages: Dict[str, list] = {}
+
+    def _prune_pending(self, user_id: str) -> None:
+        """Drop expired buffered messages for a single user (TTL-based)."""
+        bucket = self.pending_messages.get(user_id)
+        if not bucket:
+            return
+        now = time.time()
+        fresh = [
+            (ts, m, mt)
+            for ts, m, mt in bucket
+            if now - ts < self.PENDING_TTL_SECONDS
+        ]
+        if fresh:
+            self.pending_messages[user_id] = fresh
+        else:
+            self.pending_messages.pop(user_id, None)
 
     def add_connection(
         self, process_id: str, connection: WebSocket, user_id: Optional[str] = None
@@ -295,6 +324,21 @@ class ConnectionConfig:
                 process_id,
                 user_id,
             )
+
+            # Flush any pending messages buffered before WS connected
+            # (race-condition fix: orchestration emits before frontend connects)
+            self._prune_pending(user_id)
+            pending = self.pending_messages.pop(user_id, [])
+            if pending:
+                logger.info(
+                    "Flushing %d pending message(s) for user %s on WS connect",
+                    len(pending),
+                    user_id,
+                )
+                for _ts, msg, mtype in pending:
+                    asyncio.create_task(
+                        self.send_status_update_async(msg, user_id, mtype)
+                    )
         else:
             logger.info("WebSocket connection added for process: %s", process_id)
 
@@ -340,9 +384,17 @@ class ConnectionConfig:
 
         process_id = self.user_to_process.get(user_id)
         if not process_id:
-            logger.warning("No active WebSocket process found for user ID: %s", user_id)
+            # WS not connected yet — buffer instead of dropping.
+            # Will be flushed on next add_connection for this user_id.
+            self._prune_pending(user_id)
+            bucket = self.pending_messages.setdefault(user_id, [])
+            if len(bucket) >= self.PENDING_MAX_PER_USER:
+                bucket.pop(0)  # drop oldest, keep window size
+            bucket.append((time.time(), message, message_type))
             logger.debug(
-                "Available user mappings: %s", list(self.user_to_process.keys())
+                "Buffered WS message for user %s (no active WS yet, %d pending)",
+                user_id,
+                len(bucket),
             )
             return
 

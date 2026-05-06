@@ -728,29 +728,8 @@ if($useCaseSelection -eq "1" -or $useCaseSelection -eq "all" -or $useCaseSelecti
     }
     Write-Host "Files uploaded successfully to blob storage."
 
-    # Run the Python script to index data
-    Write-Host "Running the python script to index data for RFP Evaluation"
-    $process = Start-Process -FilePath $pythonCmd -ArgumentList "infra/scripts/index_datasets.py", $storageAccount, $blobContainerForRFPSummary , $aiSearch, $aiSearchIndexForRFPSummary -Wait -NoNewWindow -PassThru
-
-    if ($process.ExitCode -ne 0) {
-        Write-Host "Error: Indexing python script execution failed."
-        $isSampleDataFailed = $true
-    }
-
-    $process = Start-Process -FilePath $pythonCmd -ArgumentList "infra/scripts/index_datasets.py", $storageAccount, $blobContainerForRFPRisk , $aiSearch, $aiSearchIndexForRFPRisk -Wait -NoNewWindow -PassThru
-
-    if ($process.ExitCode -ne 0) {
-        Write-Host "Error: Indexing python script execution failed."
-        $isSampleDataFailed = $true
-    }
-
-    $process = Start-Process -FilePath $pythonCmd -ArgumentList "infra/scripts/index_datasets.py", $storageAccount, $blobContainerForRFPCompliance , $aiSearch, $aiSearchIndexForRFPCompliance -Wait -NoNewWindow -PassThru
-
-    if ($process.ExitCode -ne 0) {
-        Write-Host "Error: Indexing python script execution failed."
-        $isSampleDataFailed = $true
-    }
-    Write-Host "Python script to index data for RFP Evaluation successfully executed."
+    # Indexing is handled centrally by setup_search_pipeline.py at the end of this script.
+    Write-Host "RFP blobs uploaded — indexing will run via setup_search_pipeline.py."
 }
 
 
@@ -802,29 +781,8 @@ if($useCaseSelection -eq "5" -or $useCaseSelection -eq "all" -or $useCaseSelecti
     }
     Write-Host "Files uploaded successfully to blob storage."
 
-    # Run the Python script to index data
-    Write-Host "Running the python script to index data for Contract Compliance Review"
-    $process = Start-Process -FilePath $pythonCmd -ArgumentList "infra/scripts/index_datasets.py", $storageAccount, $blobContainerForContractSummary , $aiSearch, $aiSearchIndexForContractSummary -Wait -NoNewWindow -PassThru
-
-    if ($process.ExitCode -ne 0) {
-        Write-Host "Error: Indexing python script execution failed."
-        $isSampleDataFailed = $true
-    }
-
-    $process = Start-Process -FilePath $pythonCmd -ArgumentList "infra/scripts/index_datasets.py", $storageAccount, $blobContainerForContractRisk , $aiSearch, $aiSearchIndexForContractRisk -Wait -NoNewWindow -PassThru
-
-    if ($process.ExitCode -ne 0) {
-        Write-Host "Error: Indexing python script execution failed."
-        $isSampleDataFailed = $true
-    }
-
-    $process = Start-Process -FilePath $pythonCmd -ArgumentList "infra/scripts/index_datasets.py", $storageAccount, $blobContainerForContractCompliance , $aiSearch, $aiSearchIndexForContractCompliance -Wait -NoNewWindow -PassThru
-
-    if ($process.ExitCode -ne 0) {
-        Write-Host "Error: Indexing python script execution failed."
-        $isSampleDataFailed = $true
-    }
-    Write-Host "Python script to index data for Contract Compliance Review successfully executed."
+    # Indexing is handled centrally by setup_search_pipeline.py at the end of this script.
+    Write-Host "Contract Compliance blobs uploaded — indexing will run via setup_search_pipeline.py."
 }
 
 if($useCaseSelection -eq "2" -or $useCaseSelection -eq "all" -or $useCaseSelection -eq "6") {
@@ -865,24 +823,30 @@ if($useCaseSelection -eq "2" -or $useCaseSelection -eq "all" -or $useCaseSelecti
     }
     Write-Host "Files uploaded successfully to blob storage."
 
-    # Run the Python script to index data
-    Write-Host "Running the python script to index data for Retail Customer Satisfaction"
-    $process = Start-Process -FilePath $pythonCmd -ArgumentList "infra/scripts/index_datasets.py", $storageAccount, "retail-dataset-customer", $aiSearch, "macae-retail-customer-index" -Wait -NoNewWindow -PassThru
-
-    if ($process.ExitCode -ne 0) {
-        Write-Host "Error: Indexing python script execution failed."
-        $isSampleDataFailed = $true
-        exit 1
-    }
-    $process = Start-Process -FilePath $pythonCmd -ArgumentList "infra/scripts/index_datasets.py", $storageAccount, "retail-dataset-order" , $aiSearch, "macae-retail-order-index" -Wait -NoNewWindow -PassThru
-
-    if ($process.ExitCode -ne 0) {
-        Write-Host "Error: Indexing python script execution failed."
-        $isSampleDataFailed = $true
-        exit 1
-    }
-    Write-Host "Python script to index data for Retail Customer Satisfaction successfully executed."
+    # Indexing is handled centrally by setup_search_pipeline.py at the end of this script.
+    Write-Host "Retail blobs uploaded — indexing will run via setup_search_pipeline.py."
 }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Centralized AI Search pipeline configuration (replaces index_datasets.py)
+# Creates canonical schemas, vectorizers, semantic configs, and continuous
+# Blob/Cosmos indexers. Idempotent — safe to re-run.
+# ─────────────────────────────────────────────────────────────────────────
+Write-Host "Configuring AI Search pipeline (canonical indices + continuous indexers)..."
+Push-Location "src/backend"
+try {
+    $pipelineProcess = Start-Process -FilePath ".venv/bin/python" -ArgumentList "../../scripts/setup_search_pipeline.py" -Wait -NoNewWindow -PassThru
+    if ($pipelineProcess.ExitCode -ne 0) {
+        Write-Host "Error: AI Search pipeline configuration failed."
+        $isSampleDataFailed = $true
+    } else {
+        Write-Host "AI Search pipeline configured successfully."
+    }
+} finally {
+    Pop-Location
+}
+
 
 if ($isTeamConfigFailed -or $isSampleDataFailed) {
     Write-Host "`nOne or more tasks failed. Please check the error messages above."

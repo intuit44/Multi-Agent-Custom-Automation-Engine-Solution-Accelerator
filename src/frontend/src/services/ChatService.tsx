@@ -44,10 +44,12 @@ export class ChatService {
         message: string,
         sessionId: string | undefined,
         callbacks: StreamCallbacks,
+        fileIds?: string[],
     ): Promise<void> {
         const request: ChatMessageRequest = {
             session_id: sessionId || '',
             message,
+            ...(fileIds && fileIds.length > 0 ? { file_ids: fileIds } : {}),
         };
         await apiService.sendChatMessageStream(request, callbacks);
     }
@@ -112,6 +114,7 @@ export class ChatService {
         sessionId: string | undefined,
         onPlanCreated?: (planId: string) => void,
         onSessionId?: (sid: string) => void,
+        fileIds?: string[],
     ): AsyncIterable<string> {
         return {
             [Symbol.asyncIterator](): AsyncIterator<string> {
@@ -139,7 +142,7 @@ export class ChatService {
                     onPlanCreated: (planId) => { onPlanCreated?.(planId); finish(); },
                     onDone:        () => finish(),
                     onError:       (msg) => fail(new Error(msg)),
-                }).catch(fail);
+                }, fileIds).catch(fail);
 
                 return {
                     next(): Promise<IteratorResult<string>> {

@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-
 # ---------------------------------------------------------------------------
 # Enumerations
 # ---------------------------------------------------------------------------
@@ -225,7 +224,7 @@ class TeamConfiguration(BaseDataModel):
 
     team_id: str
     data_type: Literal[DataType.team_config] = DataType.team_config
-    session_id: str  # partition key
+    session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # partition key
     name: str
     status: str
     created: str
@@ -315,6 +314,7 @@ class ChatMessageRequest(BaseModel):
     session_id: str = ""
     message: str
     model: Optional[str] = None  # Optional model selector
+    file_ids: list[str] = []  # Foundry file IDs attached by the user (code_interpreter)
 
 
 class ChatMessageResponse(BaseModel):

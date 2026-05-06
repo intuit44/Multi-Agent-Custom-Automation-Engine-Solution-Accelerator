@@ -92,8 +92,6 @@ class FoundryAgentTemplate(AzureAgentBase):
         self._use_azure_search = self._is_azure_search_requested()
         self.use_reasoning = use_reasoning
 
-        # Ephemeral agents (e.g. ChatMCPAgent) skip Foundry registration
-        # to avoid 404 errors from create_version on every request.
         self._ephemeral = ephemeral
         self._user_id = user_id
         self._session_id = session_id
@@ -396,8 +394,22 @@ class FoundryAgentTemplate(AzureAgentBase):
     # -------------------------
     # Invocation (streaming)
     # -------------------------
-    async def invoke(self, prompt: str, session_id: str = "", user_id: str = ""):
-        """Stream model output for a prompt, with session context."""
+    async def invoke(
+        self,
+        prompt: str,
+        session_id: str = "",
+        user_id: str = "",
+        file_ids: list[str] | None = None,
+    ):
+        """Stream model output for a prompt, with session context.
+
+        Args:
+            prompt: The user message.
+            session_id: Optional session ID for history loading.
+            user_id: Optional user ID for history loading.
+            file_ids: Optional list of Foundry file IDs (uploaded via /chat/upload-file).
+                      Files are attached to the thread message with code_interpreter access.
+        """
         if not self._agent:
             raise RuntimeError("Agent not initialized; call open() first.")
 
@@ -421,10 +433,31 @@ class FoundryAgentTemplate(AzureAgentBase):
             except Exception:
                 pass  # No history available, proceed with just the prompt
 
-        messages.append(Message(role="user", text=prompt))
+        if file_ids:
+            # File-attachment flow: build a user Message that combines the text
+            # prompt with hosted-file references via Content.from_hosted_file.
+            # agent_framework translates this into the Responses API's input_file
+            # inputs natively, so the published agent (with code_interpreter
+            # enabled in Foundry) can read and analyze the attached files —
+            # same behavior as the Foundry playground.
+            from agent_framework import Content
 
-        async for update in self._agent.run(messages, stream=True):
-            yield update
+            user_contents: list = [Content.from_text(prompt)]
+            for fid in file_ids:
+                user_contents.append(Content.from_hosted_file(file_id=fid))
+            messages.append(Message(role="user", contents=user_contents))
+
+            self.logger.info(
+                "Invoking agent with %d hosted file(s): %s",
+                len(file_ids),
+                file_ids,
+            )
+            async for update in self._agent.run(messages, stream=True):
+                yield update
+        else:
+            messages.append(Message(role="user", text=prompt))
+            async for update in self._agent.run(messages, stream=True):
+                yield update
 
     # -------------------------
     # Cleanup (optional override if you want to delete server-side agent)

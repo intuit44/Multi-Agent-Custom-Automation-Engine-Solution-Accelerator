@@ -437,7 +437,7 @@ const ChatPage: React.FC = () => {
     // ── onSendMessage — maneja chat normal + clarificaciones ─────────────────
     // Chat.tsx consume esto como AsyncIterable<string>
     const handleSendMessage = useCallback(
-        async function* (userInput: string, _history: any[]) {
+        async function* (userInput: string, _history: any[], fileIds?: string[]) {
             if (!userInput.trim()) return;
 
             // Si hay clarificación pendiente → interceptar
@@ -477,6 +477,7 @@ const ChatPage: React.FC = () => {
                     // Refresh panel after first message so session appears in Recent Chats
                     setReloadLeftList(true);
                 },
+                fileIds,
             );
         },
         [clarificationMessage, planData, planApprovalRequest, sessionId, showToast, dismissToast, activatePlanMode],

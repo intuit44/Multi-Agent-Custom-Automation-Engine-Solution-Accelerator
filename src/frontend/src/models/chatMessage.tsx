@@ -8,6 +8,7 @@ export interface ChatMessageRequest {
     session_id?: string;
     message: string;
     model?: string;
+    file_ids?: string[];  // Foundry file IDs from /v4/chat/upload-file
 }
 
 /** Response from POST /v4/chat/message */

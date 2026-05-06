@@ -1,5 +1,24 @@
 #!/usr/bin/env python3
-"""Index blobs from Storage into Azure AI Search using the canonical MACAE schema.
+"""DEPRECATED for production deploys — manual / debug use only.
+
+The official deploy flow now uses scripts/setup_search_pipeline.py which:
+  - Creates canonical schemas (id filterable, vectorizer, source_blob, indexed_at)
+  - Sets up Blob → AI Search continuous indexers (Step 6 — managed pipeline
+    that replaces this script's one-shot upload behaviour)
+  - Sets up Cosmos → AI Search continuous indexer for chat history (Step 5)
+
+The continuous blob indexer handles PDF/DOCX/CSV/JSON parsing natively and
+generates content_vector via Azure OpenAI Embedding Skill at index time.
+Once configured (via setup_search_pipeline.py Step 6), any blob uploaded to
+the container is auto-indexed in <15 min without re-running this script.
+
+This script remains useful for:
+  - Force-reingest of a specific container during testing
+  - Local development before infra is provisioned
+  - Debugging schema/extraction issues on individual blobs
+
+NOT to be invoked from selecting_team_config_and_data.{sh,ps1} anymore —
+those scripts now call setup_search_pipeline.py centrally.
 
 Schema creado (idéntico a build_doc_index_schema en setup_search_pipeline.py):
     id (key, filterable, retrievable)

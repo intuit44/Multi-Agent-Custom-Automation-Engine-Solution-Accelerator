@@ -60,14 +60,23 @@ COSMOS_DATABASE = os.getenv("COSMOSDB_DATABASE", "macae")
 COSMOS_CONNECTION_STRING = os.getenv("COSMOSDB_CONNECTION_STRING", "")
 COSMOS_CHAT_CONTAINER = "chat_sessions"
 
+# Storage (Step 6 — Blob → Search continuous indexers)
+AZURE_STORAGE_ACCOUNT_NAME = os.getenv("AZURE_STORAGE_ACCOUNT_NAME", "")
+AZURE_SUBSCRIPTION_ID = os.getenv("AZURE_SUBSCRIPTION_ID", "")
+AZURE_RESOURCE_GROUP = os.getenv("AZURE_RESOURCE_GROUP", "")
+
 SEARCH_API = "2024-07-01"
 OPENAI_API = "2024-10-21"
 
-# Indexer continuo
+# Indexer continuo Cosmos → chat-history-index
 CHAT_DATASOURCE_NAME = "chat-sessions-cosmos-ds"
 CHAT_SKILLSET_NAME = "chat-history-skillset"
 CHAT_INDEXER_NAME = "chat-history-indexer"
 CHAT_INDEXER_SCHEDULE_INTERVAL = "PT5M"  # cada 5 minutos
+
+# Indexers continuos Blob → doc indices (Step 6)
+DOC_BLOB_SKILLSET_NAME = "doc-blob-skillset"
+DOC_BLOB_INDEXER_SCHEDULE_INTERVAL = "PT15M"  # cada 15 minutos
 
 EXISTING_INDICES = [
     "contract-compliance-doc-index",
@@ -85,6 +94,23 @@ NEW_DOC_INDICES = [
     "macae-hr-knowledge-index",
     "macae-marketing-knowledge-index",
 ]
+
+# Mapping índice ↔ blob container (Step 6).
+# Los nombres de container deben coincidir con infra/main.bicep.
+DOC_INDEX_BLOB_MAP = {
+    # 8 existentes
+    "contract-compliance-doc-index": "contract-compliance-dataset",
+    "contract-risk-doc-index": "contract-risk-dataset",
+    "contract-summary-doc-index": "contract-summary-dataset",
+    "macae-rfp-compliance-index": "rfp-compliance-dataset",
+    "macae-rfp-risk-index": "rfp-risk-dataset",
+    "macae-rfp-summary-index": "rfp-summary-dataset",
+    "macae-retail-customer-index": "retail-dataset-customer",
+    "macae-retail-order-index": "retail-dataset-order",
+    # 2 nuevos (HR / Marketing) — containers aún por crear vía azd up
+    "macae-hr-knowledge-index": "hr-knowledge-dataset",
+    "macae-marketing-knowledge-index": "marketing-knowledge-dataset",
+}
 
 # ── Schema templates ─────────────────────────────────────────────
 
@@ -465,6 +491,32 @@ class AzureClients:
         async with self._session.post(url, headers=headers) as resp:
             return resp.status in (202, 204)
 
+    async def check_blob_container_exists(
+        self, storage_account: str, container_name: str
+    ) -> bool:
+        """HEAD blob container vía managed identity (Storage Blob Data Reader).
+
+        Returns True si existe (200), False si no existe o sin acceso (404/403).
+        """
+        token = await self.credential.get_token("https://storage.azure.com/.default")
+        headers = {
+            "Authorization": f"Bearer {token.token}",
+            "x-ms-version": "2021-08-06",
+        }
+        url = (
+            f"https://{storage_account}.blob.core.windows.net/"
+            f"{container_name}?restype=container"
+        )
+        async with self._session.head(url, headers=headers) as resp:
+            if resp.status == 200:
+                return True
+            if resp.status not in (404, 403):
+                logger.warning(
+                    "    Container check returned HTTP %s for %s/%s",
+                    resp.status, storage_account, container_name,
+                )
+            return False
+
     # ── Embedding generation ─────────────────────────────────────
 
     async def generate_embeddings(
@@ -576,7 +628,11 @@ async def migrate_doc_indices_to_canonical(clients: AzureClients) -> int:
         # Sanitizar: quitar @search.* y content_vector (se regenera en Step 3)
         sanitized: List[Dict[str, Any]] = []
         for d in docs:
-            clean = {k: v for k, v in d.items() if not k.startswith("@") and k != "content_vector"}
+            clean = {
+                k: v
+                for k, v in d.items()
+                if not k.startswith("@") and k != "content_vector"
+            }
             if "id" in clean:
                 clean["@search.action"] = "mergeOrUpload"
                 sanitized.append(clean)
@@ -592,7 +648,10 @@ async def migrate_doc_indices_to_canonical(clients: AzureClients) -> int:
 
         if sanitized:
             if await clients.upload_docs(idx_name, sanitized):
-                logger.info("    ✅ Migrated and re-uploaded %d docs (sin vector)", len(sanitized))
+                logger.info(
+                    "    ✅ Migrated and re-uploaded %d docs (sin vector)",
+                    len(sanitized),
+                )
             else:
                 logger.error("    ❌ Re-upload failed for %s", idx_name)
                 continue
@@ -693,7 +752,9 @@ async def create_chat_history_index(clients: AzureClients) -> bool:
 
         if updated or needs_semantic_update:
             if await clients.put_index("chat-history-index", existing):
-                logger.info("  ✅ Updated chat-history-index (title/vectorizer/semantic)")
+                logger.info(
+                    "  ✅ Updated chat-history-index (title/vectorizer/semantic)"
+                )
                 return True
             logger.error("  ❌ Failed to update chat-history-index")
             return False
@@ -967,8 +1028,17 @@ def build_chat_indexer() -> dict:
     }
 
 
-async def setup_chat_indexer(clients: AzureClients) -> bool:
-    """Crea/actualiza DataSource + Skillset + Indexer para chat-history-index."""
+async def setup_chat_indexer(clients: AzureClients) -> tuple[bool, str]:
+    """Crea/actualiza DataSource + Skillset + Indexer para chat-history-index.
+
+    Returns:
+        (True, "") on success.
+        (False, reason) on failure, where reason is one of:
+            "no_connection_string" — COSMOSDB_CONNECTION_STRING not set
+            "datasource_failed"   — PUT datasource returned an error
+            "skillset_failed"     — PUT skillset returned an error
+            "indexer_failed"      — PUT indexer returned an error
+    """
     if not COSMOS_CONNECTION_STRING:
         logger.warning(
             "  ⚠️  COSMOSDB_CONNECTION_STRING no está en .env — saltando indexer continuo."
@@ -976,19 +1046,19 @@ async def setup_chat_indexer(clients: AzureClients) -> bool:
         logger.warning(
             "      Sin esto el chat-history-index depende solo del push fire-and-forget."
         )
-        return False
+        return False, "no_connection_string"
 
     logger.info("  Creando DataSource: %s", CHAT_DATASOURCE_NAME)
     if not await clients.put_resource(
         "datasources", CHAT_DATASOURCE_NAME, build_chat_datasource()
     ):
-        return False
+        return False, "datasource_failed"
 
     logger.info("  Creando Skillset: %s", CHAT_SKILLSET_NAME)
     if not await clients.put_resource(
         "skillsets", CHAT_SKILLSET_NAME, build_chat_skillset()
     ):
-        return False
+        return False, "skillset_failed"
 
     logger.info(
         "  Creando Indexer: %s (schedule=%s)",
@@ -998,7 +1068,7 @@ async def setup_chat_indexer(clients: AzureClients) -> bool:
     if not await clients.put_resource(
         "indexers", CHAT_INDEXER_NAME, build_chat_indexer()
     ):
-        return False
+        return False, "indexer_failed"
 
     logger.info("  Disparando primera ejecución del indexer...")
     if await clients.run_indexer(CHAT_INDEXER_NAME):
@@ -1008,7 +1078,215 @@ async def setup_chat_indexer(clients: AzureClients) -> bool:
             "  ⚠️  No se pudo disparar el indexer manualmente (correrá según schedule)"
         )
 
-    return True
+    return True, ""
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Step 6: Blob → Search continuous indexers (10 doc indices)
+# ═══════════════════════════════════════════════════════════════════
+#
+# Reemplaza operacionalmente a infra/scripts/index_datasets.py:
+#   - Datasource managed-identity por container (10 total)
+#   - Skillset compartido con AzureOpenAIEmbeddingSkill
+#   - Indexer con field mappings al schema canonical (id, title, content,
+#     source_blob, indexed_at, content_vector)
+#   - Schedule PT15M, parsing nativo de PDF/DOCX/CSV/JSON/MD/HTML/TXT
+#
+# Idempotente: PUT actualiza recursos existentes. Containers ausentes se
+# saltan con INFO (caso típico: HR/Marketing antes del azd up que los crea).
+
+
+def build_blob_datasource(
+    idx_name: str, container_name: str, storage_resource_id: str
+) -> dict:
+    """Datasource Azure Blob usando managed identity vía ResourceId.
+
+    El Search service necesita rol 'Storage Blob Data Reader' sobre la cuenta.
+    """
+    return {
+        "name": f"{idx_name}-blob-ds",
+        "description": f"Blob source for {idx_name} ({container_name})",
+        "type": "azureblob",
+        "credentials": {
+            "connectionString": f"ResourceId={storage_resource_id};"
+        },
+        "container": {"name": container_name},
+        "dataChangeDetectionPolicy": {
+            "@odata.type":
+                "#Microsoft.Azure.Search.HighWaterMarkChangeDetectionPolicy",
+            "highWaterMarkColumnName": "metadata_storage_last_modified",
+        },
+        "dataDeletionDetectionPolicy": {
+            "@odata.type":
+                "#Microsoft.Azure.Search.NativeBlobSoftDeleteDeletionDetectionPolicy",
+        },
+    }
+
+
+def build_doc_blob_skillset() -> dict:
+    """Skillset compartido para los 10 blob indexers — AzureOpenAIEmbeddingSkill.
+
+    El parsing de PDF/DOCX/etc. lo hace el indexer de forma nativa
+    (parsingMode='default') antes de invocar el skillset.
+    """
+    return {
+        "name": DOC_BLOB_SKILLSET_NAME,
+        "description":
+            "Shared skillset: embed /document/content vía Azure OpenAI",
+        "skills": [
+            {
+                "@odata.type":
+                    "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+                "name": "content-embedding",
+                "description": "Generate content_vector from extracted blob text",
+                "context": "/document",
+                "resourceUri": OPENAI_ENDPOINT,
+                "deploymentId": EMBEDDING_DEPLOYMENT,
+                "modelName": EMBEDDING_DEPLOYMENT,
+                "dimensions": EMBEDDING_DIMS,
+                "inputs": [
+                    {"name": "text", "source": "/document/content"},
+                ],
+                "outputs": [
+                    {"name": "embedding", "targetName": "content_vector"},
+                ],
+            }
+        ],
+    }
+
+
+def build_blob_indexer(idx_name: str) -> dict:
+    """Indexer blob → canonical doc index. PT15M schedule, parsing nativo."""
+    return {
+        "name": f"{idx_name}-blob-indexer",
+        "description": f"Continuous blob ingestion for {idx_name}",
+        "dataSourceName": f"{idx_name}-blob-ds",
+        "targetIndexName": idx_name,
+        "skillsetName": DOC_BLOB_SKILLSET_NAME,
+        "schedule": {"interval": DOC_BLOB_INDEXER_SCHEDULE_INTERVAL},
+        "parameters": {
+            "batchSize": 10,
+            "maxFailedItems": 5,
+            "maxFailedItemsPerBatch": 2,
+            "configuration": {
+                "parsingMode": "default",
+                "dataToExtract": "contentAndMetadata",
+                "indexedFileNameExtensions":
+                    ".pdf,.docx,.txt,.md,.csv,.json,.html",
+                "failOnUnsupportedContentType": False,
+                "failOnUnprocessableDocument": False,
+            },
+        },
+        "fieldMappings": [
+            {
+                "sourceFieldName": "metadata_storage_path",
+                "targetFieldName": "id",
+                "mappingFunction": {"name": "base64Encode"},
+            },
+            {
+                "sourceFieldName": "metadata_storage_name",
+                "targetFieldName": "title",
+            },
+            {
+                "sourceFieldName": "metadata_storage_name",
+                "targetFieldName": "source_blob",
+            },
+            {
+                "sourceFieldName": "metadata_storage_last_modified",
+                "targetFieldName": "indexed_at",
+            },
+        ],
+        "outputFieldMappings": [
+            {
+                "sourceFieldName": "/document/content_vector",
+                "targetFieldName": "content_vector",
+            },
+        ],
+    }
+
+
+async def setup_blob_indexers(clients: AzureClients) -> tuple[int, int, int]:
+    """Configura datasources + indexers para los 10 doc indices.
+
+    Returns:
+        (configured, skipped_no_container, failed)
+    """
+    if not all([
+        AZURE_STORAGE_ACCOUNT_NAME,
+        AZURE_SUBSCRIPTION_ID,
+        AZURE_RESOURCE_GROUP,
+    ]):
+        logger.warning(
+            "  ⚠️  AZURE_STORAGE_ACCOUNT_NAME / AZURE_SUBSCRIPTION_ID / "
+            "AZURE_RESOURCE_GROUP no están en .env — saltando Step 6."
+        )
+        logger.warning(
+            "      Obtén los valores con: azd env get-values | grep -E "
+            "'AZURE_(STORAGE_ACCOUNT_NAME|SUBSCRIPTION_ID|RESOURCE_GROUP)'"
+        )
+        return 0, len(DOC_INDEX_BLOB_MAP), 0
+
+    storage_resource_id = (
+        f"/subscriptions/{AZURE_SUBSCRIPTION_ID}"
+        f"/resourceGroups/{AZURE_RESOURCE_GROUP}"
+        f"/providers/Microsoft.Storage/storageAccounts/{AZURE_STORAGE_ACCOUNT_NAME}"
+    )
+
+    # Skillset compartido — crear/actualizar una sola vez
+    logger.info("  Creando skillset compartido: %s", DOC_BLOB_SKILLSET_NAME)
+    if not await clients.put_resource(
+        "skillsets", DOC_BLOB_SKILLSET_NAME, build_doc_blob_skillset()
+    ):
+        logger.error("  ❌ Skillset creation failed — abortando Step 6")
+        return 0, 0, len(DOC_INDEX_BLOB_MAP)
+
+    configured = 0
+    skipped = 0
+    failed = 0
+
+    for idx_name, container_name in DOC_INDEX_BLOB_MAP.items():
+        logger.info("  %s ← %s", idx_name, container_name)
+
+        # 1. Container existence check (managed identity con Storage Blob Data Reader)
+        exists = await clients.check_blob_container_exists(
+            AZURE_STORAGE_ACCOUNT_NAME, container_name
+        )
+        if not exists:
+            logger.info(
+                "    ℹ️  Container '%s' no existe — skipped "
+                "(corre `azd up` para crearlo y re-ejecuta este script)",
+                container_name,
+            )
+            skipped += 1
+            continue
+
+        # 2. Datasource
+        ds_body = build_blob_datasource(
+            idx_name, container_name, storage_resource_id
+        )
+        if not await clients.put_resource("datasources", ds_body["name"], ds_body):
+            logger.error("    ❌ Datasource %s failed", ds_body["name"])
+            failed += 1
+            continue
+
+        # 3. Indexer
+        ix_body = build_blob_indexer(idx_name)
+        if not await clients.put_resource("indexers", ix_body["name"], ix_body):
+            logger.error("    ❌ Indexer %s failed", ix_body["name"])
+            failed += 1
+            continue
+
+        # 4. Trigger primera corrida (idempotente — incremental por watermark)
+        if await clients.run_indexer(ix_body["name"]):
+            logger.info("    ✅ %s configurado y disparado", ix_body["name"])
+        else:
+            logger.warning(
+                "    ⚠️  %s creado pero no se disparó (correrá según schedule)",
+                ix_body["name"],
+            )
+        configured += 1
+
+    return configured, skipped, failed
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1041,7 +1319,9 @@ async def main():
         logger.info("── Step 0: Migrate doc indices to canonical schema ───")
         migrated = await migrate_doc_indices_to_canonical(clients)
         total_doc_indices = len(EXISTING_INDICES) + len(NEW_DOC_INDICES)
-        logger.info("Result: %d/%d doc indices canonical\n", migrated, total_doc_indices)
+        logger.info(
+            "Result: %d/%d doc indices canonical\n", migrated, total_doc_indices
+        )
 
         # Step 1
         logger.info("── Step 1: Upgrade existing indices ──────────────────")
@@ -1065,8 +1345,18 @@ async def main():
 
         # Step 5
         logger.info("── Step 5: DataSource + Indexer (Cosmos→chat-history) ─")
-        indexer_ok = await setup_chat_indexer(clients)
+        indexer_ok, indexer_fail_reason = await setup_chat_indexer(clients)
         logger.info("")
+
+        # Step 6
+        logger.info("── Step 6: Blob → Search continuous indexers (10 docs) ─")
+        blob_configured, blob_skipped, blob_failed = await setup_blob_indexers(
+            clients
+        )
+        logger.info(
+            "Result: %d configured, %d skipped (no container), %d failed\n",
+            blob_configured, blob_skipped, blob_failed,
+        )
 
         # Summary
         logger.info("=" * 60)
@@ -1081,11 +1371,21 @@ async def main():
             "  Total indices:         %d",
             total_doc_indices + (1 if created else 0),
         )
+        _indexer_fail_messages = {
+            "no_connection_string": "skipped (no COSMOSDB_CONNECTION_STRING)",
+            "datasource_failed": "❌ failed creating datasource",
+            "skillset_failed": "❌ failed creating skillset",
+            "indexer_failed": "❌ failed creating indexer",
+        }
         logger.info(
-            "  Continuous indexer:   %s",
+            "  Cosmos indexer:       %s",
             "✅ configured"
             if indexer_ok
-            else "⚠️  skipped (no COSMOSDB_CONNECTION_STRING)",
+            else f"⚠️  {_indexer_fail_messages.get(indexer_fail_reason, indexer_fail_reason)}",
+        )
+        logger.info(
+            "  Blob indexers:        %d configured, %d skipped, %d failed",
+            blob_configured, blob_skipped, blob_failed,
         )
         logger.info("=" * 60)
         logger.info("")
@@ -1100,10 +1400,16 @@ async def main():
             "  3. Both MCP and conversational agents now use hybrid search for context"
         )
         if not indexer_ok:
-            logger.warning(
-                "  ⚠️  Set COSMOSDB_CONNECTION_STRING in .env and re-run to enable "
-                "the continuous indexer (Step 5)"
-            )
+            if indexer_fail_reason == "no_connection_string":
+                logger.warning(
+                    "  ⚠️  Set COSMOSDB_CONNECTION_STRING in .env and re-run to enable "
+                    "the continuous indexer (Step 5)"
+                )
+            else:
+                logger.error(
+                    "  ❌ Step 5 failed at stage '%s'. Check logs above for details.",
+                    indexer_fail_reason,
+                )
 
     finally:
         await clients.close()

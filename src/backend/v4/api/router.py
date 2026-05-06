@@ -49,6 +49,8 @@ from v4.orchestration.orchestration_manager import OrchestrationManager
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+app_v4 = APIRouter(prefix="/v4")
+
 
 def _extract_auth(request: Request) -> tuple:
     """Extract (user_id, tenant_id) from request headers.
@@ -510,6 +512,71 @@ async def _get_previous_intent(
 # ── Chat Mode Endpoint (P0 — conversational without plan) ────────────
 
 
+@app_v4.post("/chat/upload-file")
+async def chat_upload_file(
+    file: UploadFile = File(...),
+    request: Request = None,  # type: ignore[assignment]
+):
+    """
+    Upload a file to Azure AI Foundry for use with code_interpreter.
+
+    Returns a file_id to include in the subsequent chat/message/stream request
+    via the file_ids field. Foundry attaches it to the thread message, making
+    it available for code_interpreter to read and process.
+
+    ---
+    tags:
+      - Chat
+    """
+    from azure.ai.agents.aio import AgentsClient
+
+    from common.config.app_config import config as app_config
+
+    _, _, user_access_token = _extract_auth_with_token(request)
+    creds = app_config.get_azure_credential_async(app_config.AZURE_CLIENT_ID)
+
+    try:
+        contents = await file.read()
+        filename = file.filename or "upload"
+
+        if not contents:
+            raise HTTPException(
+                status_code=400,
+                detail="The uploaded file is empty. Please select a file with content.",
+            )
+
+        logger.info(
+            "Uploading file to Foundry: name=%s size=%d bytes content_type=%s",
+            filename,
+            len(contents),
+            file.content_type,
+        )
+
+        async with AgentsClient(
+            endpoint=app_config.AZURE_AI_PROJECT_ENDPOINT,
+            credential=creds,
+        ) as agents_client:
+            # Pass a (filename, bytes, content_type) tuple — same pattern used by
+            # setup_search_pipeline.py: send raw bytes with explicit filename so
+            # Foundry can identify the file and avoids "File is empty" errors.
+            mime = file.content_type or "application/octet-stream"
+            uploaded = await agents_client.files.upload(
+                file=(filename, contents, mime),
+                purpose="assistants",
+            )
+
+        logger.info(
+            "File uploaded to Foundry: file_id=%s name=%s size=%d bytes",
+            uploaded.id,
+            filename,
+            len(contents),
+        )
+        return {"file_id": uploaded.id, "filename": filename, "size": len(contents)}
+    except Exception as ex:
+        logger.error("File upload to Foundry failed: %s", ex)
+        raise HTTPException(status_code=500, detail=f"File upload failed: {ex}")
+
+
 @app_v4.post("/chat/message")
 async def chat_message(
     background_tasks: BackgroundTasks,
@@ -890,7 +957,10 @@ async def chat_message_stream(
                 tenant_id, user_id, chat_request.session_id, _factory
             )
 
-            async for update in agent.invoke(chat_request.message):
+            async for update in agent.invoke(
+                chat_request.message,
+                file_ids=chat_request.file_ids,
+            ):
                 # Process ALL content types from the agent framework
                 for content in update.contents or []:
                     ct = content.type
@@ -1084,72 +1154,37 @@ _MCP_AGENT_INSTRUCTIONS = (
     "For multi-step work, begin with a concise checklist of what you will do.\n"
     "You do not have persistent conversational memory unless a tool returns it.\n"
     "Use tools to retrieve real context instead of claiming memory.\n\n"
-    "You have some categories of tools:\n\n"
     "═══ 1. KNOWLEDGE BASE (knowledge_base_retrieve) ═══\n"
     "You have a tool called knowledge_base_retrieve that searches across ALL knowledge bases:\n"
     "chat history, contracts, RFPs, customer data, order data, and compliance documents.\n\n"
-    "CRITICAL — MEMORY RULE:\n"
+    "MEMORY RULE — MANDATORY:\n"
     "You MUST call knowledge_base_retrieve BEFORE saying you don't have memory or context.\n"
     "When the user asks about:\n"
     "  - Previous sessions, conversations, interactions, or history\n"
     "  - Past errors, problems, or issues they had\n"
-    "  - What they discussed before, what happened earlier\n"
     "  - Any domain knowledge (contracts, NDAs, policies, products, customers)\n"
     "→ ALWAYS call knowledge_base_retrieve(query='<relevant search terms>') FIRST.\n"
     "→ NEVER say 'I don't have memory' without searching first.\n"
     "→ If search returns results, use them to answer. If no results, then say so.\n\n"
-    "KNOWLEDGE-BASE EFFICIENCY RULES:\n"
-    "- Use knowledge_base_retrieve directly for retrieval.\n"
-    "- Do NOT use Python or code interpreter to list, tabulate, or guess KB contents.\n"
-    "- Do NOT inspect filesystem paths with Python when the same question can be answered by MCP or KB tools.\n"
-    "- Use code interpreter only for explicit calculations, transformations, or code execution requested by the user.\n\n"
     "Parameters:\n"
-    "  - query: Natural language search (e.g. 'filesystem error', 'NDA Contoso risks')\n"
+    "  - query: Natural language search (e.g. 'NDA Contoso risks', 'customer churn Q1')\n"
     "  - source_type: 'all' (default), 'chat' (history only), 'documents' (docs only)\n\n"
-    "═══ 2. MCP TOOLS (external servers) ═══\n"
-    "You can connect to external MCP servers to perform real actions.\n\n"
-    "CRITICAL RULES:\n"
-    "1. Before using filesystem or external-server actions, check connection status with list_connected_servers().\n"
-    "2. Call discover_mcp_capabilities only when you need to inspect an MCP server's available tools or the user asked about capabilities.\n"
-    "2.  DESCRIBE what a tool does from memory if the user ask for it — EXECUTE it and return the real output.\n"
-    "3. For filesystem actions: check list_connected_servers(), reconnect if needed, then call_external_tool.\n"
-    "4. Before reading data resources, list or discover the available resources first; use only names you actually discovered.\n"
-    "5. Do not do speculative pre-checks with Python before MCP or KB retrieval.\n\n"
-    "WORKFLOW — Connecting to external MCP servers:\n"
-    "  a) list_connected_servers() — see active sessions and available servers\n"
-    "  b) connect_stdio_server(server_name='github') — for stdio servers (github, filesystem, etc.)\n"
-    "  c) connect_mcp_server(server_url='http://host:port/mcp', server_name='x') — for HTTP servers\n"
-    "  d) connect_from_registry(server_name='x', user_id='x') — from Cosmos DB catalog\n"
-    "  e) discover_mcp_capabilities(server_name='x') — list tools\n"
-    "  f) call_external_tool(server_name='x', target_tool='tool', arguments='{}') — execute\n"
-    "  g) read_external_resource(server_name='x', resource_uri='res://...') — read resource\n"
-    "  h) disconnect_mcp_server(server_name='x') — cleanup\n\n"
-    "EXACT TOOL NAMES (use any tool name you need):\n"
-    "  - connect_mcp_server(server_url, server_name)\n"
-    "  - connect_stdio_server(server_name)\n"
-    "  - connect_from_registry(server_name, user_id)\n"
-    "  - discover_mcp_capabilities(server_name)\n"
-    "  - call_external_tool(server_name, target_tool, arguments) — param is 'target_tool', NOT 'tool_name'\n"
-    "  - read_external_resource(server_name, resource_uri)\n"
-    "  - list_connected_servers()\n"
-    "  - disconnect_mcp_server(server_name)\n\n"
-    "═══ FILESYSTEM SERVER TOOLS (target_tool names) ═══\n"
-    "When connected to the 'filesystem' server, these are the EXACT target_tool names:\n"
-    "  - read_file(path) — read content of a single file\n"
-    "  - read_multiple_files(paths) — read several files at once (paths is a list)\n"
-    "  - write_file(path, content) — write/create a file\n"
-    "  - edit_file(path, edits, dryRun) — edit parts of an existing file\n"
-    "  - create_directory(path) — create a directory\n"
-    "  - list_directory(path) — list contents of a directory\n"
-    "  - directory_tree(path) — recursive directory tree\n"
-    "  - move_file(source, destination) — move or rename a file\n"
-    "  - search_files(path, pattern) — search files by name pattern\n"
-    "  - get_file_info(path) — file metadata (size, permissions, dates)\n"
-    "  - list_allowed_directories() — show which directories the server can access\n"
-    "Always use the exact names above.\n\n"
-    "OTHER TOOLS: get_product_info, compare_products, and any domain tool.\n"
-    "If the user gives a URL, connect DIRECTLY with connect_mcp_server.\n"
-    "If the user names a server like 'github', 'filesystem', or 'everything', use connect_stdio_server.\n"
+    "═══ 2. CODE INTERPRETER ═══\n"
+    "code_interpreter is available ONLY when the user explicitly uploads a file in the chat.\n"
+    "When files are attached to this message, they are available in the sandbox.\n\n"
+    "RULES:\n"
+    "- Use code_interpreter ONLY when the user has uploaded a file AND asks you to analyze it.\n"
+    "- NEVER call code_interpreter to explore the filesystem, list directories, or find files.\n"
+    "- NEVER call code_interpreter speculatively (without a user-uploaded file attached).\n"
+    "- Do NOT use code_interpreter to answer questions about domain data — use knowledge_base_retrieve instead.\n\n"
+    "CORRECT flow when a file is attached:\n"
+    "  1. User uploads a CSV/Excel/JSON and asks a question about it.\n"
+    "  2. Call code_interpreter to read and analyze the attached file content.\n"
+    "  3. Return the result directly.\n\n"
+    "STRICT PROHIBITIONS:\n"
+    "- Do NOT call list_connected_servers, connect_mcp_server, connect_stdio_server,\n"
+    "  connect_from_registry, discover_mcp_capabilities, call_external_tool,\n"
+    "  read_external_resource, or disconnect_mcp_server.\n\n"
     "Be concise, report real results, respond in the user's language."
 )
 

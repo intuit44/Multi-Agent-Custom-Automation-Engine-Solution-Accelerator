@@ -28,6 +28,7 @@ const API_ENDPOINTS = {
     AGENT_MESSAGE: '/v4/agent_message',
     CHAT_MESSAGE: '/v4/chat/message',
     CHAT_MESSAGE_STREAM: '/v4/chat/message/stream',
+    CHAT_UPLOAD_FILE: '/v4/chat/upload-file',
     CHAT_SESSIONS: '/v4/chat/sessions',
     CHAT_SESSION_NEW: '/v4/chat/sessions/new',
 };
@@ -285,6 +286,16 @@ export class APIService {
             type: data.agent_type
         });
         return result;
+    }
+
+    /**
+     * Upload a file to Foundry for use with code_interpreter.
+     * Returns { file_id, filename, size } to attach to subsequent chat messages.
+     */
+    async uploadChatFile(file: File): Promise<{ file_id: string; filename: string; size: number }> {
+        const formData = new FormData();
+        formData.append('file', file, file.name);
+        return apiClient.upload(API_ENDPOINTS.CHAT_UPLOAD_FILE, formData);
     }
 
     /**
