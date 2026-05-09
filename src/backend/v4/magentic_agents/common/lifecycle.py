@@ -254,13 +254,12 @@ class MCPEnabledBase:
             return
 
         force_republish = os.getenv("MACAE_FORCE_AGENT_PUBLISH", "").lower() in (
-            "1", "true", "yes",
+            "1",
+            "true",
+            "yes",
         )
 
-        if (
-            self.agent_name in _FOUNDRY_REGISTERED_AGENT_NAMES
-            and not force_republish
-        ):
+        if self.agent_name in _FOUNDRY_REGISTERED_AGENT_NAMES and not force_republish:
             self.logger.info(
                 "Agent '%s' already registered in Foundry (cached for this process).",
                 self.agent_name,
@@ -277,12 +276,29 @@ class MCPEnabledBase:
 
             if existing_agent is not None and not force_republish:
                 _FOUNDRY_REGISTERED_AGENT_NAMES.add(self.agent_name)
+                _versions = getattr(existing_agent, "versions", None)
+                _latest = (
+                    getattr(_versions, "latest", None)
+                    if _versions is not None
+                    else None
+                )
+                _version_str = (
+                    getattr(_latest, "version", "unknown")
+                    if _latest is not None
+                    else "unknown"
+                )
+                _version_id = (
+                    getattr(_latest, "id", "unknown")
+                    if _latest is not None
+                    else "unknown"
+                )
                 self.logger.info(
-                    "Agent '%s' already exists in Foundry (id=%s, version=%s); reusing it. "
+                    "Agent '%s' already exists in Foundry (id=%s, latest_version=%s, version_id=%s); reusing it. "
                     "Set MACAE_FORCE_AGENT_PUBLISH=1 to republish with updated instructions.",
                     self.agent_name,
                     getattr(existing_agent, "id", "unknown"),
-                    getattr(existing_agent, "version", "unknown"),
+                    _version_str,
+                    _version_id,
                 )
                 return
 
@@ -341,6 +357,9 @@ class MCPEnabledBase:
                 self.logger.info(
                     "Forwarding user OBO token to MCP server via Authorization header"
                 )
+                # Register http_client in the stack so it is closed when the agent closes
+                if self._stack:
+                    await self._stack.enter_async_context(http_client)
 
             mcp_tool = MCPStreamableHTTPTool(
                 name=self.mcp_cfg.name,

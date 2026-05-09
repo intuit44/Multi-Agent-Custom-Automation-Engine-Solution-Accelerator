@@ -1,0 +1,205 @@
+/* ── EnhancedChat styles ──────────────────────────────────────── */
+/* Adapted from customer-chatbot-solution-accelerator coral.css    */
+/* Uses FluentUI CSS variables for theming consistency.            */
+
+/* ── Panel container ─────────────────────────────────────────── */
+.echat-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+/* ── Messages scroll area ────────────────────────────────────── */
+.echat-messages {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 16px 16px 8px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* ── Welcome screen ──────────────────────────────────────────── */
+.echat-welcome {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 280px;
+    color: var(--colorNeutralForeground3);
+    text-align: center;
+    padding: 32px;
+}
+
+/* ── Message bubbles ─────────────────────────────────────────── */
+.echat-bubble {
+    display: flex;
+    gap: 10px;
+    animation: echatFadeIn 0.2s ease-out;
+}
+
+@keyframes echatFadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.echat-bubble--user {
+    flex-direction: row-reverse;
+}
+
+.echat-bubble--user .echat-bubble-body {
+    background-color: var(--colorBrandBackground);
+    color: var(--colorNeutralForegroundOnBrand);
+    border-radius: 12px 12px 4px 12px;
+}
+
+.echat-bubble--user .echat-bubble-header {
+    color: var(--colorNeutralForegroundOnBrand);
+}
+
+.echat-bubble--assistant .echat-bubble-body {
+    background-color: var(--colorNeutralBackground3);
+    color: var(--colorNeutralForeground1);
+    border-radius: 12px 12px 12px 4px;
+}
+
+.echat-avatar {
+    flex-shrink: 0;
+    margin-top: 4px;
+}
+
+.echat-bubble-body {
+    padding: 10px 14px;
+    max-width: 85%;
+    min-width: 120px;
+}
+
+.echat-bubble-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+    gap: 8px;
+}
+
+.echat-bubble-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.echat-bubble-content {
+    line-height: 1.5;
+}
+
+/* ── Tool activity indicators ────────────────────────────────── */
+.echat-tool-activity {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    background: var(--colorNeutralBackground3);
+    border-radius: 6px;
+    border-left: 3px solid var(--colorBrandBackground);
+}
+
+/* ── Typing dots ─────────────────────────────────────────────── */
+.echat-typing-dots {
+    display: flex;
+    gap: 4px;
+    padding: 4px 0;
+}
+
+.echat-typing-dots span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--colorNeutralForeground3);
+    animation: echatBounce 1.4s ease-in-out infinite;
+}
+
+.echat-typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.echat-typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes echatBounce {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+}
+
+/* ── Input area ──────────────────────────────────────────────── */
+.echat-input-area {
+    padding: 8px 16px 16px 16px;
+    border-top: 1px solid var(--colorNeutralStroke2);
+    background-color: var(--colorNeutralBackground1);
+}
+
+.echat-input-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+.echat-input-wrapper {
+    flex: 1;
+}
+
+/* ── Recent chats sidebar ────────────────────────────────────── */
+.echat-recent-section {
+    padding: 0 12px;
+}
+
+.echat-recent-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 0 4px 0;
+    color: var(--colorNeutralForeground3);
+}
+
+.echat-recent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.echat-recent-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.15s;
+    overflow: hidden;
+}
+
+.echat-recent-item:hover {
+    background-color: var(--colorNeutralBackground1Hover);
+}
+
+.echat-recent-item--active {
+    background-color: var(--colorNeutralBackground1Selected);
+}
+
+.echat-recent-item-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.echat-recent-item-meta {
+    flex-shrink: 0;
+}
+
+.echat-recent-empty {
+    padding: 8px;
+    text-align: center;
+    color: var(--colorNeutralForeground3);
+}

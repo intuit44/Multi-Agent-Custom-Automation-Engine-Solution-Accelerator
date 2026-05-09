@@ -1,0 +1,15 @@
+{
+  "Name": "FoundryAgentExecutor",
+  "IsCustom": true,
+  "Description": "Permite ejecutar agentes y leer threads en Azure AI Foundry",
+  "Actions": [],
+  "NotActions": [],
+  "DataActions": [
+    "Microsoft.CognitiveServices/accounts/AIServices/agents/*",
+    "Microsoft.CognitiveServices/accounts/AIServices/threads/*"
+  ],
+  "NotDataActions": [],
+  "AssignableScopes": [
+    "/subscriptions/380fa841-83f3-42fe-adc4-582a5ebe139b"
+  ]
+}

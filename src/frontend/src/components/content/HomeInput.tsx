@@ -62,6 +62,7 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [input, setInput] = useState<string>("");
   const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; file_id: string }>>([]);
+  const [generatedFiles, setGeneratedFiles] = useState<Array<{ file_id: string; filename: string; download_url: string }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -133,6 +134,7 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
         let redirectPlan: string | null = null;
         let intent = "";
         let fullResponse = "";
+        const collectedFiles: Array<{ file_id: string; filename: string; download_url: string }> = [];
 
         await ChatService.sendMessageStream(userMessage, sessionId, {
           onToken: (token) => { fullResponse += token; },
@@ -146,7 +148,12 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
           onRedirect: (planId) => { redirectPlan = planId; },
           onPlanCreated: (planId) => { redirectPlan = planId; },
           onError: (errorMsg) => { fullResponse = `Error: ${errorMsg}`; },
+          onGeneratedFile: (f) => { collectedFiles.push(f); },
         }, fileIds);
+
+        if (collectedFiles.length > 0) {
+          setGeneratedFiles(collectedFiles);
+        }
 
         dismissToast(id);
 
@@ -158,7 +165,7 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
           // CONVERSATIONAL / MCP → open chat page with the response already generated
           const initialMessages = [
             { id: `msg_${Date.now()}_user`, content: userMessage, role: "user", timestamp: new Date() },
-            { id: `msg_${Date.now()}_assistant`, content: fullResponse, role: "assistant", timestamp: new Date(), intent },
+            { id: `msg_${Date.now()}_assistant`, content: fullResponse, role: "assistant", timestamp: new Date(), intent, generatedFiles: collectedFiles },
           ];
           navigate(`/chat/${sessionId}`, { state: { initialMessages } });
         }
@@ -323,6 +330,31 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
           </ChatInput>
 
           <InlineToaster />
+
+          {/* Generated files panel — shown when code_interpreter produces downloadable files */}
+          {generatedFiles.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "8px 0" }}>
+              <Caption1 style={{ color: "var(--colorNeutralForeground3)" }}>📥 Generated files</Caption1>
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                {generatedFiles.map(f => (
+                  <a
+                    key={f.file_id}
+                    href={f.download_url}
+                    download={f.filename}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: "4px",
+                      background: "var(--colorBrandBackground2)",
+                      borderRadius: "12px", padding: "4px 10px",
+                      fontSize: "12px", color: "var(--colorBrandForeground1)",
+                      textDecoration: "none",
+                    }}
+                  >
+                    ⬇️ {f.filename}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="home-input-quick-tasks-section">
             {tasksToDisplay.length > 0 && (

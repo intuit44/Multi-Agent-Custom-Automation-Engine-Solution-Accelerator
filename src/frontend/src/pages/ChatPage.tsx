@@ -465,6 +465,7 @@ const ChatPage: React.FC = () => {
 
             // Conversación normal / nuevo plan — siempre el mismo sessionId
             const sid = planData?.plan?.session_id || sessionId || "";
+            const collectedGeneratedFiles: Array<{ file_id: string; filename: string; download_url: string }> = [];
             yield* ChatService.streamAsAsyncIterable(
                 userInput,
                 sid,
@@ -478,7 +479,30 @@ const ChatPage: React.FC = () => {
                     setReloadLeftList(true);
                 },
                 fileIds,
+                // Collect generated files; attach to the last assistant message after stream ends
+                (f) => { collectedGeneratedFiles.push(f); },
             );
+            // After stream: strip sandbox: links unconditionally — replace with real
+            // download_url when filename matches a known generated file, or show just the label.
+            chatRef.current?.updateLastMessage((prev) =>
+                prev
+                    .replace(
+                        /\[([^\]]+)\]\(sandbox:[^)]+\)/g,
+                        (_match: string, label: string) => {
+                            const known = collectedGeneratedFiles.find(
+                                (f) => label.includes(f.filename) || f.filename.includes(label)
+                            );
+                            // Use clean filename as label; if unknown, extract basename
+                            const cleanLabel = known?.filename ?? label.split('/').pop() ?? label;
+                            return known ? `[${cleanLabel}](${known.download_url})` : cleanLabel;
+                        }
+                    )
+                    .replace(/\n{3,}/g, "\n\n")
+                    .trim()
+            );
+            if (collectedGeneratedFiles.length > 0) {
+                chatRef.current?.attachGeneratedFilesToLastMessage(collectedGeneratedFiles);
+            }
         },
         [clarificationMessage, planData, planApprovalRequest, sessionId, showToast, dismissToast, activatePlanMode],
     );

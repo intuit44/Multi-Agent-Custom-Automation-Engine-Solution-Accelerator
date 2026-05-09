@@ -1,0 +1,32 @@
+{
+  "mcpServers": {
+    "macae-mcp-server": {
+      "type": "streamable-http",
+      "url": "http://localhost:9000/mcp",
+      "note": "MACAE internal MCP server (local dev)"
+    },
+    "macae-azure": {
+      "type": "streamable-http",
+      "url": "https://ca-mcp-pslc25991vme66zmins.purpleplant-4c595cea.eastus2.azurecontainerapps.io/mcp",
+      "note": "MACAE MCP server deployed on Azure Container Apps"
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      },
+      "note": "GitHub MCP server — requires GITHUB_PERSONAL_ACCESS_TOKEN env var"
+    },
+    "everything": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-everything"],
+      "note": "MCP reference server — echo, sum, images, resources — great for testing"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspaces/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator"],
+      "note": "Filesystem MCP server — restricted to workspace directory only"
+    }
+  }
+}

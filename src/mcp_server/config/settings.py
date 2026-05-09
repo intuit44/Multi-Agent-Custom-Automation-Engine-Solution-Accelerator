@@ -4,17 +4,17 @@ Configuration settings for the MCP server.
 
 from typing import Optional
 
-from pydantic import ConfigDict, Field
-from pydantic_settings import BaseSettings
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class MCPServerConfig(BaseSettings):
     """MCP Server configuration."""
-    
-    model_config = ConfigDict(
+
+    model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        extra="ignore"  # This will ignore extra environment variables
+        extra="ignore",  # This will ignore extra environment variables
     )
 
     # Server settings
@@ -32,7 +32,7 @@ class MCPServerConfig(BaseSettings):
     # MCP specific settings
     server_name: str = Field(default="MacaeMcpServer")
     enable_auth: bool = Field(default=True)
-    
+
     # Dataset path - added to handle the environment variable
     dataset_path: str = Field(default="./datasets")
 

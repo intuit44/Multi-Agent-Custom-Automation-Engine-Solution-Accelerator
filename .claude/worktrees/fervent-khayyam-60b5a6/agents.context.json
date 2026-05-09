@@ -1,0 +1,8 @@
+{
+  "version": "1.0.0",
+  "agent": "Agent975",
+  "timestamp": "2025-07-29T09:02:53Z",
+  "method": "AIProjectClient (Node.js)",
+  "endpoint": "https://boatRentalFoundry-dev.services.ai.azure.com",
+  "project": "booking-agents"
+}

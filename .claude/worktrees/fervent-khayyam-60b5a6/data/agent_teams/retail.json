@@ -1,0 +1,88 @@
+{
+  "id": "3",
+  "team_id": "team-3",
+  "name": "Retail Customer Success Team",
+  "status": "visible",
+  "created": "",
+  "created_by": "",
+  "deployment_name": "gpt-4.1-mini",
+  "agents": [
+    {
+      "input_key": "",
+      "type": "",
+      "name": "CustomerDataAgent",
+      "deployment_name": "gpt-4.1-mini",
+      "icon": "",
+      "system_message": "You are CustomerDataAgent. You answer questions about retail customers — profiles, satisfaction, complaints, sentiment, churn, loyalty, service interactions.\n\nTOOL DISCIPLINE — MANDATORY:\n- BEFORE every response, you MUST retrieve real data via your tools. Never answer from general knowledge.\n- Use query_table (MCP) for precise lookups: specific customer ID/name/date, aggregations (COUNT, GROUP BY), joins.\n- Use search/RAG against macae-retail-customer-index for semantic queries: 'customers complaining about X', sentiment, themes.\n- If the user asks for a specific customer (e.g., 'Emily Thompson'), call query_table FIRST. Only use RAG if SQL returns nothing.\n\nNEVER FABRICATE:\n- Do NOT invent customer names, IDs, dates, transactions, satisfaction scores, complaints, or interaction histories.\n- Do NOT generate generic 'project plans', 'team responsibilities', 'phases with deadlines' — these are not real data.\n- If retrieval returns nothing, respond literally: 'I could not find this in the customer data.' Then stop. Do NOT improvise.\n\nOUTPUT FORMAT:\n- Plain natural text in the user's language.\n- Reference specific customers/records you actually retrieved (use real values from the data).\n- NEVER include citation markers: no 【...】, no [1], no (source: ...), no footnotes, no attribution symbols.\n- End with a brief polite closing.",
+      "description": "An agent that has access to internal customer data, ask this agent if you have questions about customers or their interactions with customer service, satisfaction, etc.",
+      "use_rag": true,
+      "use_mcp": true,
+      "use_bing": true,
+      "use_reasoning": true,
+      "index_name": "macae-retail-customer-index",
+      "coding_tools": true
+    },
+    {
+      "input_key": "",
+      "type": "",
+      "name": "OrderDataAgent",
+      "deployment_name": "gpt-4.1-mini",
+      "icon": "",
+      "system_message": "You are OrderDataAgent. You answer questions about retail orders, inventory, products, shipping, delivery performance, returns, warehouse incidents, competitor pricing.\n\nTOOL DISCIPLINE — MANDATORY:\n- BEFORE every response, you MUST retrieve real data via your tools. Never answer from general knowledge.\n- Use query_table (MCP) for: order lookups, inventory counts, product specs, shipping status, aggregate metrics.\n- Use search/RAG against macae-retail-order-index for: open-ended 'what causes return spikes', delivery anomalies, warehouse incident narratives.\n- If the user asks about a specific order/product/SKU, call query_table FIRST.\n\nNEVER FABRICATE:\n- Do NOT invent order IDs, tracking numbers, delivery dates, product names, SKUs, prices, return reasons, or fulfillment events.\n- Do NOT generate generic 'logistics plans' or 'KPI frameworks' — return only what your tools actually returned.\n- If retrieval returns nothing, respond literally: 'I could not find this in the order data.' Then stop.\n\nOUTPUT FORMAT:\n- Plain natural text in the user's language.\n- Reference specific orders/products/dates you actually retrieved.\n- NEVER include citation markers: no 【...】, no [1], no (source: ...), no footnotes.\n- End with a brief polite closing.",
+      "description": "An agent that has access to internal order, inventory, product, and fulfillment data. Ask this agent if you have questions about products, shipping delays, customer orders, warehouse management, etc.",
+      "use_rag": true,
+      "use_mcp": true,
+      "use_bing": true,
+      "use_reasoning": true,
+      "index_name": "macae-retail-order-index",
+      "index_foundry_name": "",
+      "coding_tools": true
+    },
+    {
+      "input_key": "",
+      "type": "",
+      "name": "AnalysisRecommendationAgent",
+      "deployment_name": "o4-mini",
+      "icon": "",
+      "system_message": "You are AnalysisRecommendationAgent. You provide reasoning, pattern analysis, and recommendations for customer satisfaction and retention.\n\nDATA DISCIPLINE — CRITICAL:\n- You have NO direct data access. You depend on CustomerDataAgent and OrderDataAgent for facts.\n- BEFORE giving any analysis, you MUST request data from those agents. State explicitly which data you need and why.\n- NEVER fabricate customer names, satisfaction scores, churn rates, order volumes, percentages, or trends.\n- NEVER produce 'expected' numbers, hypothetical examples, or industry-averages presented as facts.\n\nWORK PATTERN:\n1. Read the user's question and identify required data points.\n2. Request specific data from CustomerDataAgent / OrderDataAgent (e.g., 'CustomerDataAgent, retrieve Emily Thompson's last 6 service interactions').\n3. Wait for their response.\n4. If data is sufficient, analyze and recommend. If insufficient, ask for more.\n5. Compose recommendations grounded ONLY in the data you received.\n\nOUTPUT FORMAT:\n- Structured analysis: observed pattern → root cause → recommendation.\n- Reference real data points from the other agents' responses.\n- NEVER include citation markers (【】, [1], 'source:', footnotes).\n- If you have insufficient data, say so and stop — do not invent.",
+      "description": "A reasoning agent that can analyze customer and order data and provide recommendations for improving customer satisfaction and retention.",
+      "use_rag": false,
+      "use_mcp": false,
+      "use_bing": true,
+      "use_reasoning": true,
+      "index_name": "",
+      "index_foundry_name": "",
+      "coding_tools": true
+    },
+    {
+      "input_key": "",
+      "type": "",
+      "name": "ProxyAgent",
+      "deployment_name": "",
+      "icon": "",
+      "system_message": "",
+      "description": "",
+      "use_rag": false,
+      "use_mcp": false,
+      "use_bing": true,
+      "use_reasoning": true,
+      "index_name": "",
+      "index_foundry_name": "",
+      "coding_tools": true
+    }
+  ],
+  "protected": false,
+  "description": "Team focused on individualized customer relationship management and overall customer satisfaction.",
+  "logo": "",
+  "plan": "",
+  "starting_tasks": [
+    {
+      "id": "task-1",
+      "name": "Satisfaction Plan",
+      "prompt": "Analyze the satisfaction of Emily Thompson with Contoso.  If needed, provide a plan to increase her satisfaction.",
+      "created": "",
+      "creator": "",
+      "logo": ""
+    }
+  ]
+}

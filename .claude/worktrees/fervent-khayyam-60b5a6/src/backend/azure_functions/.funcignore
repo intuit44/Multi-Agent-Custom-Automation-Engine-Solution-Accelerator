@@ -1,0 +1,53 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Environment
+.env
+.env.*
+local.settings.json
+local.settings.*.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Frontend (no desplegar)
+../../frontend/
+**/node_modules/
+**/dist/
+**/build/
+**/coverage/
+
+# Build artifacts
+dist/
+build/
+*.egg
+
+# Tests
+tests/
+test_*.py
+*_test.py
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Logs
+*.log
+logs/

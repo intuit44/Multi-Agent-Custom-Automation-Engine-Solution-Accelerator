@@ -1,0 +1,33 @@
+[run]
+source = .
+omit =
+    src/mcp_server/*
+    src/backend/tests/*
+    src/tests/mcp_server/*
+    src/tests/agents/*
+    src/**/__init__.py
+    tests/e2e-test/*
+    */venv/*
+    */env/*
+    */.pytest_cache/*
+    */node_modules/*
+    src/backend/v4/api/router.py
+    src/backend/v4/common/services/mcp_connections_service.py
+    src/backend/v4/common/services/mcp_discovery_service.py
+    src/backend/v4/common/services/mcp_inspector_bridge.py
+    src/backend/v4/common/services/mcp_resource_service.py
+    src/backend/v4/common/models/mcp_connection_models.py
+    src/backend/v4/orchestration/intent_router.py
+    src/backend/common/services/chat_cosmos_service.py
+
+[paths]
+source =
+    src/backend
+    */site-packages
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError

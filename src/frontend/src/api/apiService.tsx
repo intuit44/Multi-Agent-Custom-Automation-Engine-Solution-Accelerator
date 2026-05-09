@@ -329,6 +329,7 @@ export class APIService {
             onRedirect?: (planId: string) => void;
             onError: (error: string) => void;
             onToolActivity?: (data: { activity: string; tool: string; server?: string; success?: boolean }) => void;
+            onGeneratedFile?: (data: { file_id: string; filename: string; download_url: string }) => void;
         },
     ): Promise<void> {
         const t0 = performance.now();
@@ -385,6 +386,9 @@ export class APIService {
                                 break;
                             case 'tool_activity':
                                 callbacks.onToolActivity?.(data);
+                                break;
+                            case 'generated_file':
+                                callbacks.onGeneratedFile?.(data);
                                 break;
                         }
                     } catch {

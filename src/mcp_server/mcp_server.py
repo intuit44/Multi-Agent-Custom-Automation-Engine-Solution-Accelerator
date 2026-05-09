@@ -4,6 +4,7 @@ MACAE MCP Server - FastMCP server with organized tools and services.
 
 import argparse
 import logging
+from typing import Literal, cast
 ###
 
 from config.settings import config
@@ -88,6 +89,9 @@ def log_server_info():
         )
 
 
+Transport = Literal["stdio", "http", "streamable-http", "sse"]
+
+
 def run_server(
     transport: str = "stdio", host: str = "127.0.0.1", port: int = 9000, **kwargs
 ):
@@ -98,14 +102,17 @@ def run_server(
 
     log_server_info()
 
+    _transport = cast(Transport, transport)
     logger.info(f"🤖 Starting FastMCP server with {transport} transport")
     if transport in ["http", "streamable-http", "sse"]:
         logger.info(f"🌐 Server will be available at: http://{host}:{port}/mcp/")
-        mcp.run(transport=transport, host=host, port=port, json_response=True, **kwargs)
+        mcp.run(
+            transport=_transport, host=host, port=port, json_response=True, **kwargs
+        )
     else:
         # For STDIO transport, only pass kwargs that are supported
         stdio_kwargs = {k: v for k, v in kwargs.items() if k not in ["log_level"]}
-        mcp.run(transport=transport, **stdio_kwargs)
+        mcp.run(transport=_transport, **stdio_kwargs)
 
 
 def main():
@@ -149,7 +156,7 @@ def main():
         config.enable_auth = False
 
     # Print startup info
-    print(f"🚀 Starting MACAE MCP Server")
+    print("🚀 Starting MACAE MCP Server")
     print(f"📋 Transport: {args.transport.upper()}")
     print(f"🔧 Debug: {config.debug}")
     print(f"🔐 Auth: {'Enabled' if config.enable_auth else 'Disabled'}")

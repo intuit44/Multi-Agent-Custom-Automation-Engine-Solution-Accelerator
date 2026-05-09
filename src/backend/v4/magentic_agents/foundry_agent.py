@@ -1,6 +1,7 @@
 """Agent template for building Foundry agents with Azure AI Search, optional MCP tool, and Code Interpreter (agent_framework version)."""
 
 import logging
+import os
 from typing import Any, List, Optional, cast
 
 from agent_framework import Agent, ChatOptions, Message
@@ -26,7 +27,10 @@ from common.database.database_base import DatabaseBase
 from common.models.messages_af import TeamConfiguration
 from v4.common.services.team_service import TeamService
 from v4.config.agent_registry import agent_registry
-from v4.magentic_agents.common.lifecycle import AzureAgentBase
+from v4.magentic_agents.common.lifecycle import (
+    _FOUNDRY_REGISTERED_AGENT_NAMES,
+    AzureAgentBase,
+)
 from v4.magentic_agents.models.agent_models import MCPConfig, SearchConfig
 
 # Number of recent messages injected into the agent context on each invoke().
@@ -191,15 +195,14 @@ class FoundryAgentTemplate(AzureAgentBase):
             return None
 
         self.logger.info(
-            "Creating Azure AI Search agent with create_version: connection_name=%s, index=%s, query_type=%s, top_k=%s",
+            "Resolving Azure AI Search agent: name=%s, connection_name=%s, index=%s, query_type=%s, top_k=%s",
+            self.agent_name,
             connection_name,
             index_name,
             query_type,
             top_k,
         )
 
-        # Create agent using create_version with PromptAgentDefinition and AzureAISearchTool
-        # This approach matches the Knowledge Mining Solution Accelerator pattern
         try:
             if not self.model_deployment_name:
                 self.logger.error(
@@ -217,13 +220,75 @@ class FoundryAgentTemplate(AzureAgentBase):
                     "project_client must be initialized to create Azure AI Search agent."
                 )
 
+            # ── Reuse-first: same pattern as _register_in_foundry() in lifecycle.py ──
+            # If the agent already exists in Foundry by name, attach to it
+            # (use_latest_version=True). Only call create_version when the agent
+            # doesn't exist OR MACAE_FORCE_AGENT_PUBLISH=1 is set. This prevents
+            # version sprawl on every backend restart / new session.
+            force_republish = os.getenv("MACAE_FORCE_AGENT_PUBLISH", "").lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+
+            # Process-level cache hit → skip the list call entirely
+            if (
+                self.agent_name in _FOUNDRY_REGISTERED_AGENT_NAMES
+                and not force_republish
+            ):
+                self.logger.info(
+                    "Azure-Search agent '%s' already cached for this process; attaching.",
+                    self.agent_name,
+                )
+                return AzureAIClient(
+                    project_endpoint=self.project_endpoint,
+                    agent_name=self.agent_name,
+                    use_latest_version=True,
+                    model_deployment_name=self.model_deployment_name,
+                    credential=self.creds,
+                )
+
+            existing_agent = None
+            if not force_republish:
+                async for agent in self.project_client.agents.list():
+                    if getattr(agent, "name", None) == self.agent_name:
+                        existing_agent = agent
+                        break
+
+            if existing_agent is not None and not force_republish:
+                self._azure_server_agent_id = getattr(existing_agent, "id", None)
+                if self.agent_name:
+                    _FOUNDRY_REGISTERED_AGENT_NAMES.add(self.agent_name)
+                self.logger.info(
+                    "Azure-Search agent '%s' already exists in Foundry "
+                    "(id=%s, version=%s); reusing it. "
+                    "Set MACAE_FORCE_AGENT_PUBLISH=1 to republish with updated definition.",
+                    self.agent_name,
+                    getattr(existing_agent, "id", "unknown"),
+                    getattr(existing_agent, "version", "unknown"),
+                )
+                return AzureAIClient(
+                    project_endpoint=self.project_endpoint,
+                    agent_name=self.agent_name,
+                    use_latest_version=True,
+                    model_deployment_name=self.model_deployment_name,
+                    credential=self.creds,
+                )
+
+            if force_republish:
+                self.logger.info(
+                    "Force-publishing Azure-Search agent '%s' (MACAE_FORCE_AGENT_PUBLISH=1)",
+                    self.agent_name,
+                )
+
+            # ── Only create when missing or forced ────────────────────────────
             enhanced_instructions = (
                 f"{self.agent_instructions} "
                 "Always use the Azure AI Search tool and configured index for knowledge retrieval."
             )
 
             azure_agent = await self.project_client.agents.create_version(
-                agent_name=self.agent_name,  # Use original name
+                agent_name=self.agent_name,
                 definition=PromptAgentDefinition(
                     model=self.model_deployment_name,
                     instructions=enhanced_instructions,
@@ -245,6 +310,8 @@ class FoundryAgentTemplate(AzureAgentBase):
             )
 
             self._azure_server_agent_id = azure_agent.id
+            if self.agent_name:
+                _FOUNDRY_REGISTERED_AGENT_NAMES.add(self.agent_name)
 
             self.logger.info(
                 "Created Azure AI Search agent via create_version (name=%s, id=%s, version=%s).",
@@ -253,12 +320,10 @@ class FoundryAgentTemplate(AzureAgentBase):
                 azure_agent.version,
             )
 
-            # Wrap in AzureAIClient using agent_name and agent_version (NOT agent_id)
-            # AzureAIClient constructor: agent_name, agent_version, project_endpoint, credential
             chat_client = AzureAIClient(
                 project_endpoint=self.project_endpoint,
                 agent_name=azure_agent.name,
-                agent_version=azure_agent.version,  # Use the specific version we just created
+                agent_version=azure_agent.version,
                 model_deployment_name=self.model_deployment_name,
                 credential=self.creds,
             )
@@ -266,7 +331,7 @@ class FoundryAgentTemplate(AzureAgentBase):
 
         except Exception as ex:
             self.logger.error(
-                "Failed to create Azure Search enabled agent via create_version (connection=%s, index=%s): %s",
+                "Failed to resolve Azure Search enabled agent (connection=%s, index=%s): %s",
                 connection_name,
                 index_name,
                 ex,

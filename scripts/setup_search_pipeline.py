@@ -24,7 +24,7 @@ Steps executed:
 """
 
 import asyncio
-import json
+import json  # noqa: F401
 import logging
 import os
 import sys
@@ -513,7 +513,9 @@ class AzureClients:
             if resp.status not in (404, 403):
                 logger.warning(
                     "    Container check returned HTTP %s for %s/%s",
-                    resp.status, storage_account, container_name,
+                    resp.status,
+                    storage_account,
+                    container_name,
                 )
             return False
 
@@ -1107,18 +1109,14 @@ def build_blob_datasource(
         "name": f"{idx_name}-blob-ds",
         "description": f"Blob source for {idx_name} ({container_name})",
         "type": "azureblob",
-        "credentials": {
-            "connectionString": f"ResourceId={storage_resource_id};"
-        },
+        "credentials": {"connectionString": f"ResourceId={storage_resource_id};"},
         "container": {"name": container_name},
         "dataChangeDetectionPolicy": {
-            "@odata.type":
-                "#Microsoft.Azure.Search.HighWaterMarkChangeDetectionPolicy",
+            "@odata.type": "#Microsoft.Azure.Search.HighWaterMarkChangeDetectionPolicy",
             "highWaterMarkColumnName": "metadata_storage_last_modified",
         },
         "dataDeletionDetectionPolicy": {
-            "@odata.type":
-                "#Microsoft.Azure.Search.NativeBlobSoftDeleteDeletionDetectionPolicy",
+            "@odata.type": "#Microsoft.Azure.Search.NativeBlobSoftDeleteDeletionDetectionPolicy",
         },
     }
 
@@ -1131,12 +1129,10 @@ def build_doc_blob_skillset() -> dict:
     """
     return {
         "name": DOC_BLOB_SKILLSET_NAME,
-        "description":
-            "Shared skillset: embed /document/content vía Azure OpenAI",
+        "description": "Shared skillset: embed /document/content vía Azure OpenAI",
         "skills": [
             {
-                "@odata.type":
-                    "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+                "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
                 "name": "content-embedding",
                 "description": "Generate content_vector from extracted blob text",
                 "context": "/document",
@@ -1171,8 +1167,7 @@ def build_blob_indexer(idx_name: str) -> dict:
             "configuration": {
                 "parsingMode": "default",
                 "dataToExtract": "contentAndMetadata",
-                "indexedFileNameExtensions":
-                    ".pdf,.docx,.txt,.md,.csv,.json,.html",
+                "indexedFileNameExtensions": ".pdf,.docx,.txt,.md,.csv,.json,.html",
                 "failOnUnsupportedContentType": False,
                 "failOnUnprocessableDocument": False,
             },
@@ -1211,11 +1206,13 @@ async def setup_blob_indexers(clients: AzureClients) -> tuple[int, int, int]:
     Returns:
         (configured, skipped_no_container, failed)
     """
-    if not all([
-        AZURE_STORAGE_ACCOUNT_NAME,
-        AZURE_SUBSCRIPTION_ID,
-        AZURE_RESOURCE_GROUP,
-    ]):
+    if not all(
+        [
+            AZURE_STORAGE_ACCOUNT_NAME,
+            AZURE_SUBSCRIPTION_ID,
+            AZURE_RESOURCE_GROUP,
+        ]
+    ):
         logger.warning(
             "  ⚠️  AZURE_STORAGE_ACCOUNT_NAME / AZURE_SUBSCRIPTION_ID / "
             "AZURE_RESOURCE_GROUP no están en .env — saltando Step 6."
@@ -1261,9 +1258,7 @@ async def setup_blob_indexers(clients: AzureClients) -> tuple[int, int, int]:
             continue
 
         # 2. Datasource
-        ds_body = build_blob_datasource(
-            idx_name, container_name, storage_resource_id
-        )
+        ds_body = build_blob_datasource(idx_name, container_name, storage_resource_id)
         if not await clients.put_resource("datasources", ds_body["name"], ds_body):
             logger.error("    ❌ Datasource %s failed", ds_body["name"])
             failed += 1
@@ -1350,12 +1345,12 @@ async def main():
 
         # Step 6
         logger.info("── Step 6: Blob → Search continuous indexers (10 docs) ─")
-        blob_configured, blob_skipped, blob_failed = await setup_blob_indexers(
-            clients
-        )
+        blob_configured, blob_skipped, blob_failed = await setup_blob_indexers(clients)
         logger.info(
             "Result: %d configured, %d skipped (no container), %d failed\n",
-            blob_configured, blob_skipped, blob_failed,
+            blob_configured,
+            blob_skipped,
+            blob_failed,
         )
 
         # Summary
@@ -1385,7 +1380,9 @@ async def main():
         )
         logger.info(
             "  Blob indexers:        %d configured, %d skipped, %d failed",
-            blob_configured, blob_skipped, blob_failed,
+            blob_configured,
+            blob_skipped,
+            blob_failed,
         )
         logger.info("=" * 60)
         logger.info("")

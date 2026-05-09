@@ -27,6 +27,17 @@
 		"python.testing.pytestEnabled": true,
 		"python.testing.unittestEnabled": false,
 		"mcp": {
+			"servers": {
+				"microsoft/markitdown": {
+					"type": "stdio",
+					"command": "uvx",
+					"args": [
+						"markitdown-mcp==0.0.1a4"
+					],
+					"gallery": "https://api.mcp.github.com",
+					"version": "1.0.0"
+				}
+			},
 			"inputs": [
 				{
 					"id": "token",
@@ -34,8 +45,7 @@
 					"description": "",
 					"password": true
 				}
-			],
-			"servers": {}
+			]
 		},
 		"chat.mcp.serverSampling": {
 			"Multi-Agent-Custom-Automation-Engine-Solution-Accelerator.code-workspace: io.github.github/github-mcp-server": {

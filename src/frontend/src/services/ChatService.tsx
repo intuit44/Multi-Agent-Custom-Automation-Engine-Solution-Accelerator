@@ -30,6 +30,8 @@ export interface StreamCallbacks {
     onRedirect?: (planId: string) => void;
     onError: (error: string) => void;
     onToolActivity?: (data: { activity: string; tool: string; server?: string; success?: boolean }) => void;
+    /** Called when code_interpreter generates a downloadable file. */
+    onGeneratedFile?: (data: { file_id: string; filename: string; download_url: string }) => void;
 }
 
 // In-memory cache of chat sessions (persists during page lifetime)
@@ -115,6 +117,7 @@ export class ChatService {
         onPlanCreated?: (planId: string) => void,
         onSessionId?: (sid: string) => void,
         fileIds?: string[],
+        onGeneratedFile?: (f: { file_id: string; filename: string; download_url: string }) => void,
     ): AsyncIterable<string> {
         return {
             [Symbol.asyncIterator](): AsyncIterator<string> {
@@ -142,6 +145,7 @@ export class ChatService {
                     onPlanCreated: (planId) => { onPlanCreated?.(planId); finish(); },
                     onDone:        () => finish(),
                     onError:       (msg) => fail(new Error(msg)),
+                    onGeneratedFile: (f) => { onGeneratedFile?.(f); },
                 }, fileIds).catch(fail);
 
                 return {
@@ -184,14 +188,36 @@ export class ChatService {
             const session = await apiService.getChatSession(sessionId);
             if (!session || !session.messages) return [];
 
-            const messages: ChatMessage[] = session.messages.map((m) => ({
-                id: m.id,
-                content: m.content,
-                role: (m as any).role || (m as any).sender as 'user' | 'assistant',
-                timestamp: new Date(m.timestamp),
-                intent: (m.metadata as any)?.intent,
-                agent: (m.metadata as any)?.agent,
-            }));
+            const messages: ChatMessage[] = session.messages.map((m) => {
+                const meta = (m.metadata as any) ?? {};
+                const gf: Array<{ file_id: string; filename: string; container_id?: string | null; download_url: string }> =
+                    Array.isArray(meta.generated_files) ? meta.generated_files : [];
+                // Strip sandbox: markdown links unconditionally — replace with real
+                // download_url when the filename matches a known generated file.
+                let content = m.content ?? '';
+                content = content.replace(
+                    /\[([^\]]+)\]\(sandbox:[^)]+\)/g,
+                    (_match: string, label: string) => {
+                        const known = gf.find(
+                            (f) => label.includes(f.filename) || f.filename.includes(label)
+                        );
+                        // Use clean filename as label; if unknown, extract basename
+                        const cleanLabel = known?.filename ?? label.split('/').pop() ?? label;
+                        return known
+                            ? `[${cleanLabel}](${known.download_url})`
+                            : cleanLabel;
+                    }
+                );
+                return {
+                    id: m.id,
+                    content,
+                    role: (m as any).role || (m as any).sender as 'user' | 'assistant',
+                    timestamp: new Date(m.timestamp),
+                    intent: meta.intent,
+                    agent: meta.agent,
+                    generatedFiles: gf.length > 0 ? gf : undefined,
+                };
+            });
 
             chatSessions.set(sessionId, messages);
             return messages;

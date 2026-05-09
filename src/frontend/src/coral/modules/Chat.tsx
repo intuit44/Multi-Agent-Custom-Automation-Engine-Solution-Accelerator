@@ -24,6 +24,7 @@ const _apiService = new APIService();
 interface Message {
   role: string;
   content: string;
+  generatedFiles?: Array<{ file_id: string; filename: string; download_url: string }>;
   _meta?: {
     ui?: {
       resourceUri?: string;
@@ -41,6 +42,8 @@ export interface ChatHandle {
   pushMessage: (msg: { role: string; content: string; _meta?: Message['_meta'] }) => void;
   /** Update the content of the last message (used for WS streaming chunks). */
   updateLastMessage: (updater: (prev: string) => string) => void;
+  /** Attach generated files to the last assistant message. */
+  attachGeneratedFilesToLastMessage: (files: Array<{ file_id: string; filename: string; download_url: string }>) => void;
   /** Clear all messages. */
   clearMessages: () => void;
 }
@@ -74,6 +77,14 @@ const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
   },
   ref
 ) {
+  const getGeneratedFileKind = (filename: string): "pdf" | "image" | "text" | "other" => {
+    const lower = filename.toLowerCase();
+    if (lower.endsWith(".pdf")) return "pdf";
+    if (/\.(png|jpg|jpeg|gif|webp|svg)$/.test(lower)) return "image";
+    if (/\.(txt|md|csv|json|html)$/.test(lower)) return "text";
+    return "other";
+  };
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -109,6 +120,17 @@ const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
         if (prev.length === 0) return prev;
         const updated = [...prev];
         updated[updated.length - 1] = { ...updated[updated.length - 1], content: updater(updated[updated.length - 1].content) };
+        return updated;
+      }),
+    attachGeneratedFilesToLastMessage: (files) =>
+      setMessages((prev) => {
+        if (prev.length === 0) return prev;
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        updated[updated.length - 1] = {
+          ...last,
+          generatedFiles: files,
+        };
         return updated;
       }),
     clearMessages: () => setMessages([]),
@@ -284,6 +306,9 @@ const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
         <div className="message-wrapper">
         {messages.map((msg, index) => (
           <div key={index} className={`message ${msg.role}`}>
+            {(() => {
+              const generatedFiles = msg.generatedFiles ?? [];
+              return (
             <Body1>
               <div style={{ display: "flex", flexDirection: "column", whiteSpace: "pre-wrap", width: "100%" }}>
                 {/* MCP Protocol 2025-11-25: Render widget if _meta.ui.resourceUri present */}
@@ -316,10 +341,89 @@ const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
                         icon={<HeartRegular />}
                       />
                     </div>
+                    {/* Generated files from code_interpreter */}
+                    {generatedFiles.length > 0 && (
+                      <div style={{ marginTop: "6px" }}>
+                        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                          {generatedFiles.map((f) => (
+                            <a
+                              key={f.file_id}
+                              href={f.download_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                display: "inline-flex", alignItems: "center", gap: "4px",
+                                background: "var(--colorBrandBackground2)",
+                                borderRadius: "12px", padding: "4px 10px",
+                                fontSize: "12px", color: "var(--colorBrandForeground1)",
+                                textDecoration: "none",
+                              }}
+                            >
+                              ⬇️ {f.filename}
+                            </a>
+                          ))}
+                        </div>
+                        {generatedFiles.slice(0, 1).map((f) => {
+                          const kind = getGeneratedFileKind(f.filename);
+                          if (kind === "pdf") {
+                            return (
+                              <iframe
+                                key={`${f.file_id}-preview`}
+                                src={f.download_url}
+                                title={f.filename}
+                                style={{
+                                  width: "100%",
+                                  height: "420px",
+                                  border: "1px solid var(--colorNeutralStroke2)",
+                                  borderRadius: "12px",
+                                  marginTop: "10px",
+                                  background: "white",
+                                }}
+                              />
+                            );
+                          }
+                          if (kind === "image") {
+                            return (
+                              <img
+                                key={`${f.file_id}-preview`}
+                                src={f.download_url}
+                                alt={f.filename}
+                                style={{
+                                  maxWidth: "100%",
+                                  borderRadius: "12px",
+                                  marginTop: "10px",
+                                  border: "1px solid var(--colorNeutralStroke2)",
+                                }}
+                              />
+                            );
+                          }
+                          if (kind === "text") {
+                            return (
+                              <iframe
+                                key={`${f.file_id}-preview`}
+                                src={f.download_url}
+                                title={f.filename}
+                                style={{
+                                  width: "100%",
+                                  height: "260px",
+                                  border: "1px solid var(--colorNeutralStroke2)",
+                                  borderRadius: "12px",
+                                  marginTop: "10px",
+                                  background: "var(--colorNeutralBackground1)",
+                                }}
+                              />
+                            );
+                          }
+                          return null;
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
             </Body1>
+              );
+            })()}
           </div>
         ))}</div>
 
