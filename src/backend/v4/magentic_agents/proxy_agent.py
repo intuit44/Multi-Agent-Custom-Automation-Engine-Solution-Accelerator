@@ -287,7 +287,11 @@ class ProxyAgent(BaseAgent):
         """
         Wait for user clarification with timeout and cancellation handling.
         """
-        orchestration_config.set_clarification_pending(request_id)
+        orchestration_config.set_clarification_pending(
+            request_id,
+            session_id=self.session_id,
+            user_id=self.user_id,
+        )
         try:
             answer = await orchestration_config.wait_for_clarification(request_id)
             return UserClarificationResponse(request_id=request_id, answer=answer)

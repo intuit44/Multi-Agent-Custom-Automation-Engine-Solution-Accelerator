@@ -99,7 +99,10 @@ class OrchestrationConfig:
         self.sockets: Dict[str, WebSocket] = {}  # user_id -> WebSocket
         self.clarifications: Dict[
             str, Optional[str]
-        ] = {}  # m_plan_id -> clarification response (None pending)
+        ] = {}  # request_id -> clarification response (None pending)
+        self.clarification_contexts: Dict[
+            str, Dict[str, str]
+        ] = {}  # request_id -> session/user context for routing answers
         self.max_rounds: int = 20  # Maximum replanning rounds
 
         # Event-driven notification system for approvals and clarifications
@@ -178,13 +181,37 @@ class OrchestrationConfig:
             if plan_id in self.approvals and self.approvals[plan_id] is None:
                 self.cleanup_approval(plan_id)
 
-    def set_clarification_pending(self, request_id: str) -> None:
+    def set_clarification_pending(
+        self,
+        request_id: str,
+        session_id: str = "",
+        user_id: str = "",
+    ) -> None:
         """Mark clarification pending and create/reset its event."""
         self.clarifications[request_id] = None
+        self.clarification_contexts[request_id] = {
+            "session_id": session_id or "",
+            "user_id": user_id or "",
+        }
         if request_id not in self._clarification_events:
             self._clarification_events[request_id] = asyncio.Event()
         else:
             self._clarification_events[request_id].clear()
+
+    def get_pending_clarification_for_session(
+        self, session_id: str, user_id: str = ""
+    ) -> Optional[str]:
+        """Return the pending clarification request for this chat session."""
+        for request_id, answer in self.clarifications.items():
+            if answer is not None:
+                continue
+            context = self.clarification_contexts.get(request_id, {})
+            if context.get("session_id") != session_id:
+                continue
+            if user_id and context.get("user_id") not in ("", user_id):
+                continue
+            return request_id
+        return None
 
     def set_clarification_result(self, request_id: str, answer: str) -> None:
         """Set clarification answer and trigger event."""
@@ -245,6 +272,7 @@ class OrchestrationConfig:
     def cleanup_clarification(self, request_id: str) -> None:
         """Remove clarification tracking data and event."""
         self.clarifications.pop(request_id, None)
+        self.clarification_contexts.pop(request_id, None)
         self._clarification_events.pop(request_id, None)
 
 

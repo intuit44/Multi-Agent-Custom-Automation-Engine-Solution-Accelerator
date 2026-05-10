@@ -843,7 +843,7 @@ async def chat_message_stream(
     authenticated_user = get_authenticated_user_details(request_headers=request.headers)
     user_id = authenticated_user["user_principal_id"]
     tenant_id = authenticated_user.get("tenant_id", "")
-    user_access_token = authenticated_user.get("access_token")  # For OBO flow
+    authenticated_user.get("access_token")  # For OBO flow
 
     if not chat_request.session_id:
         chat_request.session_id = str(uuid.uuid4())
@@ -870,78 +870,70 @@ async def chat_message_stream(
     # Routing it through IntentRouter would mis-classify it as a new task or
     # conversational intent and create an infinite clarification loop.
     #
-    # The plan_id in the task anchor (written to chat_cosmos by process_request)
-    # is the sole proof of ownership — no plan-DB query needed.
+    # The pending request must belong to this exact chat session.  The task
+    # anchor only says this session is in plan mode; request ownership is stored
+    # when ProxyAgent creates the clarification request.
     if previous_intent == "task":
-        pending_request_id: Optional[str] = next(
-            (
-                req_id
-                for req_id, ans in orchestration_config.clarifications.items()
-                if ans is None
-            ),
-            None,
+        pending_request_id = orchestration_config.get_pending_clarification_for_session(
+            chat_request.session_id,
+            user_id,
         )
         if pending_request_id:
-            # plan_id was stored in the anchor metadata already read by
-            # _get_previous_intent — reuse the session data already in memory.
-            _session_match = True  # previous_intent=="task" is the proof
-
-            if _session_match:
-                logger.info(
-                    "Routing message as clarification answer for request_id=%s session=%s",
-                    pending_request_id,
-                    chat_request.session_id,
+            logger.info(
+                "Routing message as clarification answer for request_id=%s session=%s",
+                pending_request_id,
+                chat_request.session_id,
+            )
+            # Deliver the answer to the waiting orchestration.
+            orchestration_config.set_clarification_result(
+                pending_request_id, chat_request.message
+            )
+            # Persist the exchange to the single chat history.
+            try:
+                await chat_svc.add_message(
+                    session_id=chat_request.session_id,
+                    user_id=user_id,
+                    content="✅ Clarification submitted. Processing…",
+                    role="assistant",
+                    metadata={"intent": "task"},
                 )
-                # Deliver the answer to the waiting orchestration.
-                orchestration_config.set_clarification_result(
-                    pending_request_id, chat_request.message
-                )
-                # Persist the exchange to the single chat history.
-                try:
-                    await chat_svc.add_message(
-                        session_id=chat_request.session_id,
-                        user_id=user_id,
-                        content="✅ Clarification submitted. Processing…",
-                        role="assistant",
-                        metadata={"intent": "task"},
-                    )
-                except Exception as _e:
-                    logger.warning("Could not persist clarification ack: %s", _e)
+            except Exception as _e:
+                logger.warning("Could not persist clarification ack: %s", _e)
 
-                async def _clarification_stream():
-                    yield _sse_event(
-                        {
-                            "type": "intent",
-                            "intent": "task",
-                            "confidence": 1.0,
-                            "session_id": chat_request.session_id,
-                        }
-                    )
-                    yield _sse_event(
-                        {
-                            "type": "token",
-                            "content": "✅ Clarification submitted. Processing…",
-                        }
-                    )
-                    yield _sse_event(
-                        {
-                            "type": "done",
-                            "intent": "task",
-                            "agent": "assistant",
-                            "confidence": 1.0,
-                            "session_id": chat_request.session_id,
-                        }
-                    )
-
-                return StreamingResponse(
-                    _clarification_stream(),
-                    media_type="text/event-stream",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                        "X-Accel-Buffering": "no",
-                    },
+            async def _clarification_stream():
+                yield _sse_event(
+                    {
+                        "type": "intent",
+                        "intent": "task",
+                        "confidence": 1.0,
+                        "session_id": chat_request.session_id,
+                    }
                 )
+                yield _sse_event(
+                    {
+                        "type": "token",
+                        "content": "✅ Clarification submitted. Processing…",
+                    }
+                )
+                yield _sse_event(
+                    {
+                        "type": "done",
+                        "intent": "task",
+                        "agent": "assistant",
+                        "confidence": 1.0,
+                        "session_id": chat_request.session_id,
+                    }
+                )
+
+            return StreamingResponse(
+                _clarification_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
     # ── End clarification guard ──────────────────────────────────
 
     intent_result = await IntentRouter.classify_async(
@@ -1022,36 +1014,37 @@ async def chat_message_stream(
 
         try:
             code_interpreter_call_emitted = False
-            from common.config.app_config import config as app_config
             from v4.config.agent_pool import get_or_create
             from v4.magentic_agents.foundry_agent import FoundryAgentTemplate
-            from v4.magentic_agents.models.agent_models import MCPConfig
+            from v4.magentic_agents.magentic_agent_factory import MagenticAgentFactory
+
+            _memory_store = await DatabaseFactory.get_database(user_id=user_id)
+            _user_team = await _memory_store.get_current_team(user_id=user_id)
+            if not _user_team:
+                raise ValueError("No active team configured for user")
+            _team = await _memory_store.get_team_by_id(team_id=_user_team.team_id)
 
             async def _factory():
-                try:
-                    mcp_cfg = MCPConfig.from_env()
-                except ValueError:
-                    mcp_cfg = None
-                    logger.warning(
-                        "MCP env vars missing; ChatMCPAgent will have no MCP tools"
-                    )
-
-                a = FoundryAgentTemplate(
-                    agent_name="ChatMCPAgent",
-                    agent_description="Server-side chat agent with KB and MCP tools",
-                    agent_instructions=_MCP_AGENT_INSTRUCTIONS,
-                    use_reasoning=True,
-                    model_deployment_name=app_config.AZURE_OPENAI_DEPLOYMENT_NAME,
-                    project_endpoint=app_config.AZURE_AI_PROJECT_ENDPOINT,
-                    mcp_config=mcp_cfg,
-                    ephemeral=False,
-                    user_id=user_id,
-                    session_id=chat_request.session_id,
-                    runtime_tools_enabled=False,
-                    user_access_token=user_access_token,
+                if not _team:
+                    raise ValueError("No active team configured for user")
+                _factory_store = await DatabaseFactory.get_database(user_id=user_id)
+                _all_agents = await MagenticAgentFactory().get_agents(
+                    user_id, _team, _factory_store
                 )
-                await a.open()
-                return a
+                # Only FoundryAgentTemplate has .invoke() — ProxyAgent does not
+                _foundry = [
+                    a for a in _all_agents if isinstance(a, FoundryAgentTemplate)
+                ]
+                # Prefer use_rag=True; fall back to any FoundryAgentTemplate
+                _agent = next(
+                    (a for a in _foundry if getattr(a, "use_rag", False)),
+                    _foundry[0] if _foundry else None,
+                )
+                if not _agent:
+                    raise ValueError(
+                        "Team has no FoundryAgentTemplate agents with invoke()"
+                    )
+                return _agent
 
             agent = await get_or_create(
                 tenant_id, user_id, chat_request.session_id, _factory
@@ -1059,6 +1052,8 @@ async def chat_message_stream(
 
             async for update in agent.invoke(
                 chat_request.message,
+                session_id=chat_request.session_id,
+                user_id=user_id,
                 file_ids=chat_request.file_ids,
             ):
                 # Process ALL content types from the agent framework
@@ -1423,43 +1418,44 @@ async def _get_mcp_query_response(
     Args:
         user_access_token: User's EasyAuth access token for OBO flow in Foundry.
     """
-    from common.config.app_config import config as app_config
     from v4.config.agent_pool import get_or_create
-    from v4.magentic_agents.foundry_agent import FoundryAgentTemplate
-    from v4.magentic_agents.models.agent_models import MCPConfig
+    from v4.magentic_agents.magentic_agent_factory import MagenticAgentFactory
 
     try:
+        _memory_store = await DatabaseFactory.get_database(user_id=user_id)
+        _user_team = await _memory_store.get_current_team(user_id=user_id)
+        if not _user_team:
+            raise ValueError("No active team configured for user")
+        _team = await _memory_store.get_team_by_id(team_id=_user_team.team_id)
 
         async def _factory():
-            try:
-                mcp_cfg = MCPConfig.from_env()
-            except ValueError:
-                mcp_cfg = None
-                logger.warning(
-                    "MCP env vars missing; ChatMCPAgent will have no MCP tools"
-                )
+            if not _team:
+                raise ValueError("No active team configured for user")
+            from v4.magentic_agents.foundry_agent import FoundryAgentTemplate
 
-            a = FoundryAgentTemplate(
-                agent_name="ChatMCPAgent",
-                agent_description="Server-side chat agent with KB and MCP tools",
-                agent_instructions=_MCP_AGENT_INSTRUCTIONS,
-                use_reasoning=True,
-                model_deployment_name=app_config.AZURE_OPENAI_DEPLOYMENT_NAME,
-                project_endpoint=app_config.AZURE_AI_PROJECT_ENDPOINT,
-                mcp_config=mcp_cfg,
-                ephemeral=False,
-                user_id=user_id,
-                session_id=session_id,
-                runtime_tools_enabled=False,
-                user_access_token=user_access_token,
+            _factory_store = await DatabaseFactory.get_database(user_id=user_id)
+            _all_agents = await MagenticAgentFactory().get_agents(
+                user_id, _team, _factory_store
             )
-            await a.open()
-            return a
+            # Only FoundryAgentTemplate has .invoke() — ProxyAgent does not
+            _foundry = [a for a in _all_agents if isinstance(a, FoundryAgentTemplate)]
+            # Prefer use_rag=True; fall back to any FoundryAgentTemplate
+            _agent = next(
+                (a for a in _foundry if getattr(a, "use_rag", False)),
+                _foundry[0] if _foundry else None,
+            )
+            if not _agent:
+                raise ValueError(
+                    "Team has no FoundryAgentTemplate agents with invoke()"
+                )
+            return _agent
 
         agent = await get_or_create(tenant_id, user_id, session_id, _factory)
 
         full_text = ""
-        async for update in agent.invoke(message):
+        async for update in agent.invoke(
+            message, session_id=session_id, user_id=user_id
+        ):
             token = getattr(update, "text", "") or ""
             if token:
                 full_text += token

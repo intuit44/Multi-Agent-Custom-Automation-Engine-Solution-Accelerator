@@ -17,12 +17,12 @@
       "description": "Agent for HR-related employee inquiries grounded in the HR knowledge index (onboarding, benefits, policies).",
       "use_rag": true,
       "use_mcp": false,
-      "use_bing": true,
+      "use_bing": false,
       "use_reasoning": true,
       "index_name": "macae-hr-knowledge-index",
       "index_foundry_name": "",
       "index_endpoint": "",
-      "coding_tools": true
+      "coding_tools": false
     },
     {
       "input_key": "",
@@ -34,11 +34,11 @@
       "description": "Agent for IT/technical support inquiries grounded in the company knowledge index.",
       "use_rag": true,
       "use_mcp": false,
-      "use_bing": true,
+      "use_bing": false,
       "use_reasoning": true,
       "index_name": "macae-hr-knowledge-index",
       "index_foundry_name": "",
-      "coding_tools": true
+      "coding_tools": false
     },
     {
       "input_key": "",

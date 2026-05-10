@@ -4,7 +4,7 @@
 import json
 import logging
 from types import SimpleNamespace
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 
 from common.config.app_config import config
 from common.database.database_base import DatabaseBase
@@ -48,7 +48,7 @@ class MagenticAgentFactory:
     async def create_agent_from_config(
         self,
         user_id: str,
-        agent_obj: SimpleNamespace,
+        agent_obj: Union[SimpleNamespace, Any],
         team_config: TeamConfiguration,
         memory_store: DatabaseBase,
     ) -> Union[FoundryAgentTemplate, ProxyAgent]:
@@ -73,6 +73,11 @@ class MagenticAgentFactory:
         if not deployment_name and agent_obj.name.lower() == "proxyagent":
             self.logger.info("Creating ProxyAgent")
             return ProxyAgent(user_id=user_id)
+
+        if not deployment_name:
+            raise InvalidConfigurationError(
+                f"Agent '{agent_obj.name}' missing requiered 'deployment_name' field"
+            )
 
         # Validate supported models
         supported_models = json.loads(config.SUPPORTED_MODELS)
@@ -101,7 +106,7 @@ class MagenticAgentFactory:
         index_name = getattr(agent_obj, "index_name", None)
         search_config = (
             SearchConfig.from_env(index_name)
-            if getattr(agent_obj, "use_rag", False)
+            if getattr(agent_obj, "use_rag", False) and index_name
             else None
         )
         mcp_config = (
