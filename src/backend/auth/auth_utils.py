@@ -132,8 +132,9 @@ def get_tenantid(client_principal_b64):
     tenant_id = ""
     if client_principal_b64:
         try:
-            # Decode the base64 header to get the JSON string
-            decoded_bytes = base64.b64decode(client_principal_b64)
+            # Pad base64 string to a multiple of 4 before decoding
+            padded = client_principal_b64 + "=" * (-len(client_principal_b64) % 4)
+            decoded_bytes = base64.b64decode(padded)
             decoded_string = decoded_bytes.decode("utf-8")
             # Convert the JSON string1into a Python dictionary
             user_info = json.loads(decoded_string)

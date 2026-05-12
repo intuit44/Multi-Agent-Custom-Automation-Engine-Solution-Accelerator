@@ -1,30 +1,60 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
     Spinner
 } from '@fluentui/react-components';
+import { useNavigate } from 'react-router-dom';
 import '../styles/PlanPage.css';
 import CoralShellColumn from '../coral/components/Layout/CoralShellColumn';
 import CoralShellRow from '../coral/components/Layout/CoralShellRow';
 import Content from '../coral/components/Content/Content';
 import HomeInput from '@/components/content/HomeInput';
+import Chat from '@/coral/modules/Chat';
 import { NewTaskService } from '../services/NewTaskService';
 import PlanPanelLeft from '@/components/content/PlanPanelLeft';
 import ContentToolbar from '@/coral/components/Content/ContentToolbar';
 import { TeamConfig } from '../models/Team';
 import InspectorLink from '@/components/inspector/InspectorLink';
 import { TeamService } from '../services/TeamService';
+import { ChatService } from '../services/ChatService';
 import InlineToaster, { useInlineToaster } from "../components/toast/InlineToaster";
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import {
+    addStreamToken,
+    addUserMessage,
+    finishStreaming,
+    initAssistantMessage,
+    resetChat,
+    selectIsStreaming,
+    selectMessages,
+    selectSessionId,
+    setSessionId,
+    startStreaming,
+} from '../store/slices/chatSlice';
 
 /**
  * HomePage component - displays task lists and provides navigation
  * Accessible via the route "/"
  */
 const HomePage: React.FC = () => {
+    const dispatch = useAppDispatch();
+    const navigate = useNavigate();
     const { showToast } = useInlineToaster();
+    const chatMessages = useAppSelector(selectMessages);
+    const sessionId = useAppSelector(selectSessionId);
+    const isStreaming = useAppSelector(selectIsStreaming);
     const [selectedTeam, setSelectedTeam] = useState<TeamConfig | null>(null);
     const [isLoadingTeam, setIsLoadingTeam] = useState<boolean>(true);
     const [reloadLeftList, setReloadLeftList] = useState<boolean>(true);
     const initCalledRef = useRef(false);
+
+    const renderedChatMessages = useMemo(
+        () => chatMessages.map((message) => ({
+            role: message.role,
+            content: message.content,
+            generatedFiles: message.metadata?.generatedFiles,
+        })),
+        [chatMessages]
+    );
 
     useEffect(() => {
         if (initCalledRef.current) return;
@@ -100,8 +130,63 @@ const HomePage: React.FC = () => {
     * Resets textarea to empty state on HomePage
     */
     const handleNewTaskButton = useCallback(() => {
+        dispatch(resetChat());
         NewTaskService.handleNewTaskFromHome();
-    }, []);
+    }, [dispatch]);
+
+    const handleChatSend = useCallback(async (
+        message: string,
+        _history: Array<{ role: string; content: string }>,
+        fileIds?: string[]
+    ): Promise<string> => {
+        const randomValues = crypto.getRandomValues(new Uint32Array(1));
+        const nextSessionId = sessionId || `chat_${Date.now()}_${randomValues[0]}`;
+        let intent = "";
+        let fullResponse = "";
+        let redirectPlan: string | null = null;
+        const collectedFiles: Array<{ file_id: string; filename: string; download_url: string }> = [];
+
+        dispatch(setSessionId(nextSessionId));
+        dispatch(addUserMessage(message));
+        dispatch(initAssistantMessage());
+        dispatch(startStreaming());
+
+        await ChatService.sendMessageStream(message, nextSessionId, {
+            onToken: (token) => {
+                fullResponse += token;
+                dispatch(addStreamToken(token));
+            },
+            onIntent: (data) => {
+                intent = data.intent;
+                if (data.session_id) {
+                    dispatch(setSessionId(data.session_id));
+                }
+            },
+            onDone: (data) => {
+                intent = data.intent;
+            },
+            onRedirect: (planId) => {
+                redirectPlan = planId;
+            },
+            onPlanCreated: (planId) => {
+                redirectPlan = planId;
+            },
+            onError: (errorMsg) => {
+                fullResponse = `Error: ${errorMsg}`;
+            },
+            onGeneratedFile: (file) => {
+                collectedFiles.push(file);
+            },
+        }, fileIds);
+
+        dispatch(finishStreaming({ metadata: { intent, generatedFiles: collectedFiles, fullResponse } }));
+
+        if (redirectPlan) {
+            navigate(`/plan/${redirectPlan}`);
+        }
+
+        return "";
+    }, [dispatch, navigate, sessionId]);
 
     /**
      * Handle team selection from the Settings button
@@ -215,9 +300,19 @@ const HomePage: React.FC = () => {
                             <InspectorLink />
                         </ContentToolbar>
                         {!isLoadingTeam ? (
-                            <HomeInput
-                                selectedTeam={selectedTeam}
-                            />
+                            chatMessages.length > 0 ? (
+                                <Chat
+                                    userId="home-chat"
+                                    externalMessages={renderedChatMessages}
+                                    externalIsTyping={isStreaming}
+                                    onSendMessage={handleChatSend}
+                                    onClearHistory={() => dispatch(resetChat())}
+                                />
+                            ) : (
+                                <HomeInput
+                                    selectedTeam={selectedTeam}
+                                />
+                            )
                         ) : (
                             <div style={{
                                 display: 'flex',

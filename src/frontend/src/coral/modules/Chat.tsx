@@ -17,8 +17,7 @@ import WidgetFrame from "../components/WidgetFrame";
 import HeaderTools from "../components/Header/HeaderTools";
 import "./Chat.css";
 import "./prism-material-oceanic.css";
-// import { chatService } from "../services/chatService"; // TODO: Re-enable when chatService integration is complete
-
+import { ChatService } from "../../services/ChatService";
 const _apiService = new APIService();
 
 interface Message {
@@ -51,6 +50,8 @@ export interface ChatHandle {
 interface ChatProps {
   userId: string;
   children?: React.ReactNode;
+  externalMessages?: Message[];
+  externalIsTyping?: boolean;
   onSendMessage?: (
     input: string,
     history: Message[],
@@ -70,6 +71,8 @@ const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
   {
     userId,
     children,
+    externalMessages,
+    externalIsTyping,
     onSendMessage,
     onSaveMessage,
     onLoadHistory,
@@ -93,6 +96,7 @@ const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
   const [, setAvailableWidgets] = useState<any[]>([]);
   const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; file_id: string }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [currentConversationId, setCurrentConversationId] = useState<string | undefined>();
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputContainerRef = useRef<HTMLDivElement>(null);
@@ -135,6 +139,12 @@ const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
       }),
     clearMessages: () => setMessages([]),
   }));
+
+  useEffect(() => {
+    if (externalMessages) {
+      setMessages(externalMessages);
+    }
+  }, [externalMessages]);
 
   // MCP Discovery: Load available widgets proactively
   useEffect(() => {
@@ -215,6 +225,38 @@ const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
   const sendMessage = async () => {
     if (!input.trim()) return;
 
+    if (externalMessages) {
+      const outbound = input;
+      const currentFileIds = attachedFiles.map(f => f.file_id);
+      setInput("");
+      setAttachedFiles([]);
+      setIsTyping(true);
+
+      try {
+        const response = onSendMessage?.(
+          outbound,
+          messages,
+          currentFileIds.length > 0 ? currentFileIds : undefined
+        );
+
+        if (response) {
+          if (isAsyncIterable(response)) {
+            for await (const chunk of response) {
+              void chunk;
+              // External mode renders from Redux; callback side effects update the UI.
+            }
+          } else {
+            await response;
+          }
+        }
+      } catch (err) {
+        console.log("Send Message Error:", err);
+      } finally {
+        setIsTyping(false);
+      }
+      return;
+    }
+
     const updatedMessages = [...messages, { role: "user", content: input }];
     setMessages(updatedMessages);
     const currentFileIds = attachedFiles.map(f => f.file_id);
@@ -270,10 +312,10 @@ const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
         }
       } else {
         // TODO: Implement chatService integration when not using onSendMessage
-        // const response = await chatService.sendMessage(userId, input, currentConversationId);
-        // setCurrentConversationId(response.conversation_id);
-        // const assistantMessage = { role: "assistant", content: response.assistant_response };
-        // setMessages([...updatedMessages, assistantMessage]);
+        const response = await ChatService.sendMessage(input, currentConversationId);
+        setCurrentConversationId(response.session_id);
+        const assistantMessage = { role: "assistant", content: response.response };
+        setMessages([...updatedMessages, assistantMessage]);
         console.warn("No onSendMessage handler provided, message not sent");
       }
     } catch (err) {
@@ -428,7 +470,7 @@ const Chat = forwardRef<ChatHandle, ChatProps>(function Chat(
         ))}</div>
 
 
-        {isTyping && (
+        {(isTyping || externalIsTyping) && (
           <div className="typing-indicator">
             <span>Thinking...</span>
           </div>

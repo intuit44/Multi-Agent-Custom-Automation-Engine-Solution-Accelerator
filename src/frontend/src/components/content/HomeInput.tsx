@@ -22,6 +22,8 @@ import PromptCard from "@/coral/components/PromptCard";
 import { Send } from "@/coral/imports/bundleicons";
 import { Attach20Regular, Clipboard20Regular, Dismiss20Regular } from "@fluentui/react-icons";
 import { apiService } from "../../api/apiService";
+import { useAppDispatch } from "../../store/hooks";
+import { addUserMessage, initAssistantMessage, startStreaming, addStreamToken, finishStreaming, setSessionId, setSubmittingDisabled } from "../../store/slices/chatSlice";
 
 // Icon mapping function to convert string icons to FluentUI icons
 const getIconFromString = (
@@ -64,6 +66,7 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
   const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; file_id: string }>>([]);
   const [generatedFiles, setGeneratedFiles] = useState<Array<{ file_id: string; filename: string; download_url: string }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dispatch = useAppDispatch();
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -114,6 +117,7 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
   const handleSubmit = async () => {
     if (input.trim()) {
       setSubmitting(true);
+      dispatch(setSubmittingDisabled(true));
       let id = showToast("Analyzing your request…", "progress");
 
       try {
@@ -124,6 +128,13 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
         const sessionId = `chat_${Date.now()}_${randomValues[0]}`;
         const userMessage = input.trim();
         const fileIds = attachedFiles.map(f => f.file_id);
+
+        dispatch(setSessionId(sessionId));
+        // Dispatch user message to Redux
+        dispatch(addUserMessage(userMessage));
+        // Initialize assistant message placeholder
+        dispatch(initAssistantMessage());
+        dispatch(startStreaming());
 
         setInput("");
         setAttachedFiles([]);
@@ -137,7 +148,10 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
         const collectedFiles: Array<{ file_id: string; filename: string; download_url: string }> = [];
 
         await ChatService.sendMessageStream(userMessage, sessionId, {
-          onToken: (token) => { fullResponse += token; },
+          onToken: (token) => {
+            fullResponse += token;
+            dispatch(addStreamToken(token));
+          },
           onIntent: (data) => {
             intent = data.intent;
             if (data.session_id) {
@@ -147,7 +161,10 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
           onDone: (data) => { intent = data.intent; },
           onRedirect: (planId) => { redirectPlan = planId; },
           onPlanCreated: (planId) => { redirectPlan = planId; },
-          onError: (errorMsg) => { fullResponse = `Error: ${errorMsg}`; },
+          onError: (errorMsg) => {
+            fullResponse = `Error: ${errorMsg}`;
+            dispatch(finishStreaming({ metadata: { intent } }));
+          },
           onGeneratedFile: (f) => { collectedFiles.push(f); },
         }, fileIds);
 
@@ -155,19 +172,14 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
           setGeneratedFiles(collectedFiles);
         }
 
+        dispatch(finishStreaming({ metadata: { intent, generatedFiles: collectedFiles, fullResponse } }));
         dismissToast(id);
 
         if (redirectPlan) {
-          // TASK intent → same /chat/:sessionId, ChatPage activates plan mode inline
           showToast("Plan created!", "success");
-          navigate(`/chat/${sessionId}`, { state: { initialPlanId: redirectPlan } });
+          navigate(`/plan/${redirectPlan}`);
         } else {
-          // CONVERSATIONAL / MCP → open chat page with the response already generated
-          const initialMessages = [
-            { id: `msg_${Date.now()}_user`, content: userMessage, role: "user", timestamp: new Date() },
-            { id: `msg_${Date.now()}_assistant`, content: fullResponse, role: "assistant", timestamp: new Date(), intent, generatedFiles: collectedFiles },
-          ];
-          navigate(`/chat/${sessionId}`, { state: { initialMessages } });
+          // CONVERSATIONAL / MCP stays on HomePage; HomePage renders Chat from Redux messages.
         }
       } catch (error: any) {
         console.log("Error processing message:", error);
@@ -182,6 +194,7 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
       } finally {
         setInput("");
         setSubmitting(false);
+        dispatch(setSubmittingDisabled(false));
       }
     }
   };

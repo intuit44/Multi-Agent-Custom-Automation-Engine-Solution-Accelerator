@@ -1,2 +1,0 @@
-
-"""Initialize the base package."""

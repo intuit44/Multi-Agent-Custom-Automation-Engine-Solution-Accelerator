@@ -45,9 +45,20 @@ class OrchestrationManager:
 
     logger = logging.getLogger(f"{__name__}.OrchestrationManager")
 
+    # Per-user-id lock to prevent concurrent orchestration initialization
+    # Ensures idempotency: only one initialization runs per user at a time
+    _initialization_locks: dict[str, asyncio.Lock] = {}
+
     def __init__(self):
         self.user_id: Optional[str] = None
         self.logger = self.__class__.logger
+
+    @classmethod
+    def _get_user_lock(cls, user_id: str) -> asyncio.Lock:
+        """Get or create an asyncio.Lock for the given user_id."""
+        if user_id not in cls._initialization_locks:
+            cls._initialization_locks[user_id] = asyncio.Lock()
+        return cls._initialization_locks[user_id]
 
     def _extract_response_text(self, data) -> str:
         """
@@ -207,12 +218,13 @@ class OrchestrationManager:
         participant_list = list(participants.values())
         cls.logger.info("Participants for workflow: %s", list(participants.keys()))
 
+        # Note: When using a custom manager, the framework ignores max_round_count,
+        # max_stall_count, and intermediate_outputs parameters.
+        # These are already configured in the HumanApprovalMagenticManager.
         builder = MagenticBuilder(
             participants=participant_list,
             manager=manager,
             checkpoint_storage=storage,
-            max_round_count=orchestration_config.max_rounds,
-            max_stall_count=3,  # Allow up to 3 stalled rounds before stopping; set to 0 to strictly prevent re-calling stalled agents.
             intermediate_outputs=True,  # Required: yield agent streaming output events, not just orchestrator output
         )
 
@@ -242,85 +254,106 @@ class OrchestrationManager:
           - None exists
           - Team switched flag is True
           - force_rebuild is True (for new tasks after workflow completion)
+
+        Thread-safe: uses per-user-id lock to prevent concurrent initialization.
+        If multiple requests arrive simultaneously, only the first one initializes;
+        the others wait and return the same orchestration instance.
         """
-        current = orchestration_config.get_current_orchestration(user_id)
-        needs_rebuild = current is None or team_switched or force_rebuild
+        # Acquire per-user lock to ensure only one initialization runs at a time
+        user_lock = cls._get_user_lock(user_id)
+        async with user_lock:
+            # Double-check pattern: re-check after acquiring lock
+            current = orchestration_config.get_current_orchestration(user_id)
+            needs_rebuild = current is None or team_switched or force_rebuild
 
-        if needs_rebuild:
-            if team_service is None or team_service.memory_context is None:
-                raise ValueError(
-                    "team_service with initialized memory_context is required"
-                )
-
-            if current is not None and (team_switched or force_rebuild):
-                reason = (
-                    "team switched" if team_switched else "force rebuild for new task"
-                )
-                cls.logger.info(
-                    "Rebuilding orchestration for user '%s' (reason: %s)",
-                    user_id,
-                    reason,
-                )
-                # Close prior lifecycle-managed agent wrappers.
-                # Each close() is scheduled as an independent asyncio Task so it
-                # runs in the CURRENT event-loop context (same loop, new task).
-                # This avoids the AnyIO cancel-scope violation that occurs when
-                # close() is called inline from a different coroutine chain than
-                # the one that opened the agent.  We gather all tasks and await
-                # them together to ensure cleanup finishes before rebuilding.
-                prior_wrappers = orchestration_config.agent_wrappers.pop(user_id, [])
-
-                async def _close_wrapper(agent) -> None:
-                    agent_name = getattr(
-                        agent, "agent_name", getattr(agent, "name", "")
+            if needs_rebuild:
+                if team_service is None or team_service.memory_context is None:
+                    raise ValueError(
+                        "team_service with initialized memory_context is required"
                     )
-                    close_method = getattr(agent, "close", None)
-                    if callable(close_method) and inspect.iscoroutinefunction(
-                        close_method
-                    ):
-                        try:
-                            await close_method()
-                            cls.logger.debug("Closed agent wrapper '%s'", agent_name)
-                        except Exception as e:
-                            cls.logger.warning(
-                                "Non-fatal error closing agent wrapper '%s': %s",
-                                agent_name,
-                                e,
-                            )
 
-                if prior_wrappers:
-                    close_tasks = [
-                        asyncio.ensure_future(_close_wrapper(a)) for a in prior_wrappers
-                    ]
-                    await asyncio.gather(*close_tasks, return_exceptions=True)
+                if current is not None and (team_switched or force_rebuild):
+                    reason = (
+                        "team switched"
+                        if team_switched
+                        else "force rebuild for new task"
+                    )
+                    cls.logger.info(
+                        "Rebuilding orchestration for user '%s' (reason: %s)",
+                        user_id,
+                        reason,
+                    )
+                    # Close prior lifecycle-managed agent wrappers.
+                    # Each close() is scheduled as an independent asyncio Task so it
+                    # runs in the CURRENT event-loop context (same loop, new task).
+                    # This avoids the AnyIO cancel-scope violation that occurs when
+                    # close() is called inline from a different coroutine chain than
+                    # the one that opened the agent.  We gather all tasks and await
+                    # them together to ensure cleanup finishes before rebuilding.
+                    prior_wrappers = orchestration_config.agent_wrappers.pop(
+                        user_id, []
+                    )
 
-            factory = MagenticAgentFactory(team_service=team_service)
-            try:
-                agents = await factory.get_agents(
-                    user_id=user_id,
-                    team_config_input=team_config,
-                    memory_store=team_service.memory_context,
-                )
-                cls.logger.info("Created %d agents for user '%s'", len(agents), user_id)
-            except Exception as e:
-                cls.logger.error(
-                    "Failed to create agents for user '%s': %s", user_id, e
-                )
-                raise
-            try:
-                cls.logger.info("Initializing new orchestration for user '%s'", user_id)
-                workflow = await cls.init_orchestration(
-                    agents, team_config, team_service.memory_context, user_id
-                )
-                orchestration_config.orchestrations[user_id] = workflow
-                # Store wrappers for proper cleanup on next rebuild
-                orchestration_config.agent_wrappers[user_id] = agents
-            except Exception as e:
-                cls.logger.error(
-                    "Failed to initialize orchestration for user '%s': %s", user_id, e
-                )
-                raise
-        return orchestration_config.get_current_orchestration(user_id)
+                    async def _close_wrapper(agent) -> None:
+                        agent_name = getattr(
+                            agent, "agent_name", getattr(agent, "name", "")
+                        )
+                        close_method = getattr(agent, "close", None)
+                        if callable(close_method) and inspect.iscoroutinefunction(
+                            close_method
+                        ):
+                            try:
+                                await close_method()
+                                cls.logger.debug(
+                                    "Closed agent wrapper '%s'", agent_name
+                                )
+                            except Exception as e:
+                                cls.logger.warning(
+                                    "Non-fatal error closing agent wrapper '%s': %s",
+                                    agent_name,
+                                    e,
+                                )
+
+                    if prior_wrappers:
+                        close_tasks = [
+                            asyncio.ensure_future(_close_wrapper(a))
+                            for a in prior_wrappers
+                        ]
+                        await asyncio.gather(*close_tasks, return_exceptions=True)
+
+                factory = MagenticAgentFactory(team_service=team_service)
+                try:
+                    agents = await factory.get_agents(
+                        user_id=user_id,
+                        team_config_input=team_config,
+                        memory_store=team_service.memory_context,
+                    )
+                    cls.logger.info(
+                        "Created %d agents for user '%s'", len(agents), user_id
+                    )
+                except Exception as e:
+                    cls.logger.error(
+                        "Failed to create agents for user '%s': %s", user_id, e
+                    )
+                    raise
+                try:
+                    cls.logger.info(
+                        "Initializing new orchestration for user '%s'", user_id
+                    )
+                    workflow = await cls.init_orchestration(
+                        agents, team_config, team_service.memory_context, user_id
+                    )
+                    orchestration_config.orchestrations[user_id] = workflow
+                    # Store wrappers for proper cleanup on next rebuild
+                    orchestration_config.agent_wrappers[user_id] = agents
+                except Exception as e:
+                    cls.logger.error(
+                        "Failed to initialize orchestration for user '%s': %s",
+                        user_id,
+                        e,
+                    )
+                    raise
+            return orchestration_config.get_current_orchestration(user_id)
 
     # ---------------------------
     # Execution
@@ -541,12 +574,14 @@ class OrchestrationManager:
                         if _data_type_name == "AgentResponseUpdate":
                             self.logger.debug(
                                 "[OUTPUT] executor=%s data_type=%s",
-                                executor_id, _data_type_name,
+                                executor_id,
+                                _data_type_name,
                             )
                         else:
                             self.logger.info(
                                 "[OUTPUT] executor=%s data_type=%s",
-                                executor_id, _data_type_name,
+                                executor_id,
+                                _data_type_name,
                             )
 
                         # Streaming chunk from an agent executor.

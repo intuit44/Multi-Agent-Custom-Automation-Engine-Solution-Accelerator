@@ -52,7 +52,6 @@ REQUIRED ENV VARS (same as the backend):
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import logging
 import os

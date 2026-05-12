@@ -21,7 +21,9 @@ import { APIService } from "../api/apiService";
 import { ChatService } from "../services/ChatService";
 import { usePlanCancellationAlert } from "../hooks/usePlanCancellationAlert";
 import PlanCancellationDialog from "../components/common/PlanCancellationDialog";
-import "../styles/PlanPage.css"
+import "../styles/PlanPage.css";
+import { useAppDispatch, useAppSelector } from "../store/hooks";
+import { selectActivePlanId, selectPlanData, selectApprovalRequest, selectPlanStatus, selectProcessingApproval, setPlanData, setApprovalRequest, setStatus, setProcessingApproval, clearPlan } from "../store/slices/planSlice";
 
 // Create API service instance
 const apiService = new APIService();
@@ -34,6 +36,15 @@ const PlanPage: React.FC = () => {
     const { planId } = useParams<{ planId: string }>();
     const navigate = useNavigate();
     const { showToast, dismissToast } = useInlineToaster();
+
+    // Redux hooks for plan state management
+    const dispatch = useAppDispatch();
+    const reduxActivePlanId = useAppSelector(selectActivePlanId);
+    const reduxPlanData = useAppSelector(selectPlanData);
+    const reduxApprovalRequest = useAppSelector(selectApprovalRequest);
+    const reduxPlanStatus = useAppSelector(selectPlanStatus);
+    const reduxProcessingApproval = useAppSelector(selectProcessingApproval);
+
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const [input, setInput] = useState<string>("");
     const [planData, setPlanData] = useState<ProcessedPlanData | any>(null);

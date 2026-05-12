@@ -1,0 +1,182 @@
+INFO:azure.identity._credentials.managed_identity:ManagedIdentityCredential will use IMDS with client_id: b06528b9-36fc-4a71-a24e-8f673b787486
+INFO:v4.config.settings:🔧 MCP Config initialized - URL: http://localhost:9000/mcp, Name: MacaeMcpServer
+INFO:azure.monitor.opentelemetry.exporter._quickpulse._manager:QuickpulseManager initialized successfully.
+INFO:root:Application Insights configured with live metrics and WebSocket filtering
+INFO:root:Added health check middleware
+INFO:     Started server process [111543]
+INFO:     Waiting for application startup.
+INFO:app:🚀 Starting MACAE application...
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:58330 - "GET /config HTTP/1.1" 200 OK
+INFO:root:Received browser language 'language='es'' for user 
+INFO:     127.0.0.1:58336 - "POST /api/user_browser_language HTTP/1.1" 200 OK
+To sign in, use a web browser to open the page https://login.microsoft.com/device and enter the code BXKHH37MG to authenticate.
+INFO:azure.identity._internal.interactive:DeviceCodeCredential.get_token succeeded
+INFO:root:Dev OBO: token acquired (cached to disk, refresh ~90 days)
+INFO:root:OBO token present: eyJ0eXAiOiJKV1QiLCJh...qdyQ-Rlyew (len=3295)
+INFO:azure.identity.aio._credentials.managed_identity:ManagedIdentityCredential will use IMDS with client_id: b06528b9-36fc-4a71-a24e-8f673b787486
+Init team called, team_switched=False
+INFO:root:OBO token present: eyJ0eXAiOiJKV1QiLCJh...qdyQ-Rlyew (len=3295)
+INFO:azure.identity._credentials.chained:DefaultAzureCredential acquired a token from AzureCliCredential
+INFO:v4.common.services.mcp_discovery_service:Running fresh discovery for user None
+INFO:v4.common.services.mcp_resource_service:Initializing MCPResourceService with URL: http://localhost:9000/mcp
+WARNING:v4.common.services.mcp_discovery_service:MCP server URL not configured or using default localhost
+INFO:root:OBO token present: eyJ0eXAiOiJKV1QiLCJh...qdyQ-Rlyew (len=3295)
+INFO:azure.identity.aio._credentials.managed_identity:ManagedIdentityCredential will use IMDS with client_id: b06528b9-36fc-4a71-a24e-8f673b787486
+INFO:httpx:HTTP Request: GET http://localhost:16277/health "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: GET http://localhost:16277/health "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:44302 - "GET /api/v4/mcp/inspector/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40280 - "GET /api/v4/mcp/inspector/status HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+INFO:v4.common.services.mcp_resource_service:MCP initialized: MacaeMcpServer
+INFO:httpx:HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 202 Accepted"
+INFO:httpx:HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+INFO:v4.common.services.mcp_resource_service:Listed 1 MCP resources
+INFO:httpx:HTTP Request: POST http://localhost:9000/mcp "HTTP/1.1 200 OK"
+INFO:v4.common.services.mcp_resource_service:Listed 1 resource templates
+INFO:v4.common.services.mcp_discovery_service:Discovered 2 UI widgets for user None
+INFO:     127.0.0.1:44290 - "GET /api/v4/mcp/discovery HTTP/1.1" 200 OK
+Found available standard team: 00000000-0000-0000-0000-000000000004
+INFO:azure.identity.aio._credentials.chained:DefaultAzureCredential acquired a token from AzureCliCredential
+INFO:azure.identity.aio._credentials.chained:DefaultAzureCredential acquired a token from AzureCliCredential
+INFO:v4.common.services.mcp_discovery_service:Using cached discovery for None:default
+INFO:     127.0.0.1:36876 - "GET /api/v4/mcp/discovery HTTP/1.1" 200 OK
+Using user's current team: 00000000-0000-0000-0000-000000000003
+INFO:v4.magentic_agents.magentic_agent_factory:Creating agent 1/4: CustomerDataAgent
+INFO:v4.magentic_agents.magentic_agent_factory:Creating agent 'CustomerDataAgent' with model 'gpt-4.1-mini' macae-retail-customer-index (Template: Foundry)
+INFO:azure.identity.aio._credentials.managed_identity:ManagedIdentityCredential will use IMDS with client_id: b06528b9-36fc-4a71-a24e-8f673b787486
+INFO:v4.magentic_agents.foundry_agent:Azure AI Search requested (connection_id=aifp-srch-connection-pslc25991vme66zmins, index=macae-retail-customer-index).
+INFO:azure.identity.aio._credentials.managed_identity:ManagedIdentityCredential will use IMDS with client_id: b06528b9-36fc-4a71-a24e-8f673b787486
+INFO:v4.magentic_agents.foundry_agent:Initializing agent in Foundry mode.
+INFO:v4.magentic_agents.foundry_agent:Initializing agent 'CustomerDataAgent' in Azure AI Search mode (exclusive) with index=macae-retail-customer-index.
+INFO:v4.magentic_agents.foundry_agent:Resolving Azure AI Search agent: name=CustomerDataAgent, connection_name=aifp-srch-connection-pslc25991vme66zmins, index=macae-retail-customer-index, query_type=semantic, top_k=5
+INFO:azure.identity.aio._credentials.chained:DefaultAzureCredential acquired a token from AzureCliCredential
+INFO:     127.0.0.1:40272 - "GET /api/v4/chat/sessions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58346 - "GET /api/v4/chat/sessions HTTP/1.1" 200 OK
+INFO:v4.magentic_agents.foundry_agent:Azure-Search agent 'CustomerDataAgent' already exists in Foundry (id=CustomerDataAgent, version=unknown); reusing it. Set MACAE_FORCE_AGENT_PUBLISH=1 to republish with updated definition.
+INFO:v4.magentic_agents.foundry_agent:Initialized Agent 'CustomerDataAgent'
+INFO:v4.config.agent_registry:Registered agent: FoundryAgentTemplate (ID: 126073095879184, User: None)
+INFO:v4.magentic_agents.foundry_agent:Registered agent 'CustomerDataAgent' in global registry.
+INFO:v4.config.agent_registry:Registered agent: FoundryAgentTemplate (ID: 126073095879184, User: None)
+INFO:v4.magentic_agents.magentic_agent_factory:Successfully created and initialized agent 'CustomerDataAgent'
+INFO:v4.magentic_agents.magentic_agent_factory:✅ Agent 1/4 created: CustomerDataAgent
+INFO:v4.magentic_agents.magentic_agent_factory:Creating agent 2/4: OrderDataAgent
+INFO:v4.magentic_agents.magentic_agent_factory:Creating agent 'OrderDataAgent' with model 'gpt-4.1-mini' macae-retail-order-index (Template: Foundry)
+INFO:v4.magentic_agents.foundry_agent:Azure AI Search requested (connection_id=aifp-srch-connection-pslc25991vme66zmins, index=macae-retail-order-index).
+INFO:azure.identity.aio._credentials.managed_identity:ManagedIdentityCredential will use IMDS with client_id: b06528b9-36fc-4a71-a24e-8f673b787486
+INFO:v4.magentic_agents.foundry_agent:Initializing agent in Foundry mode.
+INFO:v4.magentic_agents.foundry_agent:Initializing agent 'OrderDataAgent' in Azure AI Search mode (exclusive) with index=macae-retail-order-index.
+INFO:v4.magentic_agents.foundry_agent:Resolving Azure AI Search agent: name=OrderDataAgent, connection_name=aifp-srch-connection-pslc25991vme66zmins, index=macae-retail-order-index, query_type=semantic, top_k=5
+INFO:v4.magentic_agents.foundry_agent:Azure-Search agent 'OrderDataAgent' already exists in Foundry (id=OrderDataAgent, version=unknown); reusing it. Set MACAE_FORCE_AGENT_PUBLISH=1 to republish with updated definition.
+INFO:v4.magentic_agents.foundry_agent:Initialized Agent 'OrderDataAgent'
+INFO:v4.config.agent_registry:Registered agent: FoundryAgentTemplate (ID: 126073077741072, User: None)
+INFO:v4.magentic_agents.foundry_agent:Registered agent 'OrderDataAgent' in global registry.
+INFO:v4.config.agent_registry:Registered agent: FoundryAgentTemplate (ID: 126073077741072, User: None)
+INFO:v4.magentic_agents.magentic_agent_factory:Successfully created and initialized agent 'OrderDataAgent'
+INFO:v4.magentic_agents.magentic_agent_factory:✅ Agent 2/4 created: OrderDataAgent
+INFO:v4.magentic_agents.magentic_agent_factory:Creating agent 3/4: AnalysisRecommendationAgent
+INFO:v4.magentic_agents.magentic_agent_factory:Creating agent 'AnalysisRecommendationAgent' with model 'o4-mini'  (Template: Reasoning)
+INFO:azure.identity.aio._credentials.managed_identity:ManagedIdentityCredential will use IMDS with client_id: b06528b9-36fc-4a71-a24e-8f673b787486
+INFO:v4.magentic_agents.foundry_agent:Initializing agent in Reasoning mode.
+INFO:v4.magentic_agents.foundry_agent:Initializing agent in MCP mode.
+INFO:v4.magentic_agents.foundry_agent:Total tools collected (MCP path): 0
+INFO:v4.magentic_agents.foundry_agent:Created new AzureAIClient (agent_name=AnalysisRecommendationAgent, use_latest_version=True)
+INFO:v4.magentic_agents.foundry_agent:Using AzureAIClient for 'AnalysisRecommendationAgent' (published agent, server-side tools).
+INFO:v4.magentic_agents.foundry_agent:Initialized Agent 'AnalysisRecommendationAgent'
+INFO:v4.config.agent_registry:Registered agent: FoundryAgentTemplate (ID: 126073077343888, User: None)
+INFO:v4.magentic_agents.foundry_agent:Registered agent 'AnalysisRecommendationAgent' in global registry.
+INFO:v4.config.agent_registry:Registered agent: FoundryAgentTemplate (ID: 126073077343888, User: None)
+INFO:v4.magentic_agents.magentic_agent_factory:Successfully created and initialized agent 'AnalysisRecommendationAgent'
+INFO:v4.magentic_agents.magentic_agent_factory:✅ Agent 3/4 created: AnalysisRecommendationAgent
+INFO:v4.magentic_agents.magentic_agent_factory:Creating agent 4/4: ProxyAgent
+INFO:v4.magentic_agents.magentic_agent_factory:Creating ProxyAgent
+INFO:v4.magentic_agents.magentic_agent_factory:✅ Agent 4/4 created: ProxyAgent
+INFO:v4.magentic_agents.magentic_agent_factory:Successfully created 4/4 agents for team 'Retail Customer Success Team'
+INFO:v4.orchestration.orchestration_manager.OrchestrationManager:Created 4 agents for user '00000000-0000-0000-0000-000000000000'
+INFO:v4.orchestration.orchestration_manager.OrchestrationManager:Initializing new orchestration for user '00000000-0000-0000-0000-000000000000'
+INFO:azure.identity._credentials.managed_identity:ManagedIdentityCredential will use IMDS with client_id: b06528b9-36fc-4a71-a24e-8f673b787486
+INFO:v4.orchestration.orchestration_manager.OrchestrationManager:Created AzureAIClient and manager Agent for orchestration with model 'gpt-4.1-mini' at endpoint 'https://aif-pslc25991vme66zmins.services.ai.azure.com/api/projects/proj-pslc25991vme66zmins'
+INFO:v4.orchestration.orchestration_manager.OrchestrationManager:Created HumanApprovalMagenticManager for user '00000000-0000-0000-0000-000000000000' with max_rounds=20
+INFO:v4.orchestration.orchestration_manager.OrchestrationManager:Participants for workflow: ['CustomerDataAgent', 'OrderDataAgent', 'AnalysisRecommendationAgent', 'ProxyAgent']
+WARNING:agent_framework_orchestrations._magentic:Custom manager provided; all other manager arguments will be ignored.
+INFO:agent_framework_orchestrations._magentic:Building Magentic workflow with 4 participants
+INFO:v4.orchestration.orchestration_manager.OrchestrationManager:Built Magentic workflow with 4 participants and event callbacks
+INFO:     127.0.0.1:44278 - "GET /api/v4/init_team?team_switched=false HTTP/1.1" 200 OK
+INFO:root:OBO token present: eyJ0eXAiOiJKV1QiLCJh...qdyQ-Rlyew (len=3295)
+INFO:     127.0.0.1:36882 - "GET /api/v4/team_configs HTTP/1.1" 200 OK
+INFO:root:No user principal found in headers — using sample_user (dev mode)
+INFO:root:OBO token present: eyJ0eXAiOiJKV1QiLCJh...qdyQ-Rlyew (len=3295)
+ERROR:auth.auth_utils:Incorrect padding
+Traceback (most recent call last):
+  File "/workspaces/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator/src/backend/auth/auth_utils.py", line 136, in get_tenantid
+    decoded_bytes = base64.b64decode(client_principal_b64)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/base64.py", line 88, in b64decode
+    return binascii.a2b_base64(s, strict_mode=validate)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+binascii.Error: Incorrect padding
+INFO:azure.identity.aio._credentials.managed_identity:ManagedIdentityCredential will use IMDS with client_id: b06528b9-36fc-4a71-a24e-8f673b787486
+INFO:common.services.search_index_service:SearchIndexService initialized (search=https://srch-pslc25991vme66zmins.search.windows.net, embedding=text-embedding-3-small)
+INFO:azure.identity.aio._credentials.environment:Incomplete environment configuration for EnvironmentCredential. These variables are set: AZURE_TENANT_ID, AZURE_CLIENT_ID
+INFO:azure.identity.aio._credentials.managed_identity:ManagedIdentityCredential will use IMDS with client_id: b06528b9-36fc-4a71-a24e-8f673b787486
+INFO:azure.identity.aio._credentials.chained:DefaultAzureCredential acquired a token from AzureCliCredential
+INFO:azure.identity.aio._credentials.chained:DefaultAzureCredential acquired a token from AzureCliCredential
+INFO:httpx:HTTP Request: POST https://aif-pslc25991vme66zmins.openai.azure.com/openai/deployments/gpt-4.1-mini/chat/completions?api-version=2025-01-01-preview "HTTP/1.1 200 OK"
+INFO:v4.api.router:Chat stream intent: conversational (confidence=0.95, prev=None) for message: ¿Qué agente me está respondiendo?
+INFO:     127.0.0.1:56660 - "POST /api/v4/chat/message/stream HTTP/1.1" 200 OK
+INFO:azure.identity.aio._internal.decorators:AzureCliCredential.get_token succeeded
+INFO:azure.identity.aio._credentials.default:DefaultAzureCredential acquired a token from AzureCliCredential
+INFO:v4.api.router:Reusing FoundryAgent 'CustomerDataAgent' from existing orchestration for session=test-session
+INFO:v4.config.agent_pool:Created agent for tenant= session=test-session (pool size: 1)
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x72a9acf68550>
+INFO:azure.identity.aio._credentials.chained:DefaultAzureCredential acquired a token from AzureCliCredential
+WARNING:agent_framework.azure:AzureAIClient does not support runtime tools or structured_output overrides after agent creation. Use AzureOpenAIResponsesClient instead.
+INFO:azure.identity.aio._internal.decorators:AzureCliCredential.get_token_info succeeded
+INFO:azure.identity.aio._credentials.default:DefaultAzureCredential acquired a token from AzureCliCredential
+INFO:httpx:HTTP Request: POST https://aif-pslc25991vme66zmins.services.ai.azure.com/api/projects/proj-pslc25991vme66zmins/openai/v1/responses "HTTP/1.1 200 OK"
+INFO:v4.api.router:SSE content type=text, name=, text=
+INFO:v4.api.router:SSE content type=text, name=, text=Soy
+INFO:v4.api.router:SSE content type=text, name=, text= un
+INFO:v4.api.router:SSE content type=text, name=, text= asist
+INFO:v4.api.router:SSE content type=text, name=, text=ente
+INFO:v4.api.router:SSE content type=text, name=, text= virtual
+INFO:v4.api.router:SSE content type=text, name=, text= diseñado
+INFO:v4.api.router:SSE content type=text, name=, text= para
+INFO:v4.api.router:SSE content type=text, name=, text= ayudarte
+INFO:v4.api.router:SSE content type=text, name=, text= con
+INFO:v4.api.router:SSE content type=text, name=, text= tus
+INFO:v4.api.router:SSE content type=text, name=, text= consultas
+INFO:v4.api.router:SSE content type=text, name=, text=.
+INFO:v4.api.router:SSE content type=text, name=, text= No
+INFO:v4.api.router:SSE content type=text, name=, text= soy
+INFO:v4.api.router:SSE content type=text, name=, text= un
+INFO:v4.api.router:SSE content type=text, name=, text= agente
+INFO:v4.api.router:SSE content type=text, name=, text= humano
+INFO:v4.api.router:SSE content type=text, name=, text=,
+INFO:v4.api.router:SSE content type=text, name=, text= sino
+INFO:v4.api.router:SSE content type=text, name=, text= un
+INFO:v4.api.router:SSE content type=text, name=, text= sistema
+INFO:v4.api.router:SSE content type=text, name=, text= automat
+INFO:v4.api.router:SSE content type=text, name=, text=izado
+INFO:v4.api.router:SSE content type=text, name=, text= creado
+INFO:v4.api.router:SSE content type=text, name=, text= para
+INFO:v4.api.router:SSE content type=text, name=, text= proporcion
+INFO:v4.api.router:SSE content type=text, name=, text=arte
+INFO:v4.api.router:SSE content type=text, name=, text= información
+INFO:v4.api.router:SSE content type=text, name=, text= y
+INFO:v4.api.router:SSE content type=text, name=, text= soporte
+INFO:v4.api.router:SSE content type=text, name=, text=.
+INFO:v4.api.router:SSE content type=text, name=, text= ¿
+INFO:v4.api.router:SSE content type=text, name=, text=En
+INFO:v4.api.router:SSE content type=text, name=, text= qué
+INFO:v4.api.router:SSE content type=text, name=, text= puedo
+INFO:v4.api.router:SSE content type=text, name=, text= ayudarte
+INFO:v4.api.router:SSE content type=text, name=, text= hoy
+INFO:v4.api.router:SSE content type=text, name=, text=?
+INFO:v4.api.router:SSE content type=usage, name=, text=
+INFO:azure.identity.aio._internal.decorators:AzureCliCredential.get_token succeeded
+INFO:azure.identity.aio._credentials.default:DefaultAzureCredential acquired a token from AzureCliCredential
+INFO:azure.identity.aio._internal.decorators:AzureCliCredential.get_token succeeded
+INFO:azure.identity.aio._credentials.default:DefaultAzureCredential acquired a token from AzureCliCredential

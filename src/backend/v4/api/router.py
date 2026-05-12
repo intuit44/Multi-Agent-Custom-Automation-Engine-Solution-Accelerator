@@ -400,10 +400,6 @@ async def process_request(
         )
         await memory_store.add_plan(plan)
 
-        # ── Single source of truth: write the task anchor to chat_cosmos here,
-        # inside process_request, so every caller (direct API, /chat/message,
-        # /chat/message/stream) always produces the anchor.  _get_previous_intent
-        # only needs to read chat_cosmos — no plan-DB fallback required.
         try:
             _chat_svc = await get_chat_cosmos_service()
             await _chat_svc.add_message(
@@ -713,10 +709,6 @@ async def chat_message(
     except Exception as e:
         logger.warning("Could not persist user chat message: %s", e)
 
-    # ── ChatMCPAgent primero (KB + historial) ───────────────────────────
-    # ChatPage es ahora el home: el agente siempre responde. Su respuesta
-    # (que incluye lo que recuperó de la KB) se pasa al IntentRouter para
-    # que clasifique con contexto completo.
     previous_intent = await _get_previous_intent(
         chat_svc, chat_request.session_id, user_id
     )
@@ -864,15 +856,6 @@ async def chat_message_stream(
         chat_svc, chat_request.session_id, user_id
     )
 
-    # ── Clarification guard ──────────────────────────────────────
-    # When the session already has an active plan AND the orchestration is
-    # waiting for a clarification answer, the current message IS that answer.
-    # Routing it through IntentRouter would mis-classify it as a new task or
-    # conversational intent and create an infinite clarification loop.
-    #
-    # The pending request must belong to this exact chat session.  The task
-    # anchor only says this session is in plan mode; request ownership is stored
-    # when ProxyAgent creates the clarification request.
     if previous_intent == "task":
         pending_request_id = orchestration_config.get_pending_clarification_for_session(
             chat_request.session_id,
@@ -1027,18 +1010,74 @@ async def chat_message_stream(
             async def _factory():
                 if not _team:
                     raise ValueError("No active team configured for user")
+
+                # FIRST: Try to reuse FoundryAgent from existing orchestration
+                # Do NOT create new agents for conversational chat.
+                # The orchestration was initialized in /init_team.
+                existing_orch = orchestration_config.get_current_orchestration(user_id)
+                if existing_orch:
+                    # Extract agent wrappers (FoundryAgentTemplate instances)
+                    agents = orchestration_config.agent_wrappers.get(user_id, [])
+                    foundry_agents = [
+                        a for a in agents if isinstance(a, FoundryAgentTemplate)
+                    ]
+                    # Prefer agent with RAG enabled
+                    reused_agent = next(
+                        (a for a in foundry_agents if getattr(a, "use_rag", False)),
+                        foundry_agents[0] if foundry_agents else None,
+                    )
+                    if reused_agent:
+                        logger.info(
+                            "Reusing FoundryAgent '%s' from existing orchestration for session=%s",
+                            getattr(reused_agent, "agent_name", "?"),
+                            chat_request.session_id[:12],
+                        )
+                        return reused_agent
+
+                # FALLBACK: Create new agent only if orchestration doesn't exist
+                logger.warning(
+                    "No existing orchestration for user=%s; creating agent for session=%s",
+                    user_id[:8],
+                    chat_request.session_id[:12],
+                )
                 _factory_store = await DatabaseFactory.get_database(user_id=user_id)
                 _all_agents = await MagenticAgentFactory().get_agents(
                     user_id, _team, _factory_store
                 )
+                logger.info("DEBUG: _all_agents returned %d agents", len(_all_agents))
+                for i, a in enumerate(_all_agents):
+                    logger.info(
+                        "  Agent %d: type=%s, name=%s, has_invoke=%s",
+                        i,
+                        type(a).__name__,
+                        getattr(a, "agent_name", getattr(a, "name", "?")),
+                        hasattr(a, "invoke"),
+                    )
                 # Only FoundryAgentTemplate has .invoke() — ProxyAgent does not
                 _foundry = [
                     a for a in _all_agents if isinstance(a, FoundryAgentTemplate)
                 ]
+                logger.info(
+                    "DEBUG: After filtering FoundryAgentTemplate: %d agents",
+                    len(_foundry),
+                )
+                for i, a in enumerate(_foundry):
+                    logger.info(
+                        "  Filtered Agent %d: name=%s, use_rag=%s",
+                        i,
+                        getattr(a, "agent_name", "?"),
+                        getattr(a, "use_rag", False),
+                    )
                 # Prefer use_rag=True; fall back to any FoundryAgentTemplate
                 _agent = next(
                     (a for a in _foundry if getattr(a, "use_rag", False)),
                     _foundry[0] if _foundry else None,
+                )
+                logger.info(
+                    "DEBUG: Selected agent: %s (type=%s, use_rag=%s)",
+                    getattr(_agent, "agent_name", "?"),
+                    type(_agent).__name__ if _agent else "None",
+                    getattr(_agent, "use_rag", False) if _agent else "N/A",
                 )
                 if not _agent:
                     raise ValueError(
@@ -1433,16 +1472,65 @@ async def _get_mcp_query_response(
                 raise ValueError("No active team configured for user")
             from v4.magentic_agents.foundry_agent import FoundryAgentTemplate
 
+            # FIRST: Try to reuse FoundryAgent from existing orchestration
+            existing_orch = orchestration_config.get_current_orchestration(user_id)
+            if existing_orch:
+                agents = orchestration_config.agent_wrappers.get(user_id, [])
+                foundry_agents = [
+                    a for a in agents if isinstance(a, FoundryAgentTemplate)
+                ]
+                reused_agent = next(
+                    (a for a in foundry_agents if getattr(a, "use_rag", False)),
+                    foundry_agents[0] if foundry_agents else None,
+                )
+                if reused_agent:
+                    logger.info(
+                        "Reusing FoundryAgent from existing orchestration for session=%s",
+                        session_id[:12],
+                    )
+                    return reused_agent
+
+            # FALLBACK: Create new agent if no orchestration exists
+            logger.warning(
+                "No existing orchestration for user=%s; creating agent for session=%s",
+                user_id[:8],
+                session_id[:12],
+            )
             _factory_store = await DatabaseFactory.get_database(user_id=user_id)
             _all_agents = await MagenticAgentFactory().get_agents(
                 user_id, _team, _factory_store
             )
+            logger.info("DEBUG: _all_agents returned %d agents", len(_all_agents))
+            for i, a in enumerate(_all_agents):
+                logger.info(
+                    "  Agent %d: type=%s, name=%s, has_invoke=%s",
+                    i,
+                    type(a).__name__,
+                    getattr(a, "agent_name", getattr(a, "name", "?")),
+                    hasattr(a, "invoke"),
+                )
             # Only FoundryAgentTemplate has .invoke() — ProxyAgent does not
             _foundry = [a for a in _all_agents if isinstance(a, FoundryAgentTemplate)]
+            logger.info(
+                "DEBUG: After filtering FoundryAgentTemplate: %d agents", len(_foundry)
+            )
+            for i, a in enumerate(_foundry):
+                logger.info(
+                    "  Filtered Agent %d: name=%s, use_rag=%s",
+                    i,
+                    getattr(a, "agent_name", "?"),
+                    getattr(a, "use_rag", False),
+                )
             # Prefer use_rag=True; fall back to any FoundryAgentTemplate
             _agent = next(
                 (a for a in _foundry if getattr(a, "use_rag", False)),
                 _foundry[0] if _foundry else None,
+            )
+            logger.info(
+                "DEBUG: Selected agent: %s (type=%s, use_rag=%s)",
+                getattr(_agent, "agent_name", "?"),
+                type(_agent).__name__ if _agent else "None",
+                getattr(_agent, "use_rag", False) if _agent else "N/A",
             )
             if not _agent:
                 raise ValueError(

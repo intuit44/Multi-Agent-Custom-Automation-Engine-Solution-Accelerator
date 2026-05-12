@@ -26,6 +26,8 @@ NOTE on MCP pre-warm — why we ping before returning a cached agent:
   calls begin.  This eliminates the race entirely.
 """
 
+import asyncio
+import inspect
 import logging
 import time
 from typing import Any, Dict, Tuple
@@ -98,7 +100,10 @@ async def _safe_close(agent: Any, key: Tuple[str, str, str]) -> None:
     """
     try:
         if hasattr(agent, "close") and callable(agent.close):
-            await agent.close()
+            close_method = agent.close()
+            # Check if close() returns a coroutine (async method)
+            if inspect.iscoroutine(close_method) or asyncio.iscoroutine(close_method):
+                await close_method
             logger.info(
                 "Closed agent for tenant=%s session=%s",
                 key[0][:8],

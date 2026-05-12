@@ -35,6 +35,16 @@ async def lifespan(app: FastAPI):
         await agent_registry.cleanup_all_agents()
         logger.info("✅ Agent cleanup completed successfully")
 
+        # Clean up global MCP resource service if it exists
+        try:
+            from v4.common.services.mcp_resource_service import _mcp_resource_service
+
+            if _mcp_resource_service and hasattr(_mcp_resource_service, "close"):
+                await _mcp_resource_service.close()
+                logger.info("✅ MCP Resource Service cleanup completed")
+        except Exception as mcp_e:
+            logger.warning(f"MCP cleanup warning (non-fatal): {mcp_e}")
+
     except ImportError as ie:
         logger.error(f"❌ Could not import agent_registry: {ie}")
     except Exception as e:
