@@ -930,19 +930,15 @@ async def chat_message_stream(
         chat_request.message[:80],
     )
 
-    # ── Pre-process task intent (plan creation) before streaming ──
-    plan_id: Optional[str] = None
+    # ── Manager intercepta según intent ──
+    # El Manager decide el flujo DESPUÉS de clasificación, ANTES de crear plan
+    requires_plan_creation = False
+
     if intent_result.intent == Intent.TASK:
-        try:
-            input_task = InputTask(
-                session_id=chat_request.session_id,
-                description=chat_request.message,
-            )
-            result = await process_request(background_tasks, input_task, request)
-            plan_id = result.get("plan_id")
-        except Exception as e:
-            logger.error("Error creating plan from streaming chat: %s", e)
-            plan_id = None
+        # Manager decide si esto requiere plan o solo respuesta
+        # Por ahora: TODO intent TASK requiere plan
+        # Futuro: Manager podría decir "Esto es simple, no necesita plan"
+        requires_plan_creation = True
 
     # ── SSE async generator ──────────────────────────────────────
     async def event_stream():
@@ -956,33 +952,50 @@ async def chat_message_stream(
             }
         )
 
-        # 2. Handle task intent → redirect
-        if intent_result.intent == Intent.TASK:
-            redirect_msg = (
-                "I've created a plan for your request. Redirecting to plan view."
-            )
-            # process_request already wrote the task anchor to chat_cosmos.
-            if plan_id:
-                yield _sse_event({"type": "token", "content": redirect_msg})
+        # 2. Handle task intent → Manager says "I'll create a plan..." BEFORE creating
+        if intent_result.intent == Intent.TASK and requires_plan_creation:
+            # MANAGER: Announce plan creation BEFORE executing
+            manager_announce = "I'll create a plan for your request..."
+            yield _sse_event({"type": "token", "content": manager_announce})
+
+            # THEN: Create the plan
+            plan_id_created: Optional[str] = None
+            try:
+                input_task = InputTask(
+                    session_id=chat_request.session_id,
+                    description=chat_request.message,
+                )
+                result = await process_request(background_tasks, input_task, request)
+                plan_id_created = result.get("plan_id")
+            except Exception as e:
+                logger.error("Error creating plan from streaming chat: %s", e)
+                plan_id_created = None
+
+            # MANAGER: Confirm plan creation or error
+            if plan_id_created:
+                confirm_msg = "\n✅ Plan created. Redirecting to plan view."
+                yield _sse_event({"type": "token", "content": confirm_msg})
                 yield _sse_event(
                     {
                         "type": "plan_created",
-                        "plan_id": plan_id,
+                        "plan_id": plan_id_created,
                         "session_id": chat_request.session_id,
                     }
                 )
             else:
+                error_msg = "\n❌ Sorry, I couldn't create a plan. Please try again."
                 yield _sse_event(
                     {
                         "type": "token",
-                        "content": "Sorry, I couldn't create a plan. Please try again.",
+                        "content": error_msg,
                     }
                 )
+
             yield _sse_event(
                 {
                     "type": "done",
                     "intent": "task",
-                    "agent": "planner",
+                    "agent": "manager",
                     "confidence": intent_result.confidence,
                     "session_id": chat_request.session_id,
                 }
@@ -1360,6 +1373,14 @@ async def chat_message_stream(
         except Exception as e:
             logger.warning("Could not persist streamed response: %s", e)
 
+        # MANAGER: Final consolidation message
+        if intent_result.intent.value == "mcp_query":
+            consolidation_msg = "\n✅ Query completed. Here's what I found."
+        else:  # conversational
+            consolidation_msg = "\n✅ Response ready."
+
+        yield _sse_event({"type": "token", "content": consolidation_msg})
+
         track_event_if_configured(
             "Chat_Streaming",
             {
@@ -1375,7 +1396,7 @@ async def chat_message_stream(
             {
                 "type": "done",
                 "intent": intent_result.intent.value,
-                "agent": "assistant",
+                "agent": "manager",
                 "confidence": intent_result.confidence,
                 "session_id": chat_request.session_id,
             }
