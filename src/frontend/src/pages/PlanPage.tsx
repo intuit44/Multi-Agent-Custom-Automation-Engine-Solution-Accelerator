@@ -270,6 +270,20 @@ const PlanPage: React.FC = () => {
             if (mPlanData) {
                 console.log('✅ Parsed plan data:', mPlanData);
                 dispatch(setApprovalRequest(mPlanData));
+                
+                // Agregar el plan como un mensaje en el chat con timestamp actual
+                // para que se ordene correctamente después del último mensaje del usuario
+                const planMessage: AgentMessageData = {
+                    agent: AgentType.GROUP_CHAT_MANAGER,
+                    agent_type: AgentMessageType.AI_AGENT,
+                    timestamp: Date.now(),
+                    steps: [],
+                    next_steps: [],
+                    content: `Plan approval required: ${mPlanData.user_request || ''}`,
+                    raw_data: JSON.stringify(mPlanData),
+                };
+                setAgentMessages(prev => [...prev, planMessage]);
+                
                 setWaitingForPlan(false);
                 setShowProcessingPlanSpinner(false);
                 scrollToBottom();

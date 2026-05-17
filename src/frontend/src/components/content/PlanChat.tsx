@@ -136,13 +136,16 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
           width: '100%'
         }}
       >
-        {/* User plan message */}
-        {renderUserPlanMessage(planApprovalRequest, initialTask, planData)}
+        {/* Render agent messages first (includes user messages) */}
+        <RenderAgentMessages agentMessages={agentMessages} />
 
         {/* AI thinking state */}
         {renderThinkingState(waitingForPlan)}
 
-        {/* Plan response with all information */}
+        {/* User plan message */}
+        {renderUserPlanMessage(planApprovalRequest, initialTask, planData)}
+
+        {/* Plan response with all information - now renders AFTER agent messages */}
         <RenderPlanResponse
           planApprovalRequest={planApprovalRequest}
           handleApprovePlan={onApprove}
@@ -150,7 +153,6 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
           processingApproval={processingApproval}
           showApprovalButtons={showApprovalButtons}
         />
-        <RenderAgentMessages agentMessages={agentMessages} />
 
         {showProcessingPlanSpinner && renderPlanExecutionMessage()}
         {/* Streaming plan updates */}
