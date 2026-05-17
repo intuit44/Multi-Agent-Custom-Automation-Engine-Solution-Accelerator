@@ -261,7 +261,7 @@ class MCPEnabledBase:
 
         if self.agent_name in _FOUNDRY_REGISTERED_AGENT_NAMES and not force_republish:
             self.logger.info(
-                "Agent '%s' already registered in Foundry (cached for this process).",
+                "✅ Agent '%s' already registered in Foundry (cached for this process). NO creating new version.",
                 self.agent_name,
             )
             return
@@ -269,6 +269,10 @@ class MCPEnabledBase:
         try:
             existing_agent = None
             if not force_republish:
+                self.logger.info(
+                    "🔍 Checking if agent '%s' already exists in Foundry to avoid creating new version...",
+                    self.agent_name,
+                )
                 async for agent in self.project_client.agents.list():
                     if getattr(agent, "name", None) == self.agent_name:
                         existing_agent = agent
@@ -293,8 +297,9 @@ class MCPEnabledBase:
                     else "unknown"
                 )
                 self.logger.info(
-                    "Agent '%s' already exists in Foundry (id=%s, latest_version=%s, version_id=%s); reusing it. "
-                    "Set MACAE_FORCE_AGENT_PUBLISH=1 to republish with updated instructions.",
+                    "✅ Agent '%s' ALREADY EXISTS in Foundry (id=%s, latest_version=%s, version_id=%s). "
+                    "REUSING existing agent - NO NEW VERSION CREATED. "
+                    "Set MACAE_FORCE_AGENT_PUBLISH=1 only if you need to update instructions.",
                     self.agent_name,
                     getattr(existing_agent, "id", "unknown"),
                     _version_str,
@@ -302,12 +307,11 @@ class MCPEnabledBase:
                 )
                 return
 
-            if force_republish:
-                self.logger.info(
-                    "Force-publishing agent '%s' (MACAE_FORCE_AGENT_PUBLISH=1)",
-                    self.agent_name,
-                )
-
+            # Only reaches here if agent does NOT exist in Foundry or MACAE_FORCE_AGENT_PUBLISH=1
+            self.logger.warning(
+                "⚠️ Agent '%s' does NOT exist in Foundry OR force_republish=True. Creating NEW version...",
+                self.agent_name,
+            )
             agent_def = await self.project_client.agents.create_version(
                 agent_name=self.agent_name,
                 description=self.agent_description or "",
@@ -317,7 +321,7 @@ class MCPEnabledBase:
                 ),
             )
             self.logger.info(
-                "Registered agent '%s' in Foundry (id=%s, version=%s)",
+                "🆕 CREATED NEW agent version '%s' in Foundry (id=%s, version=%s)",
                 self.agent_name,
                 agent_def.id,
                 agent_def.version,

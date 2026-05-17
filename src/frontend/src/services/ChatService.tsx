@@ -47,11 +47,13 @@ export class ChatService {
         sessionId: string | undefined,
         callbacks: StreamCallbacks,
         fileIds?: string[],
+        planId?: string,
     ): Promise<void> {
         const request: ChatMessageRequest = {
             session_id: sessionId || '',
             message,
             ...(fileIds && fileIds.length > 0 ? { file_ids: fileIds } : {}),
+            ...(planId ? { plan_id: planId } : {}),
         };
         await apiService.sendChatMessageStream(request, callbacks);
     }
@@ -114,11 +116,15 @@ export class ChatService {
     static streamAsAsyncIterable(
         message: string,
         sessionId: string | undefined,
-        onPlanCreated?: (planId: string) => void,
-        onSessionId?: (sid: string) => void,
-        fileIds?: string[],
-        onGeneratedFile?: (f: { file_id: string; filename: string; download_url: string }) => void,
+        options: {
+            onPlanCreated?: (planId: string) => void;
+            onSessionId?: (sid: string) => void;
+            fileIds?: string[];
+            onGeneratedFile?: (f: { file_id: string; filename: string; download_url: string }) => void;
+            planId?: string;
+        } = {},
     ): AsyncIterable<string> {
+        const { onPlanCreated, onSessionId, fileIds, onGeneratedFile, planId } = options;
         return {
             [Symbol.asyncIterator](): AsyncIterator<string> {
                 // Queue of resolved chunks; resolve/reject hooks for the consumer.
@@ -142,11 +148,11 @@ export class ChatService {
                         // Surface tool-call activity as a minimal UI hint.
                         if (data.activity === 'calling') push(`\n_🔧 Calling **${data.tool}**${data.server ? ` on \`${data.server}\`` : ''}…_\n`);
                     },
-                    onPlanCreated: (planId) => { onPlanCreated?.(planId); finish(); },
+                    onPlanCreated: (newPlanId) => { onPlanCreated?.(newPlanId); finish(); },
                     onDone:        () => finish(),
                     onError:       (msg) => fail(new Error(msg)),
                     onGeneratedFile: (f) => { onGeneratedFile?.(f); },
-                }, fileIds).catch(fail);
+                }, fileIds, planId).catch(fail);
 
                 return {
                     next(): Promise<IteratorResult<string>> {

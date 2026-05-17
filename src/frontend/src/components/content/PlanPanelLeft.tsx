@@ -14,7 +14,7 @@ import {
   Chat20Regular,
   ChatAdd20Regular,
 } from "@fluentui/react-icons";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PlanPanelLefProps, UserInfo } from "@/models";
 import { ChatService } from "@/services/ChatService";
@@ -47,6 +47,7 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
     getUserInfoGlobal()
   );
   const [recentChats, setRecentChats] = useState<ChatSessionSummary[]>([]);
+  const loadingRecentChatsRef = useRef(false);
 
   // Use parent's selected team if provided, otherwise use local state
   const [localSelectedTeam, setLocalSelectedTeam] = useState<TeamConfig | null>(null);
@@ -55,10 +56,15 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
 
   // Fetch recent chats — refresh when reloadTasks fires
   const loadRecentChats = useCallback(async () => {
+    if (loadingRecentChatsRef.current) return;
+    loadingRecentChatsRef.current = true;
     try {
       const sessions = await ChatService.getRecentSessions();
       setRecentChats(sessions);
-    } catch {}
+    } catch {
+    } finally {
+      loadingRecentChatsRef.current = false;
+    }
   }, []);
 
   // Mount-only init (loadRecentChats is stable — empty useCallback deps)
@@ -185,13 +191,13 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
                 <div
                   key={chat.id}
                   className="echat-recent-item"
-                  onClick={() => navigate(`/chat/${chat.id}`)}
+                  onClick={() => navigate(`/session/${chat.id}`)}
                   role="button"
                   tabIndex={0}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      navigate(`/chat/${chat.id}`);
+                      navigate(`/session/${chat.id}`);
                     }
                   }}
                 >

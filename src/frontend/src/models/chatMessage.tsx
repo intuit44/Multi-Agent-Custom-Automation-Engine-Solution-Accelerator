@@ -9,6 +9,7 @@ export interface ChatMessageRequest {
     message: string;
     model?: string;
     file_ids?: string[];  // Foundry file IDs from /v4/chat/upload-file
+    plan_id?: string;     // Set when the message originates from an open plan
 }
 
 /** Response from POST /v4/chat/message */

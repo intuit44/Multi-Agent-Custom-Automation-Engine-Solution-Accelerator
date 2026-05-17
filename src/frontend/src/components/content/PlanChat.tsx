@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { PlanChatProps, MPlanData } from "../../models/plan";
 import InlineToaster from "../toast/InlineToaster";
 import { AgentMessageData } from "@/models";
@@ -24,7 +24,12 @@ interface SimplifiedPlanChatProps extends PlanChatProps {
   handleApprovePlan: () => Promise<void>;
   handleRejectPlan: () => Promise<void>;
   processingApproval: boolean;
-
+  /** True when parent attempted to load a plan and failed (404 case). */
+  notFound?: boolean;
+  attachedFiles?: Array<{ name: string; file_id: string }>;
+  generatedFiles?: Array<{ file_id: string; filename: string; download_url: string }>;
+  onFileSelect?: (file: File) => void;
+  onRemoveFile?: (file_id: string) => void;
 }
 
 const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
@@ -46,13 +51,70 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
   showApprovalButtons,
   handleApprovePlan,
   handleRejectPlan,
-  processingApproval
+  processingApproval,
+  notFound,
+  attachedFiles,
+  generatedFiles,
+  onFileSelect,
+  onRemoveFile,
 }) => {
-  // States
+  // Notify parent when an MPlan arrives via planData.
+  useEffect(() => {
+    if (planData?.mplan) onPlanReceived?.(planData.mplan);
+  }, [planData?.mplan, onPlanReceived]);
+
+  // Bridge approval/rejection callbacks through onPlanApproval if provided.
+  const onApprove = async () => {
+    await handleApprovePlan();
+    onPlanApproval?.(true);
+  };
+  const onReject = async () => {
+    await handleRejectPlan();
+    onPlanApproval?.(false);
+  };
+
+  if (notFound) {
+    return <ContentNotFound subtitle="The requested page could not be found." />;
+  }
 
   if (!planData)
     return (
-      <ContentNotFound subtitle="The requested page could not be found." />
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+        <InlineToaster />
+        <div
+          ref={messagesContainerRef}
+          style={{
+            flex: 1,
+            overflow: 'auto',
+            padding: '32px 0',
+            maxWidth: '800px',
+            margin: '0 auto',
+            width: '100%'
+          }}
+        >
+          {renderThinkingState(waitingForPlan)}
+          <RenderAgentMessages agentMessages={agentMessages} />
+          {showBufferingText && (
+            <StreamingBufferMessage
+              streamingMessageBuffer={streamingMessageBuffer}
+              isStreaming={true}
+            />
+          )}
+        </div>
+        <PlanChatBody
+          planData={null as any}
+          input={input}
+          setInput={setInput}
+          submittingChatDisableInput={submittingChatDisableInput}
+          OnChatSubmit={OnChatSubmit}
+          waitingForPlan={waitingForPlan}
+          loading={false}
+          attachedFiles={attachedFiles}
+          generatedFiles={generatedFiles}
+          onFileSelect={onFileSelect}
+          onRemoveFile={onRemoveFile}
+        />
+      </div>
     );
   return (
     <div style={{
@@ -83,8 +145,8 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
         {/* Plan response with all information */}
         <RenderPlanResponse
           planApprovalRequest={planApprovalRequest}
-          handleApprovePlan={handleApprovePlan}
-          handleRejectPlan={handleRejectPlan}
+          handleApprovePlan={onApprove}
+          handleRejectPlan={onReject}
           processingApproval={processingApproval}
           showApprovalButtons={showApprovalButtons}
         />
@@ -108,7 +170,12 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
         submittingChatDisableInput={submittingChatDisableInput}
         OnChatSubmit={OnChatSubmit}
         waitingForPlan={waitingForPlan}
-        loading={false} />
+        loading={false}
+        attachedFiles={attachedFiles}
+        generatedFiles={generatedFiles}
+        onFileSelect={onFileSelect}
+        onRemoveFile={onRemoveFile}
+      />
 
     </div>
   );

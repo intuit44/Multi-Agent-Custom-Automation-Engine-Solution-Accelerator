@@ -237,7 +237,7 @@ class FoundryAgentTemplate(AzureAgentBase):
                 and not force_republish
             ):
                 self.logger.info(
-                    "Azure-Search agent '%s' already cached for this process; attaching.",
+                    "✅ Azure-Search agent '%s' already cached for this process. NO creating new version.",
                     self.agent_name,
                 )
                 return AzureAIClient(
@@ -250,6 +250,10 @@ class FoundryAgentTemplate(AzureAgentBase):
 
             existing_agent = None
             if not force_republish:
+                self.logger.info(
+                    "🔍 Checking if Azure-Search agent '%s' already exists in Foundry to avoid creating new version...",
+                    self.agent_name,
+                )
                 async for agent in self.project_client.agents.list():
                     if getattr(agent, "name", None) == self.agent_name:
                         existing_agent = agent
@@ -260,9 +264,9 @@ class FoundryAgentTemplate(AzureAgentBase):
                 if self.agent_name:
                     _FOUNDRY_REGISTERED_AGENT_NAMES.add(self.agent_name)
                 self.logger.info(
-                    "Azure-Search agent '%s' already exists in Foundry "
-                    "(id=%s, version=%s); reusing it. "
-                    "Set MACAE_FORCE_AGENT_PUBLISH=1 to republish with updated definition.",
+                    "✅ Azure-Search agent '%s' ALREADY EXISTS in Foundry "
+                    "(id=%s, version=%s). REUSING existing agent - NO NEW VERSION CREATED. "
+                    "Set MACAE_FORCE_AGENT_PUBLISH=1 only if you need to update definition.",
                     self.agent_name,
                     getattr(existing_agent, "id", "unknown"),
                     getattr(existing_agent, "version", "unknown"),
@@ -276,8 +280,13 @@ class FoundryAgentTemplate(AzureAgentBase):
                 )
 
             if force_republish:
-                self.logger.info(
-                    "Force-publishing Azure-Search agent '%s' (MACAE_FORCE_AGENT_PUBLISH=1)",
+                self.logger.warning(
+                    "⚠️ Force-publishing Azure-Search agent '%s' (MACAE_FORCE_AGENT_PUBLISH=1). Creating NEW version...",
+                    self.agent_name,
+                )
+            else:
+                self.logger.warning(
+                    "⚠️ Azure-Search agent '%s' does NOT exist in Foundry. Creating NEW version...",
                     self.agent_name,
                 )
 
@@ -314,7 +323,7 @@ class FoundryAgentTemplate(AzureAgentBase):
                 _FOUNDRY_REGISTERED_AGENT_NAMES.add(self.agent_name)
 
             self.logger.info(
-                "Created Azure AI Search agent via create_version (name=%s, id=%s, version=%s).",
+                "🆕 CREATED NEW Azure AI Search agent version (name=%s, id=%s, version=%s).",
                 azure_agent.name,
                 azure_agent.id,
                 azure_agent.version,

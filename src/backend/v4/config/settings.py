@@ -103,14 +103,14 @@ class OrchestrationConfig:
         self.clarification_contexts: Dict[
             str, Dict[str, str]
         ] = {}  # request_id -> session/user context for routing answers
-        self.max_rounds: int = 20  # Maximum replanning rounds
+        self.max_rounds: int = 2  # Maximum replanning rounds
 
         # Event-driven notification system for approvals and clarifications
         self._approval_events: Dict[str, asyncio.Event] = {}
         self._clarification_events: Dict[str, asyncio.Event] = {}
 
         # Default timeout (seconds) for waiting operations
-        self.default_timeout: float = 300.0
+        self.default_timeout: float = 100.0
 
     def get_current_orchestration(self, user_id: str) -> Any:
         """Get existing orchestration workflow instance for user_id."""
@@ -285,8 +285,8 @@ class ConnectionConfig:
     """
 
     # Buffer config — kept conservative to avoid memory bloat
-    PENDING_TTL_SECONDS = 60      # drop messages older than this
-    PENDING_MAX_PER_USER = 100    # cap per-user buffer to prevent runaway
+    PENDING_TTL_SECONDS = 60  # drop messages older than this
+    PENDING_MAX_PER_USER = 100  # cap per-user buffer to prevent runaway
 
     def __init__(self):
         self.connections: Dict[str, WebSocket] = {}
@@ -302,9 +302,7 @@ class ConnectionConfig:
             return
         now = time.time()
         fresh = [
-            (ts, m, mt)
-            for ts, m, mt in bucket
-            if now - ts < self.PENDING_TTL_SECONDS
+            (ts, m, mt) for ts, m, mt in bucket if now - ts < self.PENDING_TTL_SECONDS
         ]
         if fresh:
             self.pending_messages[user_id] = fresh

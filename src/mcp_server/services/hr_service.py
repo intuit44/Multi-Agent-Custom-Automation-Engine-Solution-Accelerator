@@ -87,7 +87,6 @@ class HRService(MCPToolBase):
                         "required": False,
                         "depends_on": ["create_accounts"],
                     },
-                    # Week 1
                     {
                         "id": "mentor",
                         "domain": "HR",

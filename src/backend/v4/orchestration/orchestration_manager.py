@@ -134,9 +134,6 @@ class OrchestrationManager:
         # Get credential from config (same as old version)
         credential = config.get_azure_credential(client_id=config.AZURE_CLIENT_ID)
 
-        # Create Azure AI Agent client for orchestration using config
-        # This replaces AzureChatCompletion from SK
-        # Sanitize agent name: must start/end with alphanumeric, only hyphens allowed, max 63 chars
         raw_name = team_config.name if team_config.name else "OrchestratorAgent"
         # Replace spaces and invalid chars with hyphens, strip leading/trailing hyphens
         sanitized_name = re.sub(r"[^a-zA-Z0-9-]", "-", raw_name)
@@ -283,13 +280,7 @@ class OrchestrationManager:
                         user_id,
                         reason,
                     )
-                    # Close prior lifecycle-managed agent wrappers.
-                    # Each close() is scheduled as an independent asyncio Task so it
-                    # runs in the CURRENT event-loop context (same loop, new task).
-                    # This avoids the AnyIO cancel-scope violation that occurs when
-                    # close() is called inline from a different coroutine chain than
-                    # the one that opened the agent.  We gather all tasks and await
-                    # them together to ensure cleanup finishes before rebuilding.
+
                     prior_wrappers = orchestration_config.agent_wrappers.pop(
                         user_id, []
                     )
@@ -444,22 +435,11 @@ class OrchestrationManager:
             if isinstance(_agent, _ProxyAgent):
                 _agent.session_id = session_id
 
-        # ── Chat context injection DISABLED ─────────────────────────────────
-        # Previously injected the last N chat messages as context for Plan agents.
-        # This caused contamination: Plan agents saw debug conversations,
-        # connection errors, and MCP interactions from chat mode, leading to
-        # confused plans and repeated failed attempts.
-        # Plan agents receive only the task description — they have their own
-        # tools, instructions, and MCP connections to execute independently.
-
         # Track how many times each agent is called (for debugging duplicate calls)
         agent_call_counts: dict = {}
         # Buffer streamed text per-agent so we can emit a complete AGENT_MESSAGE
         agent_stream_buffers: dict[str, str] = {}
-        # Set of agents currently between a RequestSentEvent and a ResponseReceivedEvent.
-        # Only chunks from agents in this set are forwarded to the UI; chunks arriving outside
-        # this window (e.g. broadcast synchronisation with should_respond=False) are silently
-        # discarded, eliminating the duplicate-message noise without fighting the SDK.
+
         agents_actively_responding: set[str] = set()
 
         try:

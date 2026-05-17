@@ -2,7 +2,13 @@ import {
   Body1Strong,
   Button,
   Caption1,
-  Title2
+  Title2,
+  Menu,
+  MenuTrigger,
+  MenuPopover,
+  MenuList,
+  MenuItem,
+  Divider
 } from "@fluentui/react-components";
 
 import React, { useRef, useEffect, useState } from "react";
@@ -20,10 +26,19 @@ import ChatInput from "@/coral/modules/ChatInput";
 import InlineToaster, { useInlineToaster } from "../toast/InlineToaster";
 import PromptCard from "@/coral/components/PromptCard";
 import { Send } from "@/coral/imports/bundleicons";
-import { Attach20Regular, Clipboard20Regular, Dismiss20Regular } from "@fluentui/react-icons";
+import {
+  Attach20Regular,
+  Clipboard20Regular,
+  Dismiss20Regular,
+  Image20Regular,
+  DocumentRegular,
+  FolderRegular,
+  MoreHorizontal20Regular,
+  ArrowDownload20Regular
+} from "@fluentui/react-icons";
 import { apiService } from "../../api/apiService";
-import { useAppDispatch } from "../../store/hooks";
-import { addUserMessage, initAssistantMessage, startStreaming, addStreamToken, finishStreaming, setSessionId, setSubmittingDisabled } from "../../store/slices/chatSlice";
+import { useAppDispatch, useAppSelector } from "../../store/hooks";
+import { addUserMessage, initAssistantMessage, startStreaming, addStreamToken, finishStreaming, setSessionId, setSubmittingDisabled, selectSessionId } from "../../store/slices/chatSlice";
 
 // Icon mapping function to convert string icons to FluentUI icons
 const getIconFromString = (
@@ -66,7 +81,10 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
   const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; file_id: string }>>([]);
   const [generatedFiles, setGeneratedFiles] = useState<Array<{ file_id: string; filename: string; download_url: string }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const dispatch = useAppDispatch();
+  const currentSessionId = useAppSelector(selectSessionId);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -79,6 +97,37 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
     }
     // Reset input so the same file can be re-selected
     if (fileInputRef.current) fileInputRef.current.value = "";
+    setMenuOpen(false);
+  };
+
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const result = await apiService.uploadChatFile(file);
+      setAttachedFiles(prev => [...prev, { name: file.name, file_id: result.file_id }]);
+    } catch (err) {
+      console.error("Image upload failed:", err);
+    }
+    // Reset input
+    if (imageInputRef.current) imageInputRef.current.value = "";
+    setMenuOpen(false);
+  };
+
+  const getFileIcon = (fileName: string) => {
+    const ext = fileName.split('.').pop()?.toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp'].includes(ext || '')) {
+      return '🖼️';
+    } else if (['pdf'].includes(ext || '')) {
+      return '📄';
+    } else if (['doc', 'docx'].includes(ext || '')) {
+      return '📝';
+    } else if (['xls', 'xlsx', 'csv'].includes(ext || '')) {
+      return '📊';
+    } else if (['zip', 'rar', '7z'].includes(ext || '')) {
+      return '📦';
+    }
+    return '📎';
   };
 
   const removeAttachedFile = (file_id: string) => {
@@ -125,7 +174,7 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
         // For task intent, the stream returns a redirect event.
         // For conversational/mcp, it streams the real response.
         const randomValues = crypto.getRandomValues(new Uint32Array(1));
-        const sessionId = `chat_${Date.now()}_${randomValues[0]}`;
+        const sessionId = currentSessionId || `chat_${Date.now()}_${randomValues[0]}`;
         const userMessage = input.trim();
         const fileIds = attachedFiles.map(f => f.file_id);
 
@@ -155,7 +204,7 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
           onIntent: (data) => {
             intent = data.intent;
             if (data.session_id) {
-              // Update session ID if server assigned a different one
+              dispatch(setSessionId(data.session_id));
             }
           },
           onDone: (data) => { intent = data.intent; },
@@ -282,6 +331,62 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
                         />
                     )} */}
 
+          {/* Attached files display - Professional card style */}
+          {attachedFiles.length > 0 && (
+            <div style={{ marginBottom: '12px', display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+              {attachedFiles.map(f => (
+                <div
+                  key={f.file_id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '10px 14px',
+                    backgroundColor: 'var(--colorNeutralBackground2)',
+                    border: '1px solid var(--colorNeutralStroke1)',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                    transition: 'all 0.2s ease',
+                    cursor: 'default',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--colorNeutralBackground3)';
+                    e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.08)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--colorNeutralBackground2)';
+                    e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.05)';
+                  }}
+                >
+                  <span style={{ fontSize: '18px' }}>{getFileIcon(f.name)}</span>
+                  <span style={{
+                    color: 'var(--colorNeutralForeground1)',
+                    maxWidth: '200px',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {f.name}
+                  </span>
+                  <Button
+                    appearance="transparent"
+                    icon={<Dismiss20Regular />}
+                    size="small"
+                    onClick={() => removeAttachedFile(f.file_id)}
+                    style={{
+                      minWidth: 'auto',
+                      padding: '4px',
+                      height: '20px',
+                      width: '20px',
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
           <ChatInput
             ref={textareaRef} // forwarding
             value={input}
@@ -290,79 +395,147 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
             onEnter={handleSubmit}
             disabledChat={submitting}
           >
-            {/* Hidden file input */}
+            {/* Hidden file inputs */}
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv,.xlsx,.json,.txt,.pdf"
+              accept=".csv,.xlsx,.json,.txt,.pdf,.doc,.docx,.zip,.rar"
               style={{ display: "none" }}
               onChange={handleFileSelect}
             />
-
-            {/* Attached file chips */}
-            {attachedFiles.length > 0 && (
-              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", padding: "4px 0" }}>
-                {attachedFiles.map(f => (
-                  <span
-                    key={f.file_id}
-                    style={{
-                      display: "inline-flex", alignItems: "center", gap: "4px",
-                      background: "var(--colorNeutralBackground3)",
-                      borderRadius: "12px", padding: "2px 8px",
-                      fontSize: "12px", color: "var(--colorNeutralForeground1)",
-                    }}
-                  >
-                    📎 {f.name}
-                    <Button
-                      appearance="subtle"
-                      size="small"
-                      icon={<Dismiss20Regular />}
-                      onClick={() => removeAttachedFile(f.file_id)}
-                      style={{ minWidth: "auto", padding: "0", height: "16px", width: "16px" }}
-                    />
-                  </span>
-                ))}
-              </div>
-            )}
-
-            {/* Attach button */}
-            <Button
-              appearance="subtle"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={submitting}
-              icon={<Attach20Regular />}
-              aria-label="Attach file"
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={handleImageSelect}
             />
+
+            {/* Professional Attach Menu */}
+            <Menu open={menuOpen} onOpenChange={(_e, data) => setMenuOpen(data.open)}>
+              <MenuTrigger disableButtonEnhancement>
+                <Button
+                  appearance="subtle"
+                  onClick={() => {}}
+                  disabled={submitting}
+                  icon={<Attach20Regular />}
+                  aria-label="Attach files and media"
+                  style={{
+                    height: '32px',
+                    width: '32px',
+                    borderRadius: '6px',
+                  }}
+                />
+              </MenuTrigger>
+              <MenuPopover>
+                <MenuList>
+                  <MenuItem
+                    icon={<DocumentRegular />}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    Add files and documents
+                  </MenuItem>
+                  <MenuItem
+                    icon={<Image20Regular />}
+                    onClick={() => imageInputRef.current?.click()}
+                  >
+                    Add photos and images
+                  </MenuItem>
+                  <Divider />
+                  <MenuItem
+                    icon={<FolderRegular />}
+                    disabled
+                  >
+                    Recent files
+                  </MenuItem>
+                  <Divider />
+                  <MenuItem
+                    icon={<MoreHorizontal20Regular />}
+                    disabled
+                  >
+                    More options
+                  </MenuItem>
+                </MenuList>
+              </MenuPopover>
+            </Menu>
 
             <Button
               appearance="subtle"
               className="home-input-send-button"
               onClick={handleSubmit}
               disabled={submitting}
-              icon={<Send />}              aria-label="Send message"            />
+              icon={<Send />}
+              aria-label="Send message"
+              style={{
+                height: '32px',
+                width: '32px',
+                borderRadius: '6px',
+                backgroundColor: submitting
+                  ? 'transparent'
+                  : 'var(--colorBrandBackground)',
+                color: submitting
+                  ? 'var(--colorNeutralForegroundDisabled)'
+                  : 'var(--colorNeutralBackgroundStatic)',
+              }}
+            />
           </ChatInput>
 
           <InlineToaster />
 
-          {/* Generated files panel — shown when code_interpreter produces downloadable files */}
+          {/* Generated files panel - Professional download cards */}
           {generatedFiles.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "8px 0" }}>
-              <Caption1 style={{ color: "var(--colorNeutralForeground3)" }}>📥 Generated files</Caption1>
-              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            <div style={{ marginTop: '12px', marginBottom: '12px' }}>
+              <div style={{
+                fontSize: '12px',
+                fontWeight: 600,
+                marginBottom: '8px',
+                color: 'var(--colorNeutralForeground3)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+              }}>
+                Generated Files
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                 {generatedFiles.map(f => (
                   <a
                     key={f.file_id}
                     href={f.download_url}
                     download={f.filename}
                     style={{
-                      display: "inline-flex", alignItems: "center", gap: "4px",
-                      background: "var(--colorBrandBackground2)",
-                      borderRadius: "12px", padding: "4px 10px",
-                      fontSize: "12px", color: "var(--colorBrandForeground1)",
-                      textDecoration: "none",
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      padding: '10px 14px',
+                      backgroundColor: 'var(--colorBrandBackground2)',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      fontWeight: 500,
+                      textDecoration: 'none',
+                      color: 'var(--colorNeutralForeground1)',
+                      border: '1px solid var(--colorBrandStroke1)',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                      transition: 'all 0.2s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--colorBrandBackgroundHover)';
+                      e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+                      e.currentTarget.style.transform = 'translateY(-1px)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--colorBrandBackground2)';
+                      e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.05)';
+                      e.currentTarget.style.transform = 'translateY(0)';
                     }}
                   >
-                    ⬇️ {f.filename}
+                    <ArrowDownload20Regular style={{ color: 'var(--colorBrandForeground1)' }} />
+                    <span style={{
+                      maxWidth: '200px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {f.filename}
+                    </span>
                   </a>
                 ))}
               </div>

@@ -132,6 +132,15 @@ const chatSlice = createSlice({
       state.messages = [];
       state.streamingContent = '';
     },
+
+    loadSession(state, action: PayloadAction<{ sessionId: string; messages: ChatMessage[] }>) {
+      state.sessionId = action.payload.sessionId;
+      state.messages = action.payload.messages;
+      state.isStreaming = false;
+      state.streamingContent = '';
+      state.streamingBuffer = '';
+      state.error = null;
+    },
   },
 });
 
@@ -147,6 +156,7 @@ export const {
   setSubmittingDisabled,
   setError,
   clearMessages,
+  loadSession,
 } = chatSlice.actions;
 
 // Selectors

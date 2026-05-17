@@ -104,21 +104,41 @@ class MagenticAgentFactory:
 
         # Only create configs for explicitly requested capabilities
         index_name = getattr(agent_obj, "index_name", None)
-        search_config = (
-            SearchConfig.from_env(index_name)
-            if getattr(agent_obj, "use_rag", False) and index_name
-            else None
-        )
-        mcp_config = (
-            MCPConfig.from_env() if getattr(agent_obj, "use_mcp", False) else None
-        )
-        # bing_config = BingConfig.from_env() if getattr(agent_obj, 'use_bing', False) else None
+        use_rag_value = getattr(agent_obj, "use_rag", False)
+        use_mcp_value = getattr(agent_obj, "use_mcp", False)
 
         self.logger.info(
-            "Creating agent '%s' with model '%s' %s (Template: %s)",
+            "🔍 DEBUG: Agent '%s' config: use_rag=%s, use_mcp=%s, index_name='%s'",
+            agent_obj.name,
+            use_rag_value,
+            use_mcp_value,
+            index_name,
+        )
+
+        search_config = (
+            SearchConfig.from_env(index_name) if use_rag_value and index_name else None
+        )
+
+        self.logger.info(
+            "🔍 DEBUG: search_config=%s (will %s Azure AI Search)",
+            "CREATED" if search_config else "None",
+            "USE" if search_config else "NOT USE",
+        )
+
+        mcp_config = MCPConfig.from_env() if use_mcp_value else None
+
+        self.logger.info(
+            "🔍 DEBUG: mcp_config=%s (will %s MCP)",
+            "CREATED" if mcp_config else "None",
+            "USE" if mcp_config else "NOT USE",
+        )
+
+        self.logger.info(
+            "Creating agent '%s' with model '%s' (use_rag=%s, use_mcp=%s, Template: %s)",
             agent_obj.name,
             deployment_name,
-            index_name,
+            use_rag_value,
+            use_mcp_value,
             "Reasoning" if use_reasoning else "Foundry",
         )
 

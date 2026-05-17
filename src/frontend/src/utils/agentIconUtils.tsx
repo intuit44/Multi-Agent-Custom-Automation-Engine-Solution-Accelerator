@@ -196,7 +196,7 @@ const getDeterministicAgentIcon = (cleanName: string): React.ComponentType<any> 
  */
 const getUniqueAgentIcon = (
     agentName: string,
-    allAgentNames: string[],
+    _allAgentNames: string[],
     iconStyle: React.CSSProperties
 ): React.ReactNode => {
     const cleanName = TaskService.cleanTextToSpaces(agentName).toLowerCase();

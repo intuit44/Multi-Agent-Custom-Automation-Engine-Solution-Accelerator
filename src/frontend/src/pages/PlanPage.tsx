@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { Spinner, Text } from "@fluentui/react-components";
 import { PlanDataService } from "../services/PlanDataService";
 import { ProcessedPlanData, WebsocketMessageType, MPlanData, AgentMessageData, AgentMessageType, ParsedUserClarification, AgentType, PlanStatus, TeamConfig, StreamMessage } from "../models";
@@ -17,43 +17,38 @@ import {
 import Octo from "../coral/imports/Octopus.png";
 import LoadingMessage, { loadingMessages } from "../coral/components/LoadingMessage";
 import webSocketService from "../services/WebSocketService";
-import { APIService } from "../api/apiService";
+import { apiService } from "../api/apiService";
 import { ChatService } from "../services/ChatService";
 import { usePlanCancellationAlert } from "../hooks/usePlanCancellationAlert";
 import PlanCancellationDialog from "../components/common/PlanCancellationDialog";
 import "../styles/PlanPage.css";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
-import { selectActivePlanId, selectPlanData, selectApprovalRequest, selectPlanStatus, selectProcessingApproval, setPlanData, setApprovalRequest, setStatus, setProcessingApproval, clearPlan } from "../store/slices/planSlice";
-
-// Create API service instance
-const apiService = new APIService();
+import { selectPlanData, selectApprovalRequest, selectProcessingApproval, setPlanData, setApprovalRequest, setProcessingApproval } from "../store/slices/planSlice";
 
 /**
  * Page component for displaying a specific plan
  * Accessible via the route /plan/{plan_id}
  */
 const PlanPage: React.FC = () => {
-    const { planId } = useParams<{ planId: string }>();
+    const { planId: routePlanId, sessionId: routeSessionId } = useParams<{ planId?: string; sessionId?: string }>();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const queryPlanId = searchParams.get('planId');
+    const planId = queryPlanId || routePlanId;
     const navigate = useNavigate();
     const { showToast, dismissToast } = useInlineToaster();
 
     // Redux hooks for plan state management
     const dispatch = useAppDispatch();
-    const reduxActivePlanId = useAppSelector(selectActivePlanId);
-    const reduxPlanData = useAppSelector(selectPlanData);
-    const reduxApprovalRequest = useAppSelector(selectApprovalRequest);
-    const reduxPlanStatus = useAppSelector(selectPlanStatus);
-    const reduxProcessingApproval = useAppSelector(selectProcessingApproval);
+    const planData = useAppSelector(selectPlanData);
+    const planApprovalRequest = useAppSelector(selectApprovalRequest);
+    const processingApproval = useAppSelector(selectProcessingApproval);
 
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const [input, setInput] = useState<string>("");
-    const [planData, setPlanData] = useState<ProcessedPlanData | any>(null);
     const [loading, setLoading] = useState<boolean>(true);
     const [submittingChatDisableInput, setSubmittingChatDisableInput] = useState<boolean>(true);
     const [errorLoading, setErrorLoading] = useState<boolean>(false);
     const [clarificationMessage, setClarificationMessage] = useState<ParsedUserClarification | null>(null);
-    const [processingApproval, setProcessingApproval] = useState<boolean>(false);
-    const [planApprovalRequest, setPlanApprovalRequest] = useState<MPlanData | null>(null);
     const [reloadLeftList, setReloadLeftList] = useState<boolean>(true);
     const [waitingForPlan, setWaitingForPlan] = useState<boolean>(true);
     const [showProcessingPlanSpinner, setShowProcessingPlanSpinner] = useState<boolean>(false);
@@ -63,6 +58,8 @@ const PlanPage: React.FC = () => {
     const [streamingMessageBuffer, setStreamingMessageBuffer] = useState<string>("");
     const [showBufferingText, setShowBufferingText] = useState<boolean>(false);
     const [agentMessages, setAgentMessages] = useState<AgentMessageData[]>([]);
+    const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; file_id: string }>>([]);
+    const [generatedFiles, setGeneratedFiles] = useState<Array<{ file_id: string; filename: string; download_url: string }>>([]);
     // Accumulates WS streaming buffer content for final processAgentMessage call
     const wsStreamingBufferRef = useRef<string>("");
     const formatErrorMessage = useCallback((content: string): string => {
@@ -78,6 +75,21 @@ const PlanPage: React.FC = () => {
             }
         });
         return formattedLines.join('\n');
+    }, []);
+
+    const handleFileSelect = useCallback(async (file: File) => {
+        try {
+            const result = await apiService.uploadChatFile(file);
+            setAttachedFiles(prev => [...prev, { name: file.name, file_id: result.file_id }]);
+            showToast(`File "${file.name}" uploaded successfully`, "success");
+        } catch (err) {
+            console.error("File upload failed:", err);
+            showToast("File upload failed. Please try again.", "error");
+        }
+    }, [showToast]);
+
+    const removeAttachedFile = useCallback((file_id: string) => {
+        setAttachedFiles(prev => prev.filter(f => f.file_id !== file_id));
     }, []);
 
     // Plan cancellation dialog state
@@ -121,16 +133,30 @@ const PlanPage: React.FC = () => {
                 });
             }
 
-            // Execute the pending navigation
-            if (pendingNavigation) {
+            // Limpiar el estado del plan en Redux
+            dispatch(setPlanData({ planId: planData?.plan?.id || '', data: null }));
+            dispatch(setApprovalRequest(null));
+
+            // Si estamos en /session/:sessionId?planId=..., solo remover planId
+            if (routeSessionId && queryPlanId) {
+                setSearchParams({});
+            } else if (pendingNavigation) {
+                // Execute the pending navigation para otros casos
                 pendingNavigation();
             }
             webSocketService.disconnect();
         } catch (error) {
             console.error('❌ Failed to cancel plan:', error);
             showToast('Failed to cancel the plan properly, but navigation will continue.', 'error');
+
+            // Limpiar el estado del plan incluso si la cancelación falló
+            dispatch(setPlanData({ planId: planData?.plan?.id || '', data: null }));
+            dispatch(setApprovalRequest(null));
+
             // Still proceed with navigation even if cancellation failed
-            if (pendingNavigation) {
+            if (routeSessionId && queryPlanId) {
+                setSearchParams({});
+            } else if (pendingNavigation) {
                 pendingNavigation();
             }
         } finally {
@@ -138,7 +164,7 @@ const PlanPage: React.FC = () => {
             setShowCancellationDialog(false);
             setPendingNavigation(null);
         }
-    }, [planApprovalRequest, planData, pendingNavigation, showToast]);
+    }, [planApprovalRequest, planData, pendingNavigation, routeSessionId, queryPlanId, setSearchParams, showToast, dispatch]);
 
     const handleCancelDialog = useCallback(() => {
         setShowCancellationDialog(false);
@@ -153,7 +179,7 @@ const PlanPage: React.FC = () => {
         const agentMessageResponse = PlanDataService.createAgentMessageResponse(agentMessageData, planData, is_final, streaming_message);
         console.log('📤 Persisting agent message:', agentMessageResponse);
         const sendPromise = apiService.sendAgentMessage(agentMessageResponse)
-            .then(saved => {
+            .then(() => {
                 console.log('[agent_message][persisted]', {
                     agent: agentMessageData.agent,
                     type: agentMessageData.agent_type,
@@ -185,13 +211,13 @@ const PlanPage: React.FC = () => {
 
     const resetPlanVariables = useCallback(() => {
         setInput("");
-        setPlanData(null);
+        dispatch(setPlanData({ planId: planId || '', data: null }));
+        dispatch(setProcessingApproval(false));
+        dispatch(setApprovalRequest(null));
         setLoading(true);
         setSubmittingChatDisableInput(true);
         setErrorLoading(false);
         setClarificationMessage(null);
-        setProcessingApproval(false);
-        setPlanApprovalRequest(null);
         setReloadLeftList(true);
         setWaitingForPlan(true);
         setShowProcessingPlanSpinner(false);
@@ -201,24 +227,7 @@ const PlanPage: React.FC = () => {
         setShowBufferingText(false);
         setAgentMessages([]);
         wsStreamingBufferRef.current = "";
-    }, [
-        setInput,
-        setPlanData,
-        setLoading,
-        setSubmittingChatDisableInput,
-        setErrorLoading,
-        setClarificationMessage,
-        setProcessingApproval,
-        setPlanApprovalRequest,
-        setReloadLeftList,
-        setWaitingForPlan,
-        setShowProcessingPlanSpinner,
-        setShowApprovalButtons,
-        setContinueWithWebsocketFlow,
-        setStreamingMessageBuffer,
-        setShowBufferingText,
-        setAgentMessages,
-    ]);
+    }, [dispatch, planId]);
 
 
     // Auto-scroll helper
@@ -260,7 +269,7 @@ const PlanPage: React.FC = () => {
 
             if (mPlanData) {
                 console.log('✅ Parsed plan data:', mPlanData);
-                setPlanApprovalRequest(mPlanData);
+                dispatch(setApprovalRequest(mPlanData));
                 setWaitingForPlan(false);
                 setShowProcessingPlanSpinner(false);
                 scrollToBottom();
@@ -270,7 +279,7 @@ const PlanPage: React.FC = () => {
         });
 
         return () => unsubscribe();
-    }, [scrollToBottom]);
+    }, [scrollToBottom, dispatch]);
 
     //(WebsocketMessageType.AGENT_MESSAGE_STREAMING
     useEffect(() => {
@@ -349,19 +358,33 @@ const PlanPage: React.FC = () => {
                 setSelectedTeam(planData?.team || null);
                 setSubmittingChatDisableInput(false);
                 scrollToBottom();
+
+                // Actualizar el plan a COMPLETED en el estado
                 if (planData?.plan) {
-                    planData.plan.overall_status = PlanStatus.COMPLETED;
-                    setPlanData({ ...planData });
+                    const updatedPlanData = { ...planData, plan: { ...planData.plan, overall_status: PlanStatus.COMPLETED } };
+                    dispatch(setPlanData({ planId: planId || '', data: updatedPlanData }));
                 }
+
                 webSocketService.disconnect();
                 const capturedBuffer = wsStreamingBufferRef.current;
                 wsStreamingBufferRef.current = '';
                 processAgentMessage(agentMessageData, planData, true, capturedBuffer);
+
+                // Eliminar planId de la URL y limpiar el estado del plan cuando se completa
+                if (routeSessionId && queryPlanId) {
+                    console.log('🧹 Plan completed - removing planId from URL and clearing plan state');
+                    setSearchParams({});
+                    // Limpiar el estado del plan en Redux para que no se envíe en futuros mensajes
+                    setTimeout(() => {
+                        dispatch(setPlanData({ planId: planId || '', data: null }));
+                        dispatch(setApprovalRequest(null));
+                    }, 500);
+                }
             }
         });
 
         return () => unsubscribe();
-    }, [scrollToBottom, planData, processAgentMessage, setSelectedTeam]);
+    }, [scrollToBottom, planData, processAgentMessage, setSelectedTeam, dispatch, planId, routeSessionId, queryPlanId, setSearchParams]);
 
     // WebsocketMessageType.ERROR_MESSAGE
     useEffect(() => {
@@ -450,36 +473,22 @@ const PlanPage: React.FC = () => {
                 console.log('🔗 WebSocket connection status:', connected);
             };
 
-            const handleStreamingMessage = (message: StreamMessage) => {
-                console.log('📨 Received streaming message:', message);
-            };
-
             const handlePlanApprovalResponse = (message: StreamMessage) => {
                 console.log('✅ Plan approval response received:', message);
             };
 
-            const handlePlanApprovalRequest = (message: StreamMessage) => {
-                console.log('📥 Plan approval request received:', message);
-                // This is handled by PlanChat component through its own listener
-            };
-
-            // Subscribe to all relevant v4 backend events
+            // Subscribe to connection status and plan approval response
+            // Note: AGENT_MESSAGE and PLAN_APPROVAL_REQUEST are handled by dedicated useEffect hooks above
             const unsubscribeConnection = webSocketService.on('connection_status', (message) => {
                 handleConnectionChange(message.data?.connected || false);
             });
 
-            const unsubscribeStreaming = webSocketService.on(WebsocketMessageType.AGENT_MESSAGE, handleStreamingMessage);
             const unsubscribePlanApproval = webSocketService.on(WebsocketMessageType.PLAN_APPROVAL_RESPONSE, handlePlanApprovalResponse);
-            const unsubscribePlanApprovalRequest = webSocketService.on(WebsocketMessageType.PLAN_APPROVAL_REQUEST, handlePlanApprovalRequest);
-            const unsubscribeParsedPlanApprovalRequest = webSocketService.on(WebsocketMessageType.PLAN_APPROVAL_REQUEST, handlePlanApprovalRequest);
 
             return () => {
                 console.log('🔌 Cleaning up WebSocket connections');
                 unsubscribeConnection();
-                unsubscribeStreaming();
                 unsubscribePlanApproval();
-                unsubscribePlanApprovalRequest();
-                unsubscribeParsedPlanApprovalRequest();
                 webSocketService.disconnect();
             };
         }
@@ -520,10 +529,33 @@ const PlanPage: React.FC = () => {
                 }
 
                 if (planResult?.mplan) {
-                    setPlanApprovalRequest(planResult.mplan);
+                    dispatch(setApprovalRequest(planResult.mplan));
                 }
-                if (planResult?.messages) {
-                    setAgentMessages(planResult.messages);
+                if (planResult?.messages !== undefined) {
+                    // También cargar el historial del chat previo por session_id
+                    // para no perder el contexto cuando se navega desde /chat a /plan/{id}
+                    let chatHistory: AgentMessageData[] = [];
+                    const chatSessionId = planResult?.plan?.session_id;
+                    if (chatSessionId) {
+                        try {
+                            const sessionData = await apiService.getChatSession(chatSessionId);
+                            chatHistory = (sessionData?.messages || []).map((msg): AgentMessageData => ({
+                                agent: msg.sender === 'user' ? 'human' : AgentType.GROUP_CHAT_MANAGER,
+                                agent_type: msg.sender === 'user' ? AgentMessageType.HUMAN_AGENT : AgentMessageType.AI_AGENT,
+                                timestamp: new Date(msg.timestamp).getTime(),
+                                steps: [],
+                                next_steps: [],
+                                content: msg.content,
+                                raw_data: msg.content,
+                            }));
+                        } catch (sessionErr) {
+                            console.warn('⚠️ Could not load chat session history (non-fatal):', sessionErr);
+                        }
+                    }
+                    // Anteponer historial del chat y luego mensajes del plan (evitar duplicados por contenido)
+                    const planMsgContents = new Set(planResult.messages.map(m => m.content));
+                    const uniqueChatHistory = chatHistory.filter(m => !planMsgContents.has(m.content));
+                    setAgentMessages([...uniqueChatHistory, ...planResult.messages]);
                 }
                 if (planResult?.streaming_message && planResult.streaming_message.trim() !== "") {
                     wsStreamingBufferRef.current = planResult.streaming_message;
@@ -538,18 +570,53 @@ const PlanPage: React.FC = () => {
                     setWaitingForPlan(false);
                     setSubmittingChatDisableInput(true);
                 }
-                setPlanData(planResult);
+                dispatch(setPlanData({ planId: planId || '', data: planResult }));
                 return planResult;
             } catch (err) {
                 console.log("Failed to load plan data:", err);
                 setErrorLoading(true);
-                setPlanData(null);
+                dispatch(setPlanData({ planId: planId || '', data: null }));
                 return null;
             } finally {
                 setLoading(false);
             }
         },
-        [planId, resetPlanVariables]
+        [planId, resetPlanVariables, dispatch]
+    );
+
+    const loadSessionHistory = useCallback(
+        async (sessionId: string): Promise<void> => {
+            resetPlanVariables();
+            setLoading(true);
+            try {
+                const sessionData = await apiService.getChatSession(sessionId);
+                const chatHistory = (sessionData?.messages || []).map((msg): AgentMessageData => {
+                    const role = (msg as any).role || (msg as any).sender;
+                    return {
+                        agent: role === 'user' ? 'human' : AgentType.GROUP_CHAT_MANAGER,
+                        agent_type: role === 'user' ? AgentMessageType.HUMAN_AGENT : AgentMessageType.AI_AGENT,
+                        timestamp: new Date(msg.timestamp).getTime(),
+                        steps: [],
+                        next_steps: [],
+                        content: msg.content,
+                        raw_data: msg.content,
+                    };
+                });
+                setAgentMessages(chatHistory);
+                dispatch(setPlanData({ planId: '', data: null }));
+                setWaitingForPlan(false);
+                setSubmittingChatDisableInput(false);
+                setShowApprovalButtons(false);
+                setShowProcessingPlanSpinner(false);
+                setErrorLoading(false);
+            } catch (err) {
+                console.log("Failed to load chat session history:", err);
+                setErrorLoading(true);
+            } finally {
+                setLoading(false);
+            }
+        },
+        [dispatch, resetPlanVariables]
     );
 
 
@@ -557,7 +624,7 @@ const PlanPage: React.FC = () => {
     const handleApprovePlan = useCallback(async () => {
         if (!planApprovalRequest) return;
 
-        setProcessingApproval(true);
+        dispatch(setProcessingApproval(true));
         let id = showToast("Submitting Approval", "progress");
 
         try {
@@ -577,15 +644,15 @@ const PlanPage: React.FC = () => {
             showToast("Failed to submit approval", "error");
             console.error('❌ Failed to approve plan:', error);
         } finally {
-            setProcessingApproval(false);
+            dispatch(setProcessingApproval(false));
         }
-    }, [dismissToast, planApprovalRequest, planData?.plan?.id, showToast]);
+    }, [dispatch, dismissToast, planApprovalRequest, planData?.plan?.id, showToast]);
 
     // Handle plan rejection
     const handleRejectPlan = useCallback(async () => {
         if (!planApprovalRequest) return;
 
-        setProcessingApproval(true);
+        dispatch(setProcessingApproval(true));
         let id = showToast("Submitting cancellation", "progress");
         try {
             await apiService.approvePlan({
@@ -597,20 +664,27 @@ const PlanPage: React.FC = () => {
 
             dismissToast(id);
 
+            // Limpiar el estado del plan en Redux
+            dispatch(setPlanData({ planId: planData?.plan?.id || '', data: null }));
+            dispatch(setApprovalRequest(null));
+
             navigate('/');
 
         } catch (error) {
             dismissToast(id);
             showToast("Failed to submit cancellation", "error");
             console.error('❌ Failed to reject plan:', error);
+
+            // Limpiar el estado del plan incluso si la cancelación falló
+            dispatch(setPlanData({ planId: planData?.plan?.id || '', data: null }));
+            dispatch(setApprovalRequest(null));
+
             navigate('/');
         } finally {
-            setProcessingApproval(false);
+            dispatch(setProcessingApproval(false));
         }
-    }, [planApprovalRequest, showToast, planData?.plan?.id, dismissToast, navigate]);
-    // ── Unified chat submission dispatcher ──────────────────────────────────────
-    // Mode 1: Clarification — calls submitClarification, updates agentMessages
-    // Mode 2: Normal       — streams via ChatService.streamAsAsyncIterable into agentMessages
+    }, [dispatch, planApprovalRequest, showToast, planData?.plan?.id, dismissToast, navigate]);
+
     const handleOnchatSubmit = useCallback(
         async (chatInput: string) => {
             if (!chatInput.trim()) return;
@@ -650,8 +724,8 @@ const PlanPage: React.FC = () => {
                 return;
             }
 
-            // ── Mode 2: Normal — route through IntentRouter SSE ────────────
-            const sessionId = planData?.plan?.session_id || "";
+            // ── Mode 2: — route through IntentRouter SSE ────────────
+            const sessionId = planData?.plan?.session_id || routeSessionId || "";
             const userMsg: AgentMessageData = {
                 agent: 'human',
                 agent_type: AgentMessageType.HUMAN_AGENT,
@@ -666,41 +740,74 @@ const PlanPage: React.FC = () => {
             setShowProcessingPlanSpinner(true);
             scrollToBottom();
 
-            // Add streaming placeholder
-            const placeholder: AgentMessageData = {
-                agent: AgentType.GROUP_CHAT_MANAGER,
-                agent_type: AgentMessageType.AI_AGENT,
-                timestamp: Date.now(),
-                steps: [],
-                next_steps: [],
-                content: '',
-                raw_data: '',
-            };
-            setAgentMessages(prev => [...prev, placeholder]);
-
             let accumulated = '';
+            let placeholderAdded = false;
+            const fileIds = attachedFiles.map(f => f.file_id);
+            const collectedFiles: Array<{ file_id: string; filename: string; download_url: string }> = [];
             try {
                 for await (const token of ChatService.streamAsAsyncIterable(
                     chatInput,
                     sessionId,
-                    (newPlanId) => navigate(`/plan/${newPlanId}`),
+                    {
+                        onSessionId: (newSessionId) => {
+                            // Al crear nueva sesión, navegar a /session/:sessionId
+                            if (!routeSessionId && !planId) {
+                                navigate(`/session/${newSessionId}`, { replace: true });
+                            }
+                        },
+                        onPlanCreated: (newPlanId) => {
+                            // Mantener la ruta de sesión y agregar planId como query param
+                            if (routeSessionId) {
+                                setSearchParams({ planId: newPlanId });
+                            } else {
+                                navigate(`/plan/${newPlanId}`);
+                            }
+                        },
+                        planId: planData?.plan?.id,
+                        onGeneratedFile: (f) => { collectedFiles.push(f); },
+                        fileIds,
+                    }
                 )) {
                     accumulated += token;
                     const snap = accumulated;
-                    setAgentMessages(prev =>
-                        prev.map((m, i) => i === prev.length - 1 ? { ...m, content: snap } : m)
-                    );
+
+                    if (!placeholderAdded && snap.trim()) {
+                        // Agregar placeholder solo cuando hay contenido real
+                        const placeholder: AgentMessageData = {
+                            agent: AgentType.GROUP_CHAT_MANAGER,
+                            agent_type: AgentMessageType.AI_AGENT,
+                            timestamp: Date.now(),
+                            steps: [],
+                            next_steps: [],
+                            content: snap,
+                            raw_data: '',
+                        };
+                        setAgentMessages(prev => [...prev, placeholder]);
+                        placeholderAdded = true;
+                    } else if (placeholderAdded) {
+                        // Actualizar el placeholder con el contenido acumulado
+                        setAgentMessages(prev =>
+                            prev.map((m, i) => i === prev.length - 1 ? { ...m, content: snap } : m)
+                        );
+                    }
                     scrollToBottom();
                 }
             } catch (e: any) {
                 showToast(e?.message || "Failed to send message", "error");
-                setAgentMessages(prev => prev.filter((_, i) => i !== prev.length - 1));
+                // Solo eliminar el último mensaje si se agregó el placeholder
+                if (placeholderAdded) {
+                    setAgentMessages(prev => prev.filter((_, i) => i !== prev.length - 1));
+                }
             } finally {
+                setAttachedFiles([]);
+                if (collectedFiles.length > 0) {
+                    setGeneratedFiles(prev => [...prev, ...collectedFiles]);
+                }
                 setShowProcessingPlanSpinner(false);
                 setSubmittingChatDisableInput(false);
             }
         },
-        [clarificationMessage, planData, planApprovalRequest, showToast, dismissToast, navigate, scrollToBottom],
+        [clarificationMessage, planData, routeSessionId, planId, planApprovalRequest, showToast, dismissToast, navigate, setSearchParams, scrollToBottom, attachedFiles],
     );
 
 
@@ -718,21 +825,33 @@ const PlanPage: React.FC = () => {
 
     useEffect(() => {
         const initializePlanLoading = async () => {
-            if (!planId) {
-                resetPlanVariables();
-                setErrorLoading(true);
+            // Prioridad 1: Si hay sessionId en ruta, cargar historial primero
+            if (routeSessionId) {
+                await loadSessionHistory(routeSessionId);
+            }
+
+            // Prioridad 2: Si hay planId (de ruta o query param), cargar plan
+            if (planId) {
+                try {
+                    await loadPlanData(false);
+                } catch (err) {
+                    console.error("Failed to initialize plan loading:", err);
+                }
                 return;
             }
 
-            try {
-                await loadPlanData(false);
-            } catch (err) {
-                console.error("Failed to initialize plan loading:", err);
+            // Caso 3: new chat, no planId or sessionId
+            if (!planId && !routeSessionId) {
+                resetPlanVariables();
+                setLoading(false);
+                setWaitingForPlan(false);
+                setSubmittingChatDisableInput(false);
+                return;
             }
         };
 
         initializePlanLoading();
-    }, [planId, loadPlanData, resetPlanVariables, setErrorLoading]);
+    }, [planId, routeSessionId, loadPlanData, loadSessionHistory, resetPlanVariables, setErrorLoading]);
 
     useEffect(() => {
         if (planData?.team) {
@@ -774,15 +893,15 @@ const PlanPage: React.FC = () => {
                     reloadTasks={reloadLeftList}
                     onNewTaskButton={handleNewTaskButton}
                     restReload={resetReload}
-                    onTeamSelect={() => { }}
+                    onTeamSelect={setSelectedTeam}
                     onTeamUpload={async () => { }}
-                    isHomePage={false}
+                    isHomePage={!planId && !routeSessionId}
                     selectedTeam={selectedTeam}
                     onNavigationWithAlert={handleNavigationWithAlert}
                 />
 
                 <Content>
-                    {loading || !planData ? (
+                    {planId && (loading || !planData) ? (
                         <>
                             <div className="plan-loading-spinner">
                                 <Spinner size="medium" />
@@ -817,16 +936,22 @@ const PlanPage: React.FC = () => {
                                 OnChatSubmit={handleOnchatSubmit}
                                 handleApprovePlan={handleApprovePlan}
                                 handleRejectPlan={handleRejectPlan}
+                                attachedFiles={attachedFiles}
+                                generatedFiles={generatedFiles}
+                                onFileSelect={handleFileSelect}
+                                onRemoveFile={removeAttachedFile}
                             />
                         </>
                     )}
                 </Content>
 
-                <PlanPanelRight
-                    planData={planData}
-                    loading={loading}
-                    planApprovalRequest={planApprovalRequest}
-                />
+                {planId && (
+                    <PlanPanelRight
+                        planData={planData}
+                        loading={loading}
+                        planApprovalRequest={planApprovalRequest}
+                    />
+                )}
             </CoralShellRow>
 
             {/* Plan Cancellation Confirmation Dialog */}

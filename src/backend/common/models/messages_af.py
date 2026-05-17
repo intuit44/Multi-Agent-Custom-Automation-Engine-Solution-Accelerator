@@ -315,6 +315,7 @@ class ChatMessageRequest(BaseModel):
     message: str
     model: Optional[str] = None  # Optional model selector
     file_ids: list[str] = []  # Foundry file IDs attached by the user (code_interpreter)
+    plan_id: Optional[str] = None  # When set, message is in-plan: never create a new plan
 
 
 class ChatMessageResponse(BaseModel):
