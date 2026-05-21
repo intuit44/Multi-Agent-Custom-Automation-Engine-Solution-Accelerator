@@ -9,14 +9,7 @@
 
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type { RootState } from '../store';
-
-export interface UserInfo {
-  userId: string;
-  userPrincipalId: string;
-  tenantId?: string;
-  displayName?: string;
-  userRoles?: string[];
-}
+import type { UserInfo } from '../../models/auth';
 
 export interface AppState {
   user: UserInfo | null;
@@ -38,7 +31,9 @@ const appSlice = createSlice({
   reducers: {
     setUser(state, action: PayloadAction<UserInfo | null>) {
       state.user = action.payload;
-      state.isAuthenticated = action.payload !== null;
+      state.isAuthenticated = Boolean(
+        action.payload?.user_id || action.payload?.user_email
+      );
     },
 
     setIsInitializing(state, action: PayloadAction<boolean>) {
@@ -56,6 +51,7 @@ const appSlice = createSlice({
     logout(state) {
       state.user = null;
       state.isAuthenticated = false;
+      state.isInitializing = false;
     },
   },
 });

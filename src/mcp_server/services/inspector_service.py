@@ -36,6 +36,26 @@ from utils.formatters import format_success_response, format_error_response
 
 logger = logging.getLogger(__name__)
 
+# credential_resolver is optional — only used for Key Vault credential resolution
+# in connect_stdio_server. If backend dependencies aren't available, the feature
+# gracefully degrades to env-var-only resolution.
+credential_resolver = None
+try:
+    import sys
+
+    _backend_path = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "backend")
+    )
+    if _backend_path not in sys.path:
+        sys.path.insert(0, _backend_path)
+    from credential_resolver import credential_resolver
+except ImportError as e:
+    logger.debug(
+        f"credential_resolver not available (backend dependencies missing): {e}"
+    )
+
+logger = logging.getLogger(__name__)
+
 
 def _redact(headers: Dict[str, str]) -> Dict[str, str]:
     """Redact sensitive headers for logging."""
@@ -175,7 +195,7 @@ class ExternalMCPSession:
                         method,
                         _redact(dict(response.request.headers)),
                         _truncate(payload, 2000),
-                        dict(response.headers),
+                        _redact(dict(response.headers)),
                         body.decode("utf-8", errors="replace")[:4000],
                     )
                     response.raise_for_status()
@@ -735,6 +755,9 @@ class ProxiedStdioSession:
         headers = self._build_headers()
         headers["Content-Type"] = "application/json"
 
+        if not self._msg_url:
+            raise RuntimeError("Not connected - message URL not available")
+
         try:
             resp = await self.client.post(self._msg_url, json=payload, headers=headers)
             if resp.status_code not in (200, 202):
@@ -1029,7 +1052,9 @@ class InspectorService(MCPToolBase):
         # Keyed by (user_id, server_name) for per-user session isolation.
         # user_id="" is the anonymous/shared namespace (dev / backward-compat).
         self._sessions: Dict[Tuple[str, str], ExternalMCPSession] = {}
-        self._proxied_sessions: Dict[Tuple[str, str], ProxiedStdioSession] = {}
+        self._proxied_sessions: Dict[
+            Tuple[str, str], ProxiedStdioSession | DirectStdioSession
+        ] = {}
         self._registry = RegistryBridge()
         self._inspector_config = _load_inspector_config()
         self._proxy_url = os.environ.get(
@@ -1114,6 +1139,22 @@ class InspectorService(MCPToolBase):
                 Connection status with server info and capabilities.
             """
             try:
+                # Auto-extract user_id from HTTP headers if not provided
+                if not user_id:
+                    try:
+                        from fastmcp.server.dependencies import get_http_headers
+
+                        headers = get_http_headers(include={"x-ms-client-principal-id"})
+                        user_id = headers.get("x-ms-client-principal-id") or ""
+                        if user_id:
+                            logger.info(
+                                f"[connect_mcp_server] Auto-detected user_id: {user_id}"
+                            )
+                    except Exception as e:
+                        logger.debug(
+                            f"[connect_mcp_server] Could not extract user_id: {e}"
+                        )
+
                 logger.info(
                     "[connect_mcp_server] called: server_url=%s, server_name=%s, user_id=%s, has_token=%s",
                     server_url,
@@ -1214,6 +1255,33 @@ class InspectorService(MCPToolBase):
                     except Exception as e:
                         logger.debug(
                             "[connect_mcp_server] No inbound auth header: %s", e
+                        )
+
+                # If still no token and we have user_id + server_name, try to resolve from registry
+                if not bearer and user_id and server_name:
+                    try:
+                        conn = await registry.get_user_connection(user_id, server_name)
+                        if conn and conn.get("status") == "active":
+                            secret_ref = conn.get("secret_ref", "")
+                            if secret_ref and credential_resolver:
+                                creds = await credential_resolver.resolve_by_secret_ref(
+                                    secret_ref
+                                )
+                                if creds:
+                                    bearer = (
+                                        creds.get("access_token")
+                                        or creds.get("token")
+                                        or creds.get("api_key")
+                                        or next(iter(creds.values()), "")
+                                    )
+                                    if bearer:
+                                        logger.info(
+                                            f"[connect_mcp_server] Resolved access token for "
+                                            f"'{server_name}' from Key Vault (user: {user_id})"
+                                        )
+                    except Exception as kv_err:
+                        logger.debug(
+                            f"[connect_mcp_server] Could not resolve token from registry: {kv_err}"
                         )
 
                 if bearer:
@@ -1754,12 +1822,40 @@ class InspectorService(MCPToolBase):
                 if auth_type != "none" and status == "active":
                     secret_ref = connection.get("secret_ref", "")
                     if secret_ref:
-                        # TODO: #897 resolve from Key Vault
-                        logger.info(
-                            f"'{server_name}' has secret_ref configured — "
-                            f"KV resolution not yet implemented"
-                        )
-                        extra_headers["X-MCP-Auth-Ref"] = secret_ref
+                        # Resolve token from Key Vault using CredentialResolver
+                        if credential_resolver:
+                            try:
+                                creds = await credential_resolver.resolve_by_secret_ref(
+                                    secret_ref
+                                )
+                                # Extract access_token or fallback to 'token' field
+                                if creds:
+                                    bearer_token = creds.get(
+                                        "access_token"
+                                    ) or creds.get("token")
+                                    if bearer_token:
+                                        extra_headers["Authorization"] = (
+                                            f"Bearer {bearer_token}"
+                                        )
+                                        logger.info(
+                                            f"[connect_from_registry] Resolved token from Key Vault for '{server_name}'"
+                                        )
+                                    else:
+                                        logger.warning(
+                                            f"[connect_from_registry] secret_ref '{secret_ref}' resolved but no access_token found"
+                                        )
+                                else:
+                                    logger.warning(
+                                        f"[connect_from_registry] secret_ref '{secret_ref}' returned None from Key Vault"
+                                    )
+                            except Exception as kv_err:
+                                logger.error(
+                                    f"[connect_from_registry] Failed to resolve secret_ref '{secret_ref}': {kv_err}"
+                                )
+                        else:
+                            logger.warning(
+                                f"[connect_from_registry] CredentialResolver not available, cannot resolve secret_ref for '{server_name}'"
+                            )
 
                 # Already connected?
                 _reg_key = (user_id, server_name)
@@ -1964,40 +2060,32 @@ class InspectorService(MCPToolBase):
                             # Attempt Key Vault resolution using secret name = env_key
                             # normalized to lowercase-hyphen (e.g. GITHUB_PERSONAL_ACCESS_TOKEN
                             # → github-personal-access-token)
-                            try:
-                                import sys as _sys
-
-                                _backend = os.path.normpath(
-                                    os.path.join(
-                                        os.path.dirname(__file__), "..", "..", "backend"
-                                    )
-                                )
-                                if _backend not in _sys.path:
-                                    _sys.path.insert(0, _backend)
-                                from credential_resolver import credential_resolver
-
-                                secret_name = env_key.lower().replace("_", "-")
-                                creds = await credential_resolver.resolve_by_secret_ref(
-                                    secret_name
-                                )
-                                if creds:
-                                    resolved = (
-                                        creds.get("token")
-                                        or creds.get("api_key")
-                                        or creds.get("access_token")
-                                        or creds.get(env_key)
-                                        or next(iter(creds.values()), "")
-                                    )
-                                    if resolved:
-                                        logger.info(
-                                            f"[connect_stdio_server] Resolved credential "
-                                            f"for '{server_name}' from Key Vault"
+                            if credential_resolver:
+                                try:
+                                    secret_name = env_key.lower().replace("_", "-")
+                                    creds = (
+                                        await credential_resolver.resolve_by_secret_ref(
+                                            secret_name
                                         )
-                            except Exception as kv_err:
-                                logger.debug(
-                                    f"[connect_stdio_server] KV lookup failed "
-                                    f"for '{env_key}': {kv_err}"
-                                )
+                                    )
+                                    if creds:
+                                        resolved = (
+                                            creds.get("token")
+                                            or creds.get("api_key")
+                                            or creds.get("access_token")
+                                            or creds.get(env_key)
+                                            or next(iter(creds.values()), "")
+                                        )
+                                        if resolved:
+                                            logger.info(
+                                                f"[connect_stdio_server] Resolved credential "
+                                                f"for '{server_name}' from Key Vault"
+                                            )
+                                except Exception as kv_err:
+                                    logger.debug(
+                                        f"[connect_stdio_server] KV lookup failed "
+                                        f"for '{env_key}': {kv_err}"
+                                    )
 
                         if not resolved:
                             return format_error_response(

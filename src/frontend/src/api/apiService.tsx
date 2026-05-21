@@ -446,6 +446,127 @@ export class APIService {
     async deleteChatSession(sessionId: string): Promise<{ success: boolean }> {
         return apiClient.delete(`${API_ENDPOINTS.CHAT_SESSIONS}/${sessionId}`);
     }
+
+    // ── MCP Connections ────────────────────────────────────────
+
+    /**
+     * Get all available MCP servers from the catalog.
+     */
+    async getMcpServers(): Promise<{
+        servers: Array<{
+            id: string;
+            server_name: string;
+            display_name: string;
+            description?: string;
+            endpoint: string;
+            transport: string;
+            auth_type: string;
+            capabilities?: string[];
+            tool_count?: number;
+            icon_url?: string;
+            enabled?: boolean;
+        }>;
+        total: number;
+    }> {
+        return apiClient.get('/v4/mcp/connections/servers');
+    }
+
+    /**
+     * Get user's MCP server connections with status.
+     */
+    async getUserMcpConnections(): Promise<{
+        connections: Array<{
+            server: {
+                id: string;
+                server_name: string;
+                display_name: string;
+                description?: string;
+                endpoint: string;
+                transport: string;
+                auth_type: string;
+                capabilities?: string[];
+                tool_count?: number;
+                icon_url?: string;
+            };
+            connection: {
+                status: string;
+                connected_at?: string;
+                last_error?: string;
+            } | null;
+            is_connected: boolean;
+            needs_auth: boolean;
+        }>;
+        user_id: string;
+    }> {
+        return apiClient.get('/v4/mcp/connections/user');
+    }
+
+    /**
+     * Initiate connection to an MCP server.
+     * Returns OAuth URL if authentication is required.
+     */
+    async connectToMcpServer(
+        serverName: string,
+        credentials?: Record<string, string>
+    ): Promise<{
+        status: string;
+        needs_auth: boolean;
+        oauth_url?: string;
+        connection?: Record<string, unknown>;
+    }> {
+        return apiClient.post(
+            `/v4/mcp/connections/user/${serverName}/connect`,
+            credentials ? { credentials } : undefined
+        );
+    }
+
+    /**
+     * Activate MCP connection (called after OAuth callback).
+     */
+    async activateMcpConnection(
+        serverName: string,
+        secretRef?: string
+    ): Promise<{
+        connection: Record<string, unknown>;
+        activated: boolean;
+    }> {
+        return apiClient.patch(
+            `/v4/mcp/connections/user/${serverName}/activate`,
+            secretRef ? { secret_ref: secretRef } : {}
+        );
+    }
+
+    /**
+     * Disconnect from an MCP server.
+     */
+    async disconnectMcpServer(serverName: string): Promise<{
+        disconnected: boolean;
+        server_name: string;
+    }> {
+        return apiClient.delete(`/v4/mcp/connections/user/${serverName}`);
+    }
+
+    /**
+     * Register a new MCP server in the catalog (admin operation).
+     */
+    async registerMcpServer(entry: {
+        server_name: string;
+        display_name: string;
+        description?: string;
+        endpoint: string;
+        transport: string;
+        auth_type: string;
+        auth_fields?: string[];
+        oauth_scopes?: string[];
+        capabilities?: string[];
+        icon_url?: string | null;
+        allowed_agents?: string[];
+        enabled?: boolean;
+    }): Promise<{
+        server: Record<string, unknown>;
+    }> {
+        return apiClient.post('/v4/mcp/connections/servers', entry);
+    }
 }
 
 // Export a singleton instance

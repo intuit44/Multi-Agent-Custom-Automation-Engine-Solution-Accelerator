@@ -3,8 +3,10 @@
 import json
 import logging
 from typing import Dict, Optional
+
 from azure.keyvault.secrets.aio import SecretClient
-from app_config import config
+
+from common.config.app_config import config
 
 
 class CredentialResolver:
@@ -33,7 +35,7 @@ class CredentialResolver:
             if not kv_url:
                 raise ValueError("AZURE_KEY_VAULT_URL not configured")
 
-            credential = config.get_azure_credentials()
+            credential = config.get_azure_credential_async()
             self._kv_client = SecretClient(vault_url=kv_url, credential=credential)
 
         return self._kv_client

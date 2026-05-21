@@ -9,10 +9,12 @@ import {
   ToastTitle,
   Tooltip,
   useToastController,
+  Button,
 } from "@fluentui/react-components";
 import {
   Chat20Regular,
   ChatAdd20Regular,
+  Settings24Regular,
 } from "@fluentui/react-icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -21,6 +23,7 @@ import { ChatService } from "@/services/ChatService";
 import ContosoLogo from "../../coral/imports/ContosoLogo";
 import "../../styles/PlanPanelLeft.css";
 import "../../styles/EnhancedChat.css";
+import LoginButton from "../auth/LoginButton";
 import PanelFooter from "@/coral/components/Panels/PanelFooter";
 import PanelUserCard from "../../coral/components/Panels/UserCard";
 import { getUserInfoGlobal } from "@/api/config";
@@ -28,6 +31,7 @@ import TeamSelector from "../common/TeamSelector";
 import { TeamConfig } from "../../models/Team";
 import TeamSelected from "../common/TeamSelected";
 import type { ChatSessionSummary } from "../../lib/types";
+import { SettingsModal } from "../settings/SettingsModal";
 
 const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
   reloadTasks,
@@ -48,6 +52,7 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
   );
   const [recentChats, setRecentChats] = useState<ChatSessionSummary[]>([]);
   const loadingRecentChatsRef = useRef(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Use parent's selected team if provided, otherwise use local state
   const [localSelectedTeam, setLocalSelectedTeam] = useState<TeamConfig | null>(null);
@@ -216,13 +221,26 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
         <PanelFooter>
           <div className="panel-footer-content">
             {/* User Card */}
-            <PanelUserCard
-              name={userInfo?.user_first_last_name || "Guest"}
-              // alias={userInfo ? userInfo.user_email : ""}
-              size={32}
-            />
+            <LoginButton showName={false} />
+
+            {/* Settings Button */}
+            <Tooltip content="Configuración" relationship="label">
+              <Button
+                appearance="subtle"
+                icon={<Settings24Regular />}
+                onClick={() => setSettingsOpen(true)}
+                aria-label="Configuración"
+                style={{ minWidth: 32 }}
+              />
+            </Tooltip>
           </div>
         </PanelFooter>
+
+        {/* Settings Modal */}
+        <SettingsModal
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+        />
       </PanelLeft>
     </div>
   );

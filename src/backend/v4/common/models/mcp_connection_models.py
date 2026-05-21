@@ -106,6 +106,24 @@ class MCPServerEntry(BaseModel):
         description="OAuth2 scopes if auth_type is oauth2",
     )
 
+    # OAuth2 provider endpoints (only used when auth_type == oauth2)
+    oauth_authorize_url: Optional[str] = Field(
+        default=None,
+        description="OAuth2 authorization endpoint, e.g. 'https://github.com/login/oauth/authorize'",
+    )
+    oauth_token_url: Optional[str] = Field(
+        default=None,
+        description="OAuth2 token exchange endpoint, e.g. 'https://github.com/login/oauth/access_token'",
+    )
+    oauth_client_id_env: Optional[str] = Field(
+        default=None,
+        description="Env var name holding the OAuth client_id (e.g. 'GITHUB_CLIENT_ID')",
+    )
+    oauth_client_secret_env: Optional[str] = Field(
+        default=None,
+        description="Env var name holding the OAuth client_secret (e.g. 'GITHUB_CLIENT_SECRET')",
+    )
+
     # Capabilities discovered on last connect (cached)
     capabilities: List[str] = Field(
         default_factory=list,

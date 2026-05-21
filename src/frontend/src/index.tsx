@@ -6,6 +6,7 @@ import reportWebVitals from './reportWebVitals';
 import { FluentProvider, teamsLightTheme, teamsDarkTheme } from "@fluentui/react-components";
 import { setEnvData, setApiUrl, config as defaultConfig, toBoolean, getUserInfo, setUserInfoGlobal } from './api/config';
 import { apiService } from './api';
+import store, { setIsInitializing, setUser } from './store';
 const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
 
 const AppWrapper = () => {
@@ -42,10 +43,12 @@ const AppWrapper = () => {
         let defaultUserInfo = await getUserInfo();
         window.userInfo = defaultUserInfo;
         setUserInfoGlobal(defaultUserInfo);
+        store.dispatch(setUser(defaultUserInfo));
         await apiService.sendUserBrowserLanguage();
       } catch (error) {
         console.info("frontend config did not load from python", error);
       } finally {
+        store.dispatch(setIsInitializing(false));
         setIsConfigLoaded(true);
         setIsUserInfoLoaded(true);
       }

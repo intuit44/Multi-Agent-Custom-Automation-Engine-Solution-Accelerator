@@ -98,6 +98,7 @@ export const apiClient = {
     },
     post: (url: string, body?: any) => fetchWithAuth(url, 'POST', body),
     put: (url: string, body?: any) => fetchWithAuth(url, 'PUT', body),
+    patch: (url: string, body?: any) => fetchWithAuth(url, 'PATCH', body),
     delete: (url: string) => fetchWithAuth(url, 'DELETE'),
     upload: (url: string, formData: FormData) => fetchWithAuth(url, 'POST', formData),
     login: (url: string, body?: any) => fetchWithoutAuth(url, 'POST', body), // For login without auth

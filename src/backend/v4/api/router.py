@@ -1222,6 +1222,12 @@ async def chat_message_stream(
                 agent,
             )
 
+            # Dedup state for tool_activity SSE events.
+            # The Responses API streams function-call args chunk-by-chunk, which
+            # would otherwise produce one "Calling X..." UI bubble per chunk.
+            # Console logs (logger.info) are not affected — they still fire per chunk.
+            _last_tool_activity_key: Optional[tuple] = None
+
             async for update in agent.invoke(
                 direct_chat_prompt,
                 session_id=chat_request.session_id,
@@ -1261,14 +1267,17 @@ async def chat_message_stream(
                             content.name,
                             content.arguments,
                         )
-                        yield _sse_event(
-                            {
-                                "type": "tool_activity",
-                                "activity": "calling",
-                                "tool": content.name or "unknown",
-                                "args": str(content.arguments or "")[:200],
-                            }
-                        )
+                        _key = ("calling", content.name or "unknown")
+                        if _key != _last_tool_activity_key:
+                            _last_tool_activity_key = _key
+                            yield _sse_event(
+                                {
+                                    "type": "tool_activity",
+                                    "activity": "calling",
+                                    "tool": content.name or "unknown",
+                                    "args": str(content.arguments or "")[:200],
+                                }
+                            )
 
                     elif ct == "function_result":
                         logger.info(
@@ -1276,38 +1285,55 @@ async def chat_message_stream(
                             getattr(content, "name", "?"),
                             str(getattr(content, "result", content))[:4000],
                         )
-                        yield _sse_event(
-                            {
-                                "type": "tool_activity",
-                                "activity": "result",
-                                "tool": content.name or "unknown",
-                                "success": content.exception is None,
-                            }
-                        )
+                        _key = ("result", content.name or "unknown")
+                        if _key != _last_tool_activity_key:
+                            _last_tool_activity_key = _key
+                            yield _sse_event(
+                                {
+                                    "type": "tool_activity",
+                                    "activity": "result",
+                                    "tool": content.name or "unknown",
+                                    "success": content.exception is None,
+                                }
+                            )
 
                     elif ct == "mcp_server_tool_call":
-                        yield _sse_event(
-                            {
-                                "type": "tool_activity",
-                                "activity": "calling",
-                                "tool": content.tool_name or "unknown",
-                                "server": content.server_name or "unknown",
-                                "args": str(content.arguments or "")[:200],
-                            }
+                        _key = (
+                            "calling",
+                            content.tool_name or "unknown",
+                            content.server_name or "unknown",
                         )
+                        if _key != _last_tool_activity_key:
+                            _last_tool_activity_key = _key
+                            yield _sse_event(
+                                {
+                                    "type": "tool_activity",
+                                    "activity": "calling",
+                                    "tool": content.tool_name or "unknown",
+                                    "server": content.server_name or "unknown",
+                                    "args": str(content.arguments or "")[:200],
+                                }
+                            )
 
                     elif ct == "mcp_server_tool_result":
-                        yield _sse_event(
-                            {
-                                "type": "tool_activity",
-                                "activity": "result",
-                                "tool": content.tool_name or "unknown",
-                                "server": content.server_name or "unknown",
-                                "success": content.status != "error"
-                                if content.status
-                                else True,
-                            }
+                        _key = (
+                            "result",
+                            content.tool_name or "unknown",
+                            content.server_name or "unknown",
                         )
+                        if _key != _last_tool_activity_key:
+                            _last_tool_activity_key = _key
+                            yield _sse_event(
+                                {
+                                    "type": "tool_activity",
+                                    "activity": "result",
+                                    "tool": content.tool_name or "unknown",
+                                    "server": content.server_name or "unknown",
+                                    "success": content.status != "error"
+                                    if content.status
+                                    else True,
+                                }
+                            )
 
                     elif ct == "code_interpreter_tool_call":
                         args_text = str(
@@ -3278,9 +3304,21 @@ async def connect_user_to_mcp_server(server_name: str, request: Request):
     Create a user connection entry for an MCP server.
 
     For servers with auth_type=none, immediately marks as active.
-    For servers requiring auth, marks as pending_auth.
+    For servers requiring auth:
+    - If credentials provided in body, stores them in Key Vault and marks active
+    - Otherwise, marks as pending_auth (OAuth flow)
+
+    Request body (optional):
+    {
+      "credentials": {
+        "access_token": "ghp_xxxx",
+        "api_key": "sk_xxxx",
+        ...
+      }
+    }
     """
     try:
+        from credential_resolver import CredentialResolver
         from v4.common.models.mcp_connection_models import (
             MCPConnectionStatus,
             MCPUserConnection,
@@ -3306,21 +3344,80 @@ async def connect_user_to_mcp_server(server_name: str, request: Request):
                 "already_connected": True,
             }
 
-        # Create connection
+        # Parse request body for credentials
+        body = {}
+        try:
+            body = await request.json()
+        except Exception:
+            pass
+
+        credentials = body.get("credentials")
+
+        # Determine status and secret_ref
         from v4.common.models.mcp_connection_models import MCPAuthType
 
-        status = (
-            MCPConnectionStatus.ACTIVE
-            if server.auth_type == MCPAuthType.NONE
-            else MCPConnectionStatus.PENDING_AUTH
-        )
+        status = MCPConnectionStatus.PENDING_AUTH
+        secret_ref = None
+        oauth_url: Optional[str] = None
 
+        if server.auth_type == MCPAuthType.NONE:
+            status = MCPConnectionStatus.ACTIVE
+        elif credentials:
+            try:
+                resolver = CredentialResolver()
+                secret_ref = await resolver.store_credentials(
+                    user_id, server_name, credentials
+                )
+                status = MCPConnectionStatus.ACTIVE
+                logger.info(
+                    f"Stored credentials in Key Vault for user '{user_id}' "
+                    f"connecting to '{server_name}'"
+                )
+            except Exception as kv_err:
+                logger.error(f"Failed to store credentials in Key Vault: {kv_err}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to securely store credentials",
+                )
+        elif server.auth_type == MCPAuthType.OAUTH2:
+            from v4.api.oauth_helpers import build_authorize_url, sign_state
+
+            if not server.oauth_authorize_url:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Server '{server_name}' has auth_type=oauth2 but no "
+                        f"oauth_authorize_url configured in catalog"
+                    ),
+                )
+
+            client_id_env = server.oauth_client_id_env or ""
+            client_id = os.environ.get(client_id_env, "") if client_id_env else ""
+            if not client_id:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"OAuth client_id not configured for '{server_name}' "
+                        f"(expected env var: {client_id_env or '<unset>'})"
+                    ),
+                )
+
+            state = sign_state(user_id, server_name)
+            oauth_url = build_authorize_url(
+                server.oauth_authorize_url,
+                client_id,
+                server.oauth_scopes,
+                state,
+            )
+
+        # Create connection
         conn = MCPUserConnection(
             pk=user_id,
             user_id=user_id,
             server_id=server.id,
             server_name=server_name,
             status=status,
+            secret_ref=secret_ref,
         )
         result = await svc.upsert_user_connection(conn)
 
@@ -3329,7 +3426,10 @@ async def connect_user_to_mcp_server(server_name: str, request: Request):
             {"user_id": user_id, "server_name": server_name, "status": status.value},
         )
 
-        return {"connection": result.model_dump(mode="json"), "created": True}
+        response = {"connection": result.model_dump(mode="json"), "created": True}
+        if oauth_url:
+            response["oauth_url"] = oauth_url
+        return response
 
     except HTTPException:
         raise
@@ -3376,6 +3476,100 @@ async def activate_user_mcp_connection(server_name: str, request: Request):
     except Exception as e:
         logger.error(f"Error activating MCP connection: {e}")
         raise HTTPException(status_code=500, detail="Failed to activate connection")
+
+
+@app_v4.get("/mcp/connections/oauth/callback")
+async def mcp_oauth_callback(code: str, state: str):
+    """OAuth2 redirect callback.
+
+    Verifies the signed state, exchanges the authorization code for a token,
+    stores it in Key Vault, marks the user's connection as active, and returns
+    an HTML page that closes the popup.
+    """
+    from fastapi.responses import HTMLResponse
+
+    from credential_resolver import CredentialResolver
+    from v4.api.oauth_helpers import exchange_code_for_token, verify_state
+    from v4.common.services.mcp_connections_service import MCPConnectionsService
+
+    def _html(message: str, ok: bool = True, status_code: int = 200) -> HTMLResponse:
+        color = "#0a7d3e" if ok else "#b3261e"
+        return HTMLResponse(
+            content=f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>OAuth</title></head>
+<body style="font-family:system-ui;padding:32px;text-align:center;">
+  <h2 style="color:{color};">{"Conexión exitosa" if ok else "Error en la conexión"}</h2>
+  <p style="color:#555;">{message}</p>
+  <script>
+    try {{ if (window.opener) window.opener.postMessage(
+        {{type: 'mcp_oauth', ok: {str(ok).lower()}}}, '*'); }} catch (e) {{}}
+    setTimeout(() => window.close(), 1500);
+  </script>
+</body></html>""",
+            status_code=status_code,
+        )
+
+    try:
+        user_id, server_name = verify_state(state)
+    except ValueError as ve:
+        logger.warning(f"OAuth callback rejected invalid state: {ve}")
+        return _html(f"Token de estado inválido: {ve}", ok=False, status_code=400)
+
+    svc = await MCPConnectionsService.get_instance()
+    server = await svc.get_server_by_name(server_name)
+    if not server:
+        return _html(
+            f"Servidor '{server_name}' no encontrado", ok=False, status_code=404
+        )
+
+    client_id_env = server.oauth_client_id_env or ""
+    client_secret_env = server.oauth_client_secret_env or ""
+    client_id = os.environ.get(client_id_env, "") if client_id_env else ""
+    client_secret = os.environ.get(client_secret_env, "") if client_secret_env else ""
+    if not client_id or not client_secret or not server.oauth_token_url:
+        return _html(
+            "OAuth no está completamente configurado en el catálogo.",
+            ok=False,
+            status_code=500,
+        )
+
+    try:
+        token_data = await exchange_code_for_token(
+            server.oauth_token_url, client_id, client_secret, code
+        )
+    except Exception as exc:
+        logger.error(f"OAuth token exchange failed for '{server_name}': {exc}")
+        return _html(
+            f"No se pudo intercambiar el código: {exc}", ok=False, status_code=502
+        )
+
+    try:
+        resolver = CredentialResolver()
+        secret_ref = await resolver.store_credentials(user_id, server_name, token_data)
+    except Exception as exc:
+        logger.error(f"Failed to store OAuth token in Key Vault: {exc}")
+        return _html(
+            "No se pudo guardar el token de forma segura.",
+            ok=False,
+            status_code=500,
+        )
+
+    try:
+        await svc.mark_connection_active(user_id, server_name, secret_ref=secret_ref)
+    except Exception as exc:
+        logger.error(f"Failed to mark connection active: {exc}")
+        return _html(
+            "El token se guardó pero no se pudo activar la conexión.",
+            ok=False,
+            status_code=500,
+        )
+
+    track_event_if_configured(
+        "MCP_OAuth_Completed",
+        {"user_id": user_id, "server_name": server_name},
+    )
+
+    return _html(f"Conectado a {server.display_name}. Puedes cerrar esta ventana.")
 
 
 @app_v4.delete("/mcp/connections/user/{server_name}")

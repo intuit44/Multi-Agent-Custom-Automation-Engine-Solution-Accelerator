@@ -20,6 +20,7 @@ dependencies = [
   "uvicorn[standard]==0.38.0",
   "python-dotenv==1.1.1",
   "azure-identity==1.19.0",
+  "azure-keyvault-secrets==4.11.0",
   "pydantic==2.11.7",
   "pydantic-settings==2.6.1",
   "python-multipart==0.0.22",

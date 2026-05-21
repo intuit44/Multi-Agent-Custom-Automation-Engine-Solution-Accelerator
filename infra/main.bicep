@@ -1563,7 +1563,7 @@ module webSite 'modules/web-sites.bicep' = {
           WEBSITES_PORT: '3000'
           WEBSITES_CONTAINER_START_TIME_LIMIT: '1800' // 30 minutes, adjust as needed
           BACKEND_API_URL: 'https://${containerApp.outputs.fqdn}'
-          AUTH_ENABLED: 'false'
+          AUTH_ENABLED: 'true'
         }
         // WAF aligned configuration for Monitoring
         applicationInsightResourceId: enableMonitoring ? applicationInsights!.outputs.resourceId : null
