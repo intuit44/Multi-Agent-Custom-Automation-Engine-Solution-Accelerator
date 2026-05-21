@@ -25,7 +25,6 @@ import "../../styles/PlanPanelLeft.css";
 import "../../styles/EnhancedChat.css";
 import LoginButton from "../auth/LoginButton";
 import PanelFooter from "@/coral/components/Panels/PanelFooter";
-import PanelUserCard from "../../coral/components/Panels/UserCard";
 import { getUserInfoGlobal } from "@/api/config";
 import TeamSelector from "../common/TeamSelector";
 import { TeamConfig } from "../../models/Team";
