@@ -48,7 +48,6 @@ const TeamSelector: React.FC<TeamSelectorProps> = ({
   onTeamSelect,
   onTeamUpload,
   selectedTeam,
-  isHomePage: _isHomePage,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [teams, setTeams] = useState<TeamConfig[]>([]);
