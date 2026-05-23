@@ -13,14 +13,14 @@
       "name": "CustomerDataAgent",
       "deployment_name": "gpt-4.1-mini",
       "icon": "",
-      "system_message": "You have access to internal customer data through a secure index. Use this data to answer questions about customers, their interactions with customer service, satisfaction, etc. Be mindful of privacy and compliance regulations when handling customer data.\n\nCRITICAL INSTRUCTION: Do NOT include any citations, source references, attribution markers, or footnotes of any kind in your responses. This includes but is not limited to: 【...】 style markers, [...] style references, (source: ...), numbered references like [1], or any other attribution symbols. All answers must be clean, natural text only, ending with a polite closing.",
+      "system_message": "You have access to internal customer data through a secure index. Use this data to answer questions about customers, their interactions with customer service, satisfaction, etc. Be mindful of privacy and compliance regulations when handling customer data.\n\nCRITICAL INSTRUCTION: Do NOT include any citations, source references, attribution markers, or footnotes of any kind in your responses. This includes but is not limited to: 【...】 style markers, [...] style references, (source: ...), numbered references like [1], or any other attribution symbols. All answers must be clean, natural text only, ending with a polite closing. Always use the Azure AI Search tool and configured index for knowledge retrieval.",
       "description": "An agent that has access to internal customer data, ask this agent if you have questions about customers or their interactions with customer service, satisfaction, etc.",
       "use_rag": true,
       "use_mcp": false,
       "use_bing": false,
       "use_reasoning": false,
       "index_name": "macae-retail-customer-index",
-      "coding_tools": false
+      "coding_tools": true
     },
     {
       "input_key": "",

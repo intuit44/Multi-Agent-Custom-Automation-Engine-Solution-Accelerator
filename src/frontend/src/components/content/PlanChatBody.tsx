@@ -38,6 +38,12 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
     onFileSelect,
     onRemoveFile,
 }) => {
+    const isDisabled = submittingChatDisableInput || waitingForPlan;
+    const placeholder = waitingForPlan
+        ? "Waiting for plan..."
+        : planData
+            ? "Type your message here..."
+            : "Describe your task...";
     const fileInputRef = useRef<HTMLInputElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const [menuOpen, setMenuOpen] = useState(false);
@@ -227,8 +233,8 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
                 value={input}
                 onChange={setInput}
                 onEnter={() => OnChatSubmit(input)}
-                disabledChat={false}
-                placeholder="Type your message here..."
+                disabledChat={isDisabled}
+                placeholder={placeholder}
                 style={{
                     fontSize: '16px',
                     borderRadius: '12px',
@@ -242,7 +248,7 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
                         <Button
                             appearance="subtle"
                             icon={<Attach20Regular />}
-                            disabled={submittingChatDisableInput}
+                            disabled={isDisabled}
                             aria-label="Attach files and media"
                             style={{
                                 height: '32px',
@@ -250,7 +256,7 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
                                 borderRadius: '6px',
                                 backgroundColor: 'transparent',
                                 border: 'none',
-                                color: submittingChatDisableInput
+                                color: isDisabled
                                     ? 'var(--colorNeutralForegroundDisabled)'
                                     : 'var(--colorNeutralForeground2)',
                                 flexShrink: 0,
@@ -294,18 +300,18 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
                     appearance="subtle"
                     className="home-input-send-button"
                     onClick={() => OnChatSubmit(input)}
-                    disabled={submittingChatDisableInput || !input.trim()}
+                    disabled={isDisabled || !input.trim()}
                     icon={<Send />}
                     aria-label="Send message"
                     style={{
                         height: '32px',
                         width: '32px',
                         borderRadius: '6px',
-                        backgroundColor: (submittingChatDisableInput || !input.trim())
+                        backgroundColor: (isDisabled || !input.trim())
                             ? 'transparent'
                             : 'var(--colorBrandBackground)',
                         border: 'none',
-                        color: (submittingChatDisableInput || !input.trim())
+                        color: (isDisabled || !input.trim())
                             ? 'var(--colorNeutralForegroundDisabled)'
                             : 'var(--colorNeutralBackgroundStatic)',
                         flexShrink: 0,

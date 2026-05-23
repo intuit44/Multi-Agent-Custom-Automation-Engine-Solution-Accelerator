@@ -147,6 +147,7 @@ class PlanService:
                     plan = await memory_store.get_plan(human_feedback.plan_id)
                     mplan.plan_id = human_feedback.plan_id
                     mplan.team_id = plan.team_id  # just to keep consistency
+                    mplan.overall_status = PlanStatus.approved
                     orchestration_config.plans[human_feedback.m_plan_id] = mplan
                     if plan:
                         plan.overall_status = PlanStatus.approved
@@ -196,6 +197,8 @@ class PlanService:
                 plan = await memory_store.get_plan(agent_msg.plan_id)
                 plan.streaming_message = agent_message.streaming_message
                 plan.overall_status = PlanStatus.completed
+                if plan.m_plan:
+                    plan.m_plan["overall_status"] = PlanStatus.completed.value
                 await memory_store.update_plan(plan)
             return True
         except Exception as e:

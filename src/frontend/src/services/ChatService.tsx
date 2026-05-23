@@ -22,8 +22,8 @@ import type {
 /** Callbacks for streaming chat responses. */
 export interface StreamCallbacks {
     onToken: (token: string) => void;
-    onIntent: (data: { intent: string; confidence: number; session_id: string }) => void;
-    onDone: (data: { intent: string; agent: string; confidence: number; session_id: string }) => void;
+    onIntent: (data: { intent: string; confidence: number; session_id: string; plan_id?: string; m_plan_id?: string }) => void;
+    onDone: (data: { intent: string; agent: string; confidence: number; session_id: string; plan_id?: string; m_plan_id?: string }) => void;
     /** Called when intent router detects a task and creates a plan inline. */
     onPlanCreated?: (planId: string) => void;
     /** Legacy redirect — kept for backward compat. */
@@ -119,12 +119,13 @@ export class ChatService {
         options: {
             onPlanCreated?: (planId: string) => void;
             onSessionId?: (sid: string) => void;
+            onDone?: (data: { intent: string; agent: string; confidence: number; session_id: string; plan_id?: string; m_plan_id?: string }) => void;
             fileIds?: string[];
             onGeneratedFile?: (f: { file_id: string; filename: string; download_url: string }) => void;
             planId?: string;
         } = {},
     ): AsyncIterable<string> {
-        const { onPlanCreated, onSessionId, fileIds, onGeneratedFile, planId } = options;
+        const { onPlanCreated, onSessionId, onDone, fileIds, onGeneratedFile, planId } = options;
         return {
             [Symbol.asyncIterator](): AsyncIterator<string> {
                 // Queue of resolved chunks; resolve/reject hooks for the consumer.
@@ -149,7 +150,7 @@ export class ChatService {
                         if (data.activity === 'calling') push(`\n_🔧 Calling **${data.tool}**${data.server ? ` on \`${data.server}\`` : ''}…_\n`);
                     },
                     onPlanCreated: (newPlanId) => { onPlanCreated?.(newPlanId); finish(); },
-                    onDone:        () => finish(),
+                    onDone:        (data) => { onDone?.(data); finish(); },
                     onError:       (msg) => fail(new Error(msg)),
                     onGeneratedFile: (f) => { onGeneratedFile?.(f); },
                 }, fileIds, planId).catch(fail);

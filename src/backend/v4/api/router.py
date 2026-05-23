@@ -29,6 +29,8 @@ from common.models.messages_af import (
     InputTask,
     Plan,
     PlanStatus,
+    TeamAgent,
+    TeamConfiguration,
     TeamSelectionRequest,
 )
 from common.services.chat_cosmos_service import get_chat_cosmos_service
@@ -928,6 +930,221 @@ def _build_direct_chat_prompt(message: str, team: Any, selected_agent: Any) -> s
     )
 
 
+def _get_m_plan_id_from_plan(plan: Any) -> Optional[str]:
+    m_plan = getattr(plan, "m_plan", None)
+    if isinstance(m_plan, dict):
+        return m_plan.get("id") or m_plan.get("m_plan_id")
+    return getattr(m_plan, "id", None) or getattr(m_plan, "m_plan_id", None)
+
+
+def _build_plan_chat_prompt(
+    message: str,
+    team: Any,
+    selected_agent: Any,
+    plan: Any,
+) -> str:
+    selected_name = _agent_runtime_name(selected_agent) or "UnknownAgent"
+    m_plan = getattr(plan, "m_plan", None)
+    if hasattr(m_plan, "model_dump"):
+        m_plan = m_plan.model_dump()
+
+    return (
+        "ACTIVE PLAN CONTEXT FROM MACAE BACKEND\n"
+        f"plan_id: {getattr(plan, 'plan_id', '') or getattr(plan, 'id', '')}\n"
+        f"m_plan_id: {_get_m_plan_id_from_plan(plan) or ''}\n"
+        f"plan_status: {getattr(plan, 'overall_status', '')}\n"
+        f"initial_goal: {getattr(plan, 'initial_goal', '')}\n"
+        f"Selected responding agent for this turn: {selected_name}\n"
+        f"{_team_agent_context(team)}\n\n"
+        "Current m_plan object, if available:\n"
+        f"{json.dumps(m_plan, ensure_ascii=False, default=str) if m_plan else '{}'}\n\n"
+        "Instructions:\n"
+        "- This message is inside the active application Plan context above.\n"
+        "- Do not create a new application Plan for this message.\n"
+        "- Use the active plan state and team as authoritative context.\n"
+        "- If the user is asking about status, next steps, approval, or prior work, "
+        "answer in relation to the active plan.\n"
+        "- Respond in the user's language.\n\n"
+        f"USER MESSAGE:\n{message}"
+    )
+
+
+def _agent_can_join_direct_orchestration(agent: Any) -> bool:
+    """Return True for agents that implement the AgentFramework protocol."""
+    return callable(getattr(agent, "run", None)) or callable(
+        getattr(agent, "invoke", None)
+    )
+
+
+def _merge_teams_for_direct_response(
+    teams: list[TeamConfiguration],
+    user_id: str,
+    default_deployment_name: str,
+) -> TeamConfiguration:
+    """Build a direct-response team from all available teams.
+
+    ProxyAgent is intentionally kept once with its original clarification role.
+    Business agents keep their names so the Magentic manager can route to the
+    same participants users see elsewhere in the app.
+    """
+    merged_agents: list[TeamAgent] = []
+    seen_names: set[str] = set()
+    descriptions: list[str] = []
+
+    for team in teams:
+        if getattr(team, "status", "visible") == "hidden":
+            continue
+        team_name = getattr(team, "name", "") or "Unnamed Team"
+        team_description = getattr(team, "description", "") or ""
+        descriptions.append(f"{team_name}: {team_description}".strip())
+
+        for agent in getattr(team, "agents", []) or []:
+            name = getattr(agent, "name", "") or ""
+            if not name:
+                continue
+            normalized = name.lower()
+            if normalized == "proxyagent":
+                if "proxyagent" in seen_names:
+                    continue
+                seen_names.add("proxyagent")
+                merged_agents.append(agent)
+                continue
+            if normalized in seen_names:
+                logger.warning(
+                    "Skipping duplicate direct-response agent name '%s' from team '%s'",
+                    name,
+                    team_name,
+                )
+                continue
+            seen_names.add(normalized)
+
+            agent_dict = (
+                agent.model_dump() if hasattr(agent, "model_dump") else dict(agent)
+            )
+            agent_dict["description"] = (
+                f"[Team: {team_name}] {agent_dict.get('description', '')}".strip()
+            )
+            agent_dict["system_message"] = (
+                f"Team context: {team_name}. {team_description}\n\n"
+                f"{agent_dict.get('system_message', '')}"
+            ).strip()
+            merged_agents.append(TeamAgent(**agent_dict))
+
+    if not any((agent.name or "").lower() == "proxyagent" for agent in merged_agents):
+        merged_agents.append(
+            TeamAgent(
+                input_key="",
+                type="",
+                name="ProxyAgent",
+                deployment_name="",
+                icon="",
+                system_message="",
+                description="Clarification agent for missing user details.",
+            )
+        )
+
+    return TeamConfiguration(
+        team_id="direct-response-team",
+        name="Direct Response Team",
+        status="visible",
+        created="",
+        created_by=user_id,
+        deployment_name=default_deployment_name,
+        agents=merged_agents,
+        description=(
+            "Direct response orchestration across all available teams. "
+            + "\n".join(descriptions)
+        ),
+        logo="",
+        plan="",
+        starting_tasks=[],
+        user_id=user_id,
+    )
+
+
+async def _create_direct_response_workflow(
+    user_id: str,
+    tenant_id: str,
+    team_config_input: Optional[TeamConfiguration] = None,
+) -> tuple[Any, list[Any], TeamConfiguration]:
+    """Create a Magentic workflow for a single direct chat request."""
+    from common.config.app_config import config
+    from v4.magentic_agents.magentic_agent_factory import MagenticAgentFactory
+    from v4.magentic_agents.proxy_agent import ProxyAgent
+
+    memory_store = await DatabaseFactory.get_database(
+        user_id=user_id, tenant_id=tenant_id
+    )
+    team_service = TeamService(memory_store)
+    if team_config_input is not None:
+        direct_team = team_config_input
+        if not getattr(direct_team, "deployment_name", None):
+            direct_team.deployment_name = config.AZURE_OPENAI_DEPLOYMENT_NAME
+    else:
+        teams = await team_service.get_all_team_configurations()
+        if not teams:
+            current = await memory_store.get_current_team(user_id=user_id)
+            if current:
+                team = await memory_store.get_team_by_id(team_id=current.team_id)
+                if team:
+                    teams = [team]
+        if not teams:
+            raise ValueError("No teams configured for direct response")
+
+        current = await memory_store.get_current_team(user_id=user_id)
+        current_team = (
+            await memory_store.get_team_by_id(team_id=current.team_id)
+            if current
+            else None
+        )
+        default_deployment_name = (
+            getattr(current_team, "deployment_name", None)
+            or getattr(teams[0], "deployment_name", None)
+            or config.AZURE_OPENAI_DEPLOYMENT_NAME
+        )
+        direct_team = _merge_teams_for_direct_response(
+            teams,
+            user_id=user_id,
+            default_deployment_name=default_deployment_name,
+        )
+
+    agents = await MagenticAgentFactory(team_service=team_service).get_agents(
+        user_id=user_id,
+        team_config_input=direct_team,
+        memory_store=memory_store,
+    )
+    agents = [agent for agent in agents if _agent_can_join_direct_orchestration(agent)]
+    if not agents:
+        raise ValueError("No executable agents available for direct response")
+
+    for agent in agents:
+        if isinstance(agent, ProxyAgent):
+            agent.session_id = ""
+
+    workflow = await OrchestrationManager.init_direct_response_orchestration(
+        agents=agents,
+        team_config=direct_team,
+        user_id=user_id,
+    )
+    return workflow, agents, direct_team
+
+
+async def _close_direct_response_agents(agents: list[Any]) -> None:
+    for agent in agents:
+        close_method = getattr(agent, "close", None)
+        if callable(close_method):
+            try:
+                result = close_method()
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as exc:
+                logger.warning(
+                    "Could not close direct-response agent '%s': %s",
+                    _agent_runtime_name(agent) or type(agent).__name__,
+                    exc,
+                )
+
+
 @app_v4.post("/chat/message/stream")
 async def chat_message_stream(
     background_tasks: BackgroundTasks,
@@ -960,12 +1177,46 @@ async def chat_message_stream(
 
     # ── Pre-stream work: persist user message + classify intent ──
     chat_svc = await get_chat_cosmos_service()
+    memory_store = await DatabaseFactory.get_database(
+        user_id=user_id, tenant_id=tenant_id
+    )
+    active_plan = None
+    active_plan_team = None
+    active_m_plan_id: Optional[str] = None
+    if chat_request.plan_id:
+        active_plan = await memory_store.get_plan_by_plan_id(
+            plan_id=chat_request.plan_id
+        )
+        if not active_plan:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Plan '{chat_request.plan_id}' not found",
+            )
+        active_m_plan_id = _get_m_plan_id_from_plan(active_plan)
+        if getattr(active_plan, "team_id", None):
+            active_plan_team = await memory_store.get_team_by_id(
+                team_id=active_plan.team_id
+            )
+        if not active_plan_team:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Team for plan '{chat_request.plan_id}' not found",
+            )
+        if getattr(active_plan, "session_id", None):
+            chat_request.session_id = active_plan.session_id
+
     try:
         await chat_svc.add_message(
             session_id=chat_request.session_id,
             user_id=user_id,
             content=chat_request.message,
             role="user",
+            metadata={
+                "plan_id": chat_request.plan_id,
+                "m_plan_id": active_m_plan_id,
+            }
+            if chat_request.plan_id
+            else None,
         )
     except Exception as e:
         logger.warning("Could not persist user chat message: %s", e)
@@ -1008,6 +1259,8 @@ async def chat_message_stream(
                         "intent": "task",
                         "confidence": 1.0,
                         "session_id": chat_request.session_id,
+                        "plan_id": chat_request.plan_id,
+                        "m_plan_id": active_m_plan_id,
                     }
                 )
                 yield _sse_event(
@@ -1023,6 +1276,8 @@ async def chat_message_stream(
                         "agent": "assistant",
                         "confidence": 1.0,
                         "session_id": chat_request.session_id,
+                        "plan_id": chat_request.plan_id,
+                        "m_plan_id": active_m_plan_id,
                     }
                 )
 
@@ -1037,9 +1292,18 @@ async def chat_message_stream(
             )
     # ── End clarification guard ──────────────────────────────────
 
-    intent_result = await IntentRouter.classify_async(
-        chat_request.message, previous_intent=previous_intent
-    )
+    if active_plan:
+        from v4.orchestration.intent_router import IntentResult
+
+        intent_result = IntentResult(
+            intent=Intent.CONVERSATIONAL,
+            confidence=1.0,
+            reasoning="active plan follow-up",
+        )
+    else:
+        intent_result = await IntentRouter.classify_async(
+            chat_request.message, previous_intent=previous_intent
+        )
     logger.info(
         "Chat stream intent: %s (confidence=%.2f, prev=%s) for message: %s",
         intent_result.intent.value,
@@ -1050,10 +1314,10 @@ async def chat_message_stream(
 
     # When the message originates from an open plan view, TASK creation is
     # forbidden — any follow-up belongs to that plan (clarification handled
-    # above, otherwise treat as conversational follow-up about the plan).
-    if chat_request.plan_id and intent_result.intent == Intent.TASK:
+    # above, otherwise treat as a plan-context follow-up).
+    if active_plan and intent_result.intent == Intent.TASK:
         logger.info(
-            "plan_id=%s present — downgrading TASK to CONVERSATIONAL",
+            "plan_id=%s present — routing TASK as active plan follow-up",
             chat_request.plan_id,
         )
         from v4.orchestration.intent_router import IntentResult
@@ -1061,7 +1325,7 @@ async def chat_message_stream(
         intent_result = IntentResult(
             intent=Intent.CONVERSATIONAL,
             confidence=intent_result.confidence,
-            reasoning="plan_id present — in-plan follow-up, not a new task",
+            reasoning="active plan follow-up, not a new task",
         )
 
     # ── Pre-process task intent (plan creation) before streaming ──
@@ -1087,6 +1351,8 @@ async def chat_message_stream(
                 "intent": intent_result.intent.value,
                 "confidence": intent_result.confidence,
                 "session_id": chat_request.session_id,
+                "plan_id": chat_request.plan_id or plan_id,
+                "m_plan_id": active_m_plan_id,
             }
         )
 
@@ -1119,107 +1385,64 @@ async def chat_message_stream(
                     "agent": "planner",
                     "confidence": intent_result.confidence,
                     "session_id": chat_request.session_id,
+                    "plan_id": plan_id,
                 }
             )
             return
 
-        # 3. Unified FoundryAgent for ALL non-task intents
-        #    One brain: knowledge_base_retrieve + MCP tools + reasoning.
-        #    Emits rich SSE events so the UI can show intermediate steps.
+        # 3. Direct chat with multi-team capability and full tool visibility.
+        #    Creates a merged team with all agents, selects the best one, and
+        #    streams detailed events (code_interpreter, file uploads, reasoning).
         full_text = ""
         collected_generated_files: list[dict] = []
 
         try:
             code_interpreter_call_emitted = False
             from v4.magentic_agents.foundry_agent import FoundryAgentTemplate
-            from v4.magentic_agents.magentic_agent_factory import MagenticAgentFactory
 
-            _memory_store = await DatabaseFactory.get_database(
-                user_id=user_id, tenant_id=tenant_id
+            # Create merged team with ALL agents from ALL teams
+            (
+                workflow,
+                direct_agents,
+                direct_team,
+            ) = await _create_direct_response_workflow(
+                user_id=user_id,
+                tenant_id=tenant_id,
+                team_config_input=active_plan_team,
             )
-            _user_team = await _memory_store.get_current_team(user_id=user_id)
-            if not _user_team:
-                raise ValueError("No active team configured for user")
-            _team = await _memory_store.get_team_by_id(team_id=_user_team.team_id)
+            direct_team_name = getattr(direct_team, "name", "Direct Response Team")
 
-            async def _factory():
-                if not _team:
-                    raise ValueError("No active team configured for user")
+            # Select best agent from merged team using keyword scoring
+            foundry_agents = [
+                a for a in direct_agents if isinstance(a, FoundryAgentTemplate)
+            ]
+            if not foundry_agents:
+                raise ValueError("No FoundryAgent available in merged team")
 
-                # FIRST: Try to reuse FoundryAgent from existing orchestration
-                # Do NOT create new agents for conversational chat.
-                # The orchestration was initialized in /init_team.
-                existing_orch = orchestration_config.get_current_orchestration(user_id)
-                agents = orchestration_config.agent_wrappers.get(user_id, [])
-                foundry_agents = [
-                    a for a in agents if isinstance(a, FoundryAgentTemplate)
-                ]
-                reused_agent = _select_team_agent(
-                    chat_request.message, _team, foundry_agents
-                )
-                if reused_agent:
-                    logger.info(
-                        "Selected team agent '%s' for direct chat session=%s (orchestration=%s)",
-                        _agent_runtime_name(reused_agent) or "?",
-                        chat_request.session_id[:12],
-                        "present" if existing_orch else "wrappers-only",
-                    )
-                    return reused_agent
+            agent = _select_team_agent(
+                chat_request.message, direct_team, foundry_agents
+            )
+            selected_agent_name = _agent_runtime_name(agent) or "assistant"
+            logger.info(
+                "Selected '%s' from merged team (session=%s, %d agents available)",
+                selected_agent_name,
+                chat_request.session_id[:12],
+                len(foundry_agents),
+            )
 
-                # FALLBACK: Create wrappers only if none are available for this user.
-                logger.warning(
-                    "No reusable agent wrappers for user=%s; creating agents for session=%s",
-                    user_id[:8],
-                    chat_request.session_id[:12],
+            direct_chat_prompt = (
+                _build_plan_chat_prompt(
+                    chat_request.message,
+                    direct_team,
+                    agent,
+                    active_plan,
                 )
-                _factory_store = await DatabaseFactory.get_database(
-                    user_id=user_id, tenant_id=tenant_id
+                if active_plan
+                else _build_direct_chat_prompt(
+                    chat_request.message,
+                    direct_team,
+                    agent,
                 )
-                _all_agents = await MagenticAgentFactory().get_agents(
-                    user_id, _team, _factory_store
-                )
-                orchestration_config.agent_wrappers[user_id] = _all_agents
-                logger.info("DEBUG: _all_agents returned %d agents", len(_all_agents))
-                for i, a in enumerate(_all_agents):
-                    logger.info(
-                        "  Agent %d: type=%s, name=%s, has_invoke=%s",
-                        i,
-                        type(a).__name__,
-                        getattr(a, "agent_name", getattr(a, "name", "?")),
-                        hasattr(a, "invoke"),
-                    )
-                _foundry = [
-                    a for a in _all_agents if isinstance(a, FoundryAgentTemplate)
-                ]
-                logger.info(
-                    "DEBUG: After filtering FoundryAgentTemplate: %d agents",
-                    len(_foundry),
-                )
-                for i, a in enumerate(_foundry):
-                    logger.info(
-                        "  Filtered Agent %d: name=%s, use_rag=%s",
-                        i,
-                        getattr(a, "agent_name", "?"),
-                        getattr(a, "use_rag", False),
-                    )
-                _agent = _select_team_agent(chat_request.message, _team, _foundry)
-                logger.info(
-                    "DEBUG: Selected direct chat agent: %s (type=%s, use_rag=%s)",
-                    _agent_runtime_name(_agent) if _agent else "?",
-                    type(_agent).__name__ if _agent else "None",
-                    getattr(_agent, "use_rag", False) if _agent else "N/A",
-                )
-                if not _agent:
-                    raise ValueError(
-                        "Team has no FoundryAgentTemplate agents with invoke()"
-                    )
-                return _agent
-
-            agent = await _factory()
-            direct_chat_prompt = _build_direct_chat_prompt(
-                chat_request.message,
-                _team,
-                agent,
             )
 
             # Dedup state for tool_activity SSE events.
@@ -1497,7 +1720,15 @@ async def chat_message_stream(
 
         # 4. Persist full assistant response to Cosmos
         try:
-            _persist_meta: dict = {"intent": intent_result.intent.value}
+            _persist_meta: dict = {
+                "intent": intent_result.intent.value,
+                "selected_agent": selected_agent_name,
+                "merged_team": direct_team_name,
+            }
+            if active_plan:
+                _persist_meta["plan_id"] = chat_request.plan_id
+                _persist_meta["m_plan_id"] = active_m_plan_id
+                _persist_meta["team_id"] = getattr(active_plan, "team_id", None)
             if collected_generated_files:
                 # Strip internal 'type' key — only store the file descriptors
                 _persist_meta["generated_files"] = [
@@ -1520,12 +1751,17 @@ async def chat_message_stream(
             logger.warning("Could not persist streamed response: %s", e)
 
         track_event_if_configured(
-            "Chat_Streaming",
+            "Chat_MultiTeam_Streaming",
             {
                 "session_id": chat_request.session_id,
                 "user_id": user_id,
                 "intent": intent_result.intent.value,
                 "response_length": len(full_text),
+                "selected_agent": selected_agent_name,
+                "merged_team": direct_team_name,
+                "available_agents": len(foundry_agents) if foundry_agents else 0,
+                "plan_id": chat_request.plan_id,
+                "m_plan_id": active_m_plan_id,
             },
         )
 
@@ -1534,9 +1770,11 @@ async def chat_message_stream(
             {
                 "type": "done",
                 "intent": intent_result.intent.value,
-                "agent": "assistant",
+                "agent": selected_agent_name,
                 "confidence": intent_result.confidence,
                 "session_id": chat_request.session_id,
+                "plan_id": chat_request.plan_id,
+                "m_plan_id": active_m_plan_id,
             }
         )
 
@@ -1551,7 +1789,7 @@ async def chat_message_stream(
     )
 
 
-# ── MCP Agent (FoundryAgentTemplate with tool execution) ────────
+# ── Direct response fallback instructions (legacy MCP prompt text) ────────
 
 _MCP_AGENT_INSTRUCTIONS = (
     "You are the MACAE assistant.\n"
@@ -1611,100 +1849,85 @@ async def _get_mcp_query_response(
     tenant_id: str = "",
     user_access_token: Optional[str] = None,
 ) -> str:
-    """Get response using server-side ChatMCPAgent (published in Foundry with KB).
+    """Get a non-streaming direct response through Magentic orchestration.
 
     Args:
         user_access_token: User's EasyAuth access token for OBO flow in Foundry.
     """
-    from v4.magentic_agents.magentic_agent_factory import MagenticAgentFactory
-
     try:
-        _memory_store = await DatabaseFactory.get_database(
-            user_id=user_id, tenant_id=tenant_id
+        from agent_framework import AgentResponseUpdate, Message
+        from agent_framework_orchestrations._base_group_chat_orchestrator import (
+            GroupChatRequestSentEvent,
+            GroupChatResponseReceivedEvent,
         )
-        _user_team = await _memory_store.get_current_team(user_id=user_id)
-        if not _user_team:
-            raise ValueError("No active team configured for user")
-        _team = await _memory_store.get_team_by_id(team_id=_user_team.team_id)
 
-        async def _factory():
-            if not _team:
-                raise ValueError("No active team configured for user")
-            from v4.magentic_agents.foundry_agent import FoundryAgentTemplate
+        from v4.magentic_agents.proxy_agent import ProxyAgent as _ProxyAgent
 
-            # FIRST: Reuse existing wrappers even if the Magentic workflow object
-            # is not present. Direct chat only needs the initialized agent wrappers.
-            existing_orch = orchestration_config.get_current_orchestration(user_id)
-            agents = orchestration_config.agent_wrappers.get(user_id, [])
-            foundry_agents = [a for a in agents if isinstance(a, FoundryAgentTemplate)]
-            reused_agent = _select_team_agent(message, _team, foundry_agents)
-            if reused_agent:
-                logger.info(
-                    "Selected team agent '%s' for direct chat session=%s (orchestration=%s)",
-                    _agent_runtime_name(reused_agent) or "?",
-                    session_id[:12],
-                    "present" if existing_orch else "wrappers-only",
+        workflow, direct_agents, _direct_team = await _create_direct_response_workflow(
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+        for _agent in direct_agents:
+            if isinstance(_agent, _ProxyAgent):
+                _agent.session_id = session_id
+
+        active_agents: set[str] = set()
+        agent_buffers: dict[str, str] = {}
+        final_output = ""
+        direct_prompt = (
+            "DIRECT CHAT REQUEST\n"
+            "Answer the user without creating or exposing an application Plan. "
+            "Coordinate the available agents internally. Use ProxyAgent only "
+            "if a missing user detail blocks a correct answer.\n\n"
+            f"USER MESSAGE:\n{message}"
+        )
+
+        try:
+            async for event in workflow.run(direct_prompt, stream=True):
+                event_type = (
+                    event.type if hasattr(event, "type") else type(event).__name__
                 )
-                return reused_agent
+                if event_type == "group_chat":
+                    if isinstance(event.data, GroupChatRequestSentEvent):
+                        active_agents.add(event.data.participant_name)
+                    elif isinstance(event.data, GroupChatResponseReceivedEvent):
+                        active_agents.discard(event.data.participant_name)
+                    continue
+                if event_type != "output":
+                    continue
 
-            # FALLBACK: Create wrappers only if none are available for this user.
-            logger.warning(
-                "No reusable agent wrappers for user=%s; creating agents for session=%s",
-                user_id[:8],
-                session_id[:12],
-            )
-            _factory_store = await DatabaseFactory.get_database(
-                user_id=user_id, tenant_id=tenant_id
-            )
-            _all_agents = await MagenticAgentFactory().get_agents(
-                user_id, _team, _factory_store
-            )
-            orchestration_config.agent_wrappers[user_id] = _all_agents
-            logger.info("DEBUG: _all_agents returned %d agents", len(_all_agents))
-            for i, a in enumerate(_all_agents):
-                logger.info(
-                    "  Agent %d: type=%s, name=%s, has_invoke=%s",
-                    i,
-                    type(a).__name__,
-                    getattr(a, "agent_name", getattr(a, "name", "?")),
-                    hasattr(a, "invoke"),
-                )
-            # Only FoundryAgentTemplate has .invoke() — ProxyAgent does not
-            _foundry = [a for a in _all_agents if isinstance(a, FoundryAgentTemplate)]
-            logger.info(
-                "DEBUG: After filtering FoundryAgentTemplate: %d agents", len(_foundry)
-            )
-            for i, a in enumerate(_foundry):
-                logger.info(
-                    "  Filtered Agent %d: name=%s, use_rag=%s",
-                    i,
-                    getattr(a, "agent_name", "?"),
-                    getattr(a, "use_rag", False),
-                )
-            _agent = _select_team_agent(message, _team, _foundry)
-            logger.info(
-                "DEBUG: Selected direct chat agent: %s (type=%s, use_rag=%s)",
-                _agent_runtime_name(_agent) if _agent else "?",
-                type(_agent).__name__ if _agent else "None",
-                getattr(_agent, "use_rag", False) if _agent else "N/A",
-            )
-            if not _agent:
-                raise ValueError(
-                    "Team has no FoundryAgentTemplate agents with invoke()"
-                )
-            return _agent
+                executor_id = getattr(event, "executor_id", None)
+                output_data = event.data
+                if isinstance(output_data, AgentResponseUpdate) and executor_id:
+                    if executor_id not in active_agents:
+                        continue
+                    token = output_data.text or ""
+                    if token:
+                        agent_buffers[executor_id] = (
+                            agent_buffers.get(executor_id, "") + token
+                        )
+                elif isinstance(output_data, Message):
+                    final_output = output_data.text or ""
+                elif isinstance(output_data, list):
+                    texts = []
+                    for item in output_data:
+                        if isinstance(item, Message) and item.text:
+                            texts.append(item.text)
+                        elif not isinstance(item, Message):
+                            texts.append(str(item))
+                    final_output = "\n".join(texts)
+                elif hasattr(output_data, "text"):
+                    final_output = output_data.text or ""
+                elif output_data:
+                    final_output = str(output_data)
+        finally:
+            await _close_direct_response_agents(direct_agents)
 
-        agent = await _factory()
-        direct_chat_prompt = _build_direct_chat_prompt(message, _team, agent)
-
-        full_text = ""
-        async for update in agent.invoke(
-            direct_chat_prompt, session_id=session_id, user_id=user_id
-        ):
-            token = getattr(update, "text", "") or ""
-            if token:
-                full_text += token
-        return full_text if full_text else _mcp_fallback(message)
+        if final_output:
+            return final_output
+        if agent_buffers:
+            return "\n\n".join(text for text in agent_buffers.values() if text.strip())
+        return _mcp_fallback(message)
 
     except Exception as e:
         logger.warning("MCP agent query failed (%s), using fallback", e)

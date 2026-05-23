@@ -27,7 +27,7 @@ const CoralAccordionHeader: React.FC<Props> = ({
         justifyContent: "space-between",
         display: "flex",
         alignItems: "center",
-        height: '40px',
+        height,
       }}
     >
       <Body1>{children}</Body1>

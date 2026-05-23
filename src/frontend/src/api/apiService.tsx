@@ -321,8 +321,8 @@ export class APIService {
         chatRequest: ChatMessageRequest,
         callbacks: {
             onToken: (token: string) => void;
-            onIntent: (data: { intent: string; confidence: number; session_id: string }) => void;
-            onDone: (data: { intent: string; agent: string; confidence: number; session_id: string }) => void;
+            onIntent: (data: { intent: string; confidence: number; session_id: string; plan_id?: string; m_plan_id?: string }) => void;
+            onDone: (data: { intent: string; agent: string; confidence: number; session_id: string; plan_id?: string; m_plan_id?: string }) => void;
             /** Called when intent router detects a task and creates a plan inline (new unified flow). */
             onPlanCreated?: (planId: string) => void;
             /** Legacy redirect callback — kept for backward compat with HomeInput. */

@@ -91,7 +91,8 @@
                 "pflannery.vscode-versionlens",
                 "plibither8.remove-comments",
                 "visualstudioexptteam.vscodeintellicode-completions",
-                "vscjava.migrate-java-to-azure"
+                "vscjava.migrate-java-to-azure",
+                "ms-vscode.vscode-speech"
             ]
         }
     },

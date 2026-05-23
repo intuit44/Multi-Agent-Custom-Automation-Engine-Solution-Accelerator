@@ -23,7 +23,13 @@ from agent_framework_orchestrations._base_group_chat_orchestrator import (
     GroupChatResponseReceivedEvent,
 )
 from agent_framework_orchestrations._magentic import (
+    ORCHESTRATOR_FINAL_ANSWER_PROMPT,
+    ORCHESTRATOR_PROGRESS_LEDGER_PROMPT,
+    ORCHESTRATOR_TASK_LEDGER_FACTS_PROMPT,
+    ORCHESTRATOR_TASK_LEDGER_PLAN_PROMPT,
+    ORCHESTRATOR_TASK_LEDGER_PLAN_UPDATE_PROMPT,
     MagenticProgressLedger,
+    StandardMagenticManager,
 )
 from requests import session
 
@@ -233,6 +239,93 @@ class OrchestrationManager:
         )
 
         return workflow
+
+    @classmethod
+    async def init_direct_response_orchestration(
+        cls,
+        agents: List,
+        team_config: TeamConfiguration,
+        user_id: str,
+    ):
+        """
+        Initialize a Magentic workflow for direct chat responses.
+
+        This path intentionally does not create or request approval for an MPlan.
+        It still uses the Magentic manager to coordinate participants, including
+        ProxyAgent when user clarification is genuinely required.
+        """
+        if not user_id:
+            raise ValueError("user_id is required to initialize direct orchestration")
+
+        credential = config.get_azure_credential(client_id=config.AZURE_CLIENT_ID)
+        raw_name = f"{team_config.name or 'DirectResponse'} Direct"
+        sanitized_name = re.sub(r"[^a-zA-Z0-9-]", "-", raw_name)
+        sanitized_name = re.sub(r"-+", "-", sanitized_name).strip("-")[:63]
+        agent_name = sanitized_name if sanitized_name else "DirectResponseManager"
+
+        chat_client = AzureAIClient(
+            project_endpoint=config.AZURE_AI_PROJECT_ENDPOINT,
+            model_deployment_name=team_config.deployment_name,
+            agent_name=agent_name,
+            credential=credential,
+        )
+        manager_agent = Agent(
+            client=chat_client,
+            name="DirectResponseManager",
+            default_options=AzureAIProjectAgentOptions(store=True),
+        )
+
+        direct_rules = """
+
+DIRECT RESPONSE MODE:
+- Do not create, mention, request approval for, or expose a formal application Plan.
+- Coordinate the available agents internally and return one final answer to the user.
+- Select the agent or agents whose descriptions and capabilities match the user's request.
+- Do not prefer the first participant or the user's current visual team.
+- Ask ProxyAgent only when a missing user detail blocks a correct answer.
+- If one specialist can answer fully, ask only that specialist.
+- Respond in the user's language.
+"""
+
+        manager = StandardMagenticManager(
+            manager_agent,
+            max_round_count=orchestration_config.max_rounds,
+            max_stall_count=3,
+            max_reset_count=2,
+            task_ledger_facts_prompt=ORCHESTRATOR_TASK_LEDGER_FACTS_PROMPT
+            + direct_rules,
+            task_ledger_plan_prompt=ORCHESTRATOR_TASK_LEDGER_PLAN_PROMPT + direct_rules,
+            task_ledger_plan_update_prompt=ORCHESTRATOR_TASK_LEDGER_PLAN_UPDATE_PROMPT
+            + direct_rules,
+            progress_ledger_prompt=ORCHESTRATOR_PROGRESS_LEDGER_PROMPT + direct_rules,
+            final_answer_prompt=ORCHESTRATOR_FINAL_ANSWER_PROMPT
+            + "\nReturn only the final answer for the user. Do not mention internal plans.",
+        )
+
+        participants = {}
+        for ag in agents:
+            name = getattr(ag, "agent_name", None) or getattr(ag, "name", None)
+            if not name:
+                name = f"agent_{len(participants) + 1}"
+            if name in participants:
+                cls.logger.warning("Skipping duplicate direct participant '%s'", name)
+                continue
+            if hasattr(ag, "_agent") and ag._agent is not None:
+                participants[name] = ag._agent
+            else:
+                participants[name] = ag
+
+        cls.logger.info(
+            "Direct response participants for user '%s': %s",
+            user_id,
+            list(participants.keys()),
+        )
+        return MagenticBuilder(
+            participants=list(participants.values()),
+            manager=manager,
+            checkpoint_storage=InMemoryCheckpointStorage(),
+            intermediate_outputs=True,
+        ).build()
 
     # ---------------------------
     # Orchestration retrieval

@@ -132,13 +132,107 @@ const isClarificationMessage = (content: string): boolean => {
   return clarificationKeywords.some(keyword => lowerContent.includes(keyword));
 };
 
+// Static markdown link renderer — hoisted to module scope so the `components`
+// object is stable across renders. An inline object here would be a new
+// reference on every render and defeat ReactMarkdown's internal memoization.
+const markdownComponents = {
+  a: ({ node, children, ...props }: any) => (
+    <a
+      {...props}
+      style={{
+        color: 'var(--colorNeutralBrandForeground1)',
+        textDecoration: 'none'
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.textDecoration = 'underline';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.textDecoration = 'none';
+      }}
+    >
+      {children}
+    </a>
+  )
+};
+
+// Isolated, memoized Markdown. Re-parses (and re-highlights) ONLY when its
+// content string changes. This is the key fix: appending a streaming token to
+// the last message no longer re-parses the Markdown of every previous message.
+const AgentMarkdown = React.memo(({ content }: { content: string }) => (
+  <ReactMarkdown
+    remarkPlugins={[remarkGfm]}
+    rehypePlugins={[rehypePrism]}
+    components={markdownComponents}
+  >
+    {content}
+  </ReactMarkdown>
+));
+AgentMarkdown.displayName = 'AgentMarkdown';
+
+interface AgentMessageItemProps {
+  msg: AgentMessageData;
+  planData?: any;
+  planApprovalRequest?: any;
+}
+
+// A single chat row, memoized. Even if it re-renders because planData/approval
+// references churn, the expensive Markdown inside stays protected by
+// AgentMarkdown's content-based memoization.
+export const AgentMessageItem = React.memo(({ msg, planData, planApprovalRequest }: AgentMessageItemProps) => {
+  const styles = useStyles();
+  const isHuman = msg.agent_type === AgentMessageType.HUMAN_AGENT;
+  const isClarification = !isHuman && isClarificationMessage(msg.content || '');
+  const content = TaskService.cleanHRAgent(msg.content) || "";
+
+  return (
+    <div
+      className={styles.container}
+      style={{ flexDirection: isHuman ? 'row-reverse' : 'row' }}
+    >
+      {/* Avatar */}
+      <div className={`${styles.avatar} ${isHuman ? styles.humanAvatar : styles.botAvatar}`}>
+        {isHuman ? (
+          <PersonRegular style={{ fontSize: '16px', color: 'white' }} />
+        ) : (
+          getAgentIcon(msg.agent, planData, planApprovalRequest)
+        )}
+      </div>
+
+      {/* Message Content */}
+      <div className={`${styles.messageContent} ${isHuman ? styles.humanMessageContent : styles.botMessageContent}`}>
+        {/* Agent Header (only for bots) */}
+        {!isHuman && (
+          <div className={styles.agentHeader}>
+            <Body1 className={styles.agentName}>
+              {getAgentDisplayName(msg.agent)}
+            </Body1>
+            <Tag appearance="brand">
+              AI Agent
+            </Tag>
+          </div>
+        )}
+
+        {/* Message Bubble */}
+        <div className={
+          isHuman
+            ? `${styles.messageBubble} ${styles.humanBubble}`
+            : isClarification
+              ? styles.clarificationBubble
+              : `${styles.messageBubble} ${styles.botBubble}`
+        }>
+          <AgentMarkdown content={content} />
+        </div>
+      </div>
+    </div>
+  );
+});
+AgentMessageItem.displayName = 'AgentMessageItem';
+
 const RenderAgentMessages: React.FC<StreamingAgentMessageProps> = ({
   agentMessages,
   planData,
   planApprovalRequest
 }) => {
-  const styles = useStyles();
-
   if (!agentMessages?.length) return null;
 
   // Filter out messages with empty content
@@ -147,81 +241,14 @@ const RenderAgentMessages: React.FC<StreamingAgentMessageProps> = ({
 
   return (
     <>
-      {validMessages.map((msg, index) => {
-        const isHuman = msg.agent_type === AgentMessageType.HUMAN_AGENT;
-        const isClarification = !isHuman && isClarificationMessage(msg.content || '');
-
-        return (
-          <div
-            key={index}
-            className={styles.container}
-            style={{
-              flexDirection: isHuman ? 'row-reverse' : 'row'
-            }}
-          >
-            {/* Avatar */}
-            <div className={`${styles.avatar} ${isHuman ? styles.humanAvatar : styles.botAvatar}`}>
-              {isHuman ? (
-                <PersonRegular style={{ fontSize: '16px', color: 'white' }} />
-              ) : (
-                getAgentIcon(msg.agent, planData, planApprovalRequest)
-              )}
-            </div>
-
-            {/* Message Content */}
-            <div className={`${styles.messageContent} ${isHuman ? styles.humanMessageContent : styles.botMessageContent}`}>
-              {/* Agent Header (only for bots) */}
-              {!isHuman && (
-                <div className={styles.agentHeader}>
-                  <Body1 className={styles.agentName}>
-                    {getAgentDisplayName(msg.agent)}
-                  </Body1>
-                  <Tag
-                    appearance="brand"
-                  >
-                    AI Agent
-                  </Tag>
-                </div>
-              )}
-
-              {/* Message Bubble */}
-              <div className={
-                isHuman
-                  ? `${styles.messageBubble} ${styles.humanBubble}`
-                  : isClarification
-                    ? styles.clarificationBubble
-                    : `${styles.messageBubble} ${styles.botBubble}`
-              }>
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  rehypePlugins={[rehypePrism]}
-                  components={{
-                      a: ({ node, children, ...props }) => (
-                        <a
-                          {...props}
-                          style={{
-                            color: 'var(--colorNeutralBrandForeground1)',
-                            textDecoration: 'none'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.textDecoration = 'underline';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.textDecoration = 'none';
-                          }}
-                        >
-                          {children}
-                        </a>
-                      )
-                    }}
-                >
-                  {TaskService.cleanHRAgent(msg.content) || ""}
-                </ReactMarkdown>
-              </div>
-            </div>
-          </div>
-        );
-      })}
+      {validMessages.map((msg, index) => (
+        <AgentMessageItem
+          key={`${msg.agent}-${msg.timestamp}-${index}`}
+          msg={msg}
+          planData={planData}
+          planApprovalRequest={planApprovalRequest}
+        />
+      ))}
     </>
   );
 };

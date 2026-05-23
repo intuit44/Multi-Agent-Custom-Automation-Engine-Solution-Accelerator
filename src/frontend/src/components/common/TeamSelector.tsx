@@ -48,7 +48,7 @@ const TeamSelector: React.FC<TeamSelectorProps> = ({
   onTeamSelect,
   onTeamUpload,
   selectedTeam,
-  isHomePage,
+  isHomePage: _isHomePage,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [teams, setTeams] = useState<TeamConfig[]>([]);
@@ -497,7 +497,7 @@ const TeamSelector: React.FC<TeamSelectorProps> = ({
 
   return (
     <>
-      <Dialog open={isOpen} onOpenChange={(event: DialogOpenChangeEvent, data: DialogOpenChangeData) => handleOpenChange(data.open)}>
+      <Dialog open={isOpen} onOpenChange={(_event: DialogOpenChangeEvent, data: DialogOpenChangeData) => handleOpenChange(data.open)}>
         <DialogTrigger disableButtonEnhancement>
           <Button
             appearance="subtle"
@@ -533,7 +533,7 @@ const TeamSelector: React.FC<TeamSelectorProps> = ({
                 <TabList
                   className={styles.tabList}
                   selectedValue={activeTab}
-                  onTabSelect={(event: SelectTabEvent, data: SelectTabData) => setActiveTab(data.value as string)}
+                  onTabSelect={(_event: SelectTabEvent, data: SelectTabData) => setActiveTab(data.value as string)}
                 >
                   <Tab
                     value="teams"
@@ -565,7 +565,7 @@ const TeamSelector: React.FC<TeamSelectorProps> = ({
                           className={styles.searchInput}
                           placeholder="Search teams..."
                           value={searchQuery}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>, data: InputOnChangeData) => {
+                          onChange={(_e: React.ChangeEvent<HTMLInputElement>, data: InputOnChangeData) => {
                             console.log('Search changed:', data.value);
                             setSearchQuery(data.value || '');
                           }}
@@ -720,7 +720,7 @@ const TeamSelector: React.FC<TeamSelectorProps> = ({
         </DialogSurface>
       </Dialog>
 
-      <Dialog open={deleteConfirmOpen} onOpenChange={(event: DialogOpenChangeEvent, data: DialogOpenChangeData) => setDeleteConfirmOpen(data.open)}>
+      <Dialog open={deleteConfirmOpen} onOpenChange={(_event: DialogOpenChangeEvent, data: DialogOpenChangeData) => setDeleteConfirmOpen(data.open)}>
         <DialogSurface className={styles.deleteDialogSurface}>
           <DialogContent className={styles.deleteDialogContent}>
             <DialogBody className={styles.deleteDialogBody}>

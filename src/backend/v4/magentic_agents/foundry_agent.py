@@ -348,17 +348,17 @@ class FoundryAgentTemplate(AzureAgentBase):
             return None
 
     # -------------------------
-    # Agent lifecycle override
+    # Agent lifecycle
     # -------------------------
     async def _after_open(self) -> None:
         """Initialize ChatAgent after connections are established."""
         if self.use_reasoning:
             self.logger.info("Initializing agent in Reasoning mode.")
             # Use a deterministic low temperature for reasoning mode
-            temp = 0.0
+            temp = 0.3
         else:
             self.logger.info("Initializing agent in Foundry mode.")
-            temp = 0.1
+            temp = 0.3
 
         try:
             if self._use_azure_search:
@@ -508,12 +508,6 @@ class FoundryAgentTemplate(AzureAgentBase):
                 pass  # No history available, proceed with just the prompt
 
         if file_ids:
-            # File-attachment flow: build a user Message that combines the text
-            # prompt with hosted-file references via Content.from_hosted_file.
-            # agent_framework translates this into the Responses API's input_file
-            # inputs natively, so the published agent (with code_interpreter
-            # enabled in Foundry) can read and analyze the attached files —
-            # same behavior as the Foundry playground.
             from agent_framework import Content
 
             user_contents: list = [Content.from_text(prompt)]

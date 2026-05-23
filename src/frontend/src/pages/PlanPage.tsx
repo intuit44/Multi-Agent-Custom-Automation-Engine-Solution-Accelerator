@@ -540,8 +540,12 @@ const PlanPage: React.FC = () => {
                         try {
                             const sessionData = await apiService.getChatSession(chatSessionId);
                             chatHistory = (sessionData?.messages || []).map((msg): AgentMessageData => ({
-                                agent: msg.sender === 'user' ? 'human' : AgentType.GROUP_CHAT_MANAGER,
-                                agent_type: msg.sender === 'user' ? AgentMessageType.HUMAN_AGENT : AgentMessageType.AI_AGENT,
+                                agent: ((msg as any).role || (msg as any).sender) === 'user'
+                                    ? 'human'
+                                    : ((msg as any).metadata?.selected_agent || AgentType.GROUP_CHAT_MANAGER),
+                                agent_type: ((msg as any).role || (msg as any).sender) === 'user'
+                                    ? AgentMessageType.HUMAN_AGENT
+                                    : AgentMessageType.AI_AGENT,
                                 timestamp: new Date(msg.timestamp).getTime(),
                                 steps: [],
                                 next_steps: [],
@@ -592,8 +596,9 @@ const PlanPage: React.FC = () => {
                 const sessionData = await apiService.getChatSession(sessionId);
                 const chatHistory = (sessionData?.messages || []).map((msg): AgentMessageData => {
                     const role = (msg as any).role || (msg as any).sender;
+                    const metadata = (msg as any).metadata || {};
                     return {
-                        agent: role === 'user' ? 'human' : AgentType.GROUP_CHAT_MANAGER,
+                        agent: role === 'user' ? 'human' : (metadata.selected_agent || AgentType.GROUP_CHAT_MANAGER),
                         agent_type: role === 'user' ? AgentMessageType.HUMAN_AGENT : AgentMessageType.AI_AGENT,
                         timestamp: new Date(msg.timestamp).getTime(),
                         steps: [],
@@ -742,6 +747,8 @@ const PlanPage: React.FC = () => {
 
             let accumulated = '';
             let placeholderAdded = false;
+            let respondingAgent = AgentType.GROUP_CHAT_MANAGER;
+            const activePlanId = planData?.plan?.plan_id || planData?.plan?.id || planId || "";
             const fileIds = attachedFiles.map(f => f.file_id);
             const collectedFiles: Array<{ file_id: string; filename: string; download_url: string }> = [];
             try {
@@ -763,7 +770,16 @@ const PlanPage: React.FC = () => {
                                 navigate(`/plan/${newPlanId}`);
                             }
                         },
-                        planId: planData?.plan?.id,
+                        onDone: (data) => {
+                            if (!data.agent) return;
+                            respondingAgent = data.agent as AgentType;
+                            if (placeholderAdded) {
+                                setAgentMessages(prev =>
+                                    prev.map((m, i) => i === prev.length - 1 ? { ...m, agent: respondingAgent } : m)
+                                );
+                            }
+                        },
+                        planId: activePlanId,
                         onGeneratedFile: (f) => { collectedFiles.push(f); },
                         fileIds,
                     }
@@ -774,7 +790,7 @@ const PlanPage: React.FC = () => {
                     if (!placeholderAdded && snap.trim()) {
                         // Agregar placeholder solo cuando hay contenido real
                         const placeholder: AgentMessageData = {
-                            agent: AgentType.GROUP_CHAT_MANAGER,
+                            agent: respondingAgent,
                             agent_type: AgentMessageType.AI_AGENT,
                             timestamp: Date.now(),
                             steps: [],
@@ -825,12 +841,13 @@ const PlanPage: React.FC = () => {
 
     useEffect(() => {
         const initializePlanLoading = async () => {
-            // Prioridad 1: Si hay sessionId en ruta, cargar historial primero
-            if (routeSessionId) {
+            // If a plan is present, loadPlanData already merges the related
+            // chat session history. Loading /session first creates duplicate
+            // GETs and races the plan state.
+            if (routeSessionId && !planId) {
                 await loadSessionHistory(routeSessionId);
             }
 
-            // Prioridad 2: Si hay planId (de ruta o query param), cargar plan
             if (planId) {
                 try {
                     await loadPlanData(false);

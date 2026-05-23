@@ -62,7 +62,7 @@ export const agentMiddleware: Middleware =
             dispatch(addStreamToken(token));
           },
 
-          onIntent: (data: { intent: string; confidence: number; session_id: string }) => {
+          onIntent: (data: { intent: string; confidence: number; session_id: string; plan_id?: string; m_plan_id?: string }) => {
             dispatch(
               setIntent({
                 intent: data.intent,
@@ -89,7 +89,7 @@ export const agentMiddleware: Middleware =
             dispatch(setPlanCreated(planId));
           },
 
-          onDone: (data: { intent: string; agent: string; confidence: number; session_id: string }) => {
+          onDone: (data: { intent: string; agent: string; confidence: number; session_id: string; plan_id?: string; m_plan_id?: string }) => {
             dispatch(
               finishStreaming({
                 metadata: {
