@@ -12,9 +12,9 @@ Test markers:
 - @pytest.mark.e2e: End-to-end tests requiring full environment
 """
 
+import logging
 import os
 import uuid
-import logging
 
 import pytest
 import pytest_asyncio
@@ -84,8 +84,8 @@ async def real_ai_client(azure_credentials_available):
         pytest.skip("Azure credentials not available for integration tests")
 
     try:
-        from azure.identity.aio import DefaultAzureCredential
         from azure.ai.projects.aio import AIProjectClient
+        from azure.identity.aio import DefaultAzureCredential
 
         endpoint = os.getenv("AZURE_AI_AGENT_ENDPOINT")
         if not endpoint:

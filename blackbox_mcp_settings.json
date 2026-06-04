@@ -2,13 +2,11 @@
   "mcpServers": {
     "macae-mcp-server": {
       "type": "streamable-http",
-      "url": "http://localhost:9000/mcp",
-      "note": "MACAE internal MCP server (local dev)"
+      "url": "http://localhost:9000/mcp"
     },
     "macae-azure": {
       "type": "streamable-http",
-      "url": "https://ca-mcp-pslc25991vme66zmins.purpleplant-4c595cea.eastus2.azurecontainerapps.io/mcp",
-      "note": "MACAE MCP server deployed on Azure Container Apps"
+      "url": "https://ca-mcp-pslc25991vme66zmins.purpleplant-4c595cea.eastus2.azurecontainerapps.io/mcp"
     },
     "github": {
       "command": "npx",
@@ -18,16 +16,14 @@
       ],
       "env": {
         "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
-      },
-      "note": "GitHub MCP server — requires GITHUB_PERSONAL_ACCESS_TOKEN env var"
+      }
     },
     "everything": {
       "command": "npx",
       "args": [
         "-y",
         "@modelcontextprotocol/server-everything"
-      ],
-      "note": "MCP reference server — echo, sum, images, resources — great for testing"
+      ]
     },
     "filesystem": {
       "command": "npx",
@@ -35,8 +31,7 @@
         "-y",
         "@modelcontextprotocol/server-filesystem",
         "/workspaces/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator"
-      ],
-      "note": "Filesystem MCP server — restricted to workspace directory only"
+      ]
     },
     "elevenlabs": {
       "command": "uvx",
@@ -45,16 +40,14 @@
       ],
       "env": {
         "ELEVENLABS_API_KEY": "${ELEVENLABS_API_KEY}"
-      },
-      "note": "JARVIS voice (TTS) — ElevenLabs official MCP server. Key loaded from .env"
+      }
     },
     "desktop-commander": {
       "command": "npx",
       "args": [
         "-y",
         "@wonderwhy-er/desktop-commander"
-      ],
-      "note": "Full system control — shell, files, processes, apps"
+      ]
     },
     "github.com/microsoft/playwright-mcp": {
       "command": "npx",
@@ -62,8 +55,7 @@
         "-y",
         "@playwright/mcp@latest",
         "--headless"
-      ],
-      "note": "Playwright MCP (canonical name) — web automation, YouTube, social media. Official Microsoft."
+      ]
     }
   }
 }

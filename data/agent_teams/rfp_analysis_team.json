@@ -20,12 +20,12 @@
       "description": "Summarizes RFP and contract documents into structured, easy-to-understand overviews.",
       "use_rag": true,
       "use_mcp": false,
-      "use_bing": false,
+      "use_bing": true,
       "use_reasoning": false,
       "index_name": "macae-rfp-summary-index",
       "index_foundry_name": "",
       "index_endpoint": "",
-      "coding_tools": false
+      "coding_tools": true
     },
     {
       "input_key": "",
@@ -37,10 +37,10 @@
       "description": "Analyzes the dataset for risks such as delivery, financial, operational, and compliance-related vulnerabilities.",
       "use_rag": true,
       "use_mcp": false,
-      "use_bing": false,
+      "use_bing": true,
       "use_reasoning": false,
       "index_name": "macae-rfp-risk-index",
-      "coding_tools": false
+      "coding_tools": true
     },
     {
       "input_key": "",
@@ -52,10 +52,10 @@
       "description": "Checks for compliance gaps against regulations, policies, and standard contracting practices.",
       "use_rag": true,
       "use_mcp": false,
-      "use_bing": false,
+      "use_bing": true,
       "use_reasoning": false,
       "index_name": "macae-rfp-compliance-index",
-      "coding_tools": false
+      "coding_tools": true
     }
   ],
   "protected": false,

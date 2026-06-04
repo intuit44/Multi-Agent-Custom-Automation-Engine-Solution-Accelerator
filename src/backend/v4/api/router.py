@@ -2,8 +2,8 @@ import asyncio
 import json
 import logging
 import os
-import re
 import uuid
+from contextlib import AsyncExitStack
 from typing import Any, Optional
 
 from fastapi import (
@@ -837,51 +837,137 @@ def _agent_config_by_name(team: Any) -> dict[str, Any]:
     }
 
 
-def _agent_selection_score(message: str, agent_name: str, agent_config: Any) -> int:
-    """Score an agent from team metadata. Avoid hard-coding retail/HR/etc."""
-    text = message.lower()
-    haystack = " ".join(
-        [
-            agent_name,
-            getattr(agent_config, "description", "") or "",
-            getattr(agent_config, "system_message", "") or "",
-            getattr(agent_config, "index_name", "") or "",
-        ]
-    ).lower()
-
-    score = 0
-    for token in set(re.findall(r"[a-zA-ZÀ-ÿ0-9_]{4,}", text)):
-        if token in haystack:
-            score += 1
-    if getattr(agent_config, "use_reasoning", False):
-        score += 1
-    if getattr(agent_config, "use_rag", False):
-        score += 1
-    return score
+def _build_agent_description(agent: Any, config: Any) -> str:
+    """Build a rich description for an agent, including its capabilities."""
+    description = getattr(config, "description", "") or ""
+    capabilities = []
+    if getattr(config, "use_rag", False):
+        index_name = getattr(config, "index_name", "") or ""
+        capabilities.append(
+            f"RAG/Search{f'(index={index_name})' if index_name else ''}"
+        )
+    if getattr(config, "use_mcp", False):
+        capabilities.append("MCP/external-tools")
+    if getattr(config, "use_reasoning", False):
+        capabilities.append("Reasoning")
+    if getattr(config, "coding_tools", False):
+        capabilities.append("CodeInterpreter")
+    if capabilities:
+        description = f"{description} [capabilities: {', '.join(capabilities)}]".strip()
+    return description or "(no description)"
 
 
-def _select_team_agent(message: str, team: Any, agents: list[Any]) -> Any:
-    """Select the best existing team agent for direct chat responses."""
+def _match_agent_by_name(chosen: str, agents: list[Any]) -> Optional[Any]:
+    """Fuzzy-match LLM response to an agent.
+
+    Tries (in order):
+    1. Exact case-insensitive match on the full name.
+    2. The chosen string is contained in the agent name (handles trailing punctuation / spacing).
+    3. The agent name is contained in the chosen string (handles extra explanation text).
+    Returns None if no match found.
+    """
+    chosen_stripped = chosen.strip().rstrip(".,;:!?").lower()
+    for a in agents:
+        name = (_agent_runtime_name(a) or "").lower()
+        if name == chosen_stripped:
+            return a
+    for a in agents:
+        name = (_agent_runtime_name(a) or "").lower()
+        if chosen_stripped in name or name in chosen_stripped:
+            return a
+    return None
+
+
+async def _select_team_agent(message: str, team: Any, agents: list[Any]) -> Any:
+    """Select the best agent using ProxyAgent as the primary intermediary.
+
+    ProxyAgent acts as the central coordinator between the user and all
+    specialized agents. It receives the user request, understands the context,
+    and delegates tasks to the appropriate specialist agents (TechnicalSupportAgent,
+    HRHelperAgent, MarketingAgent, etc.) as needed.
+
+    Selection strategy:
+    1. If a ProxyAgent is available, always prefer it — it is the designated
+       intermediary that maintains conversation context and routes internally.
+    2. If there is only one invokable agent, return it directly.
+    3. Fall back to LLM-based routing only when no ProxyAgent is present and
+       multiple specialist agents are available.
+    """
+    from common.config.app_config import config as app_config
+
     invokable_agents = [agent for agent in agents if _is_invokable_agent(agent)]
     if not invokable_agents:
         return None
 
-    configs = _agent_config_by_name(team)
-    message_lower = message.lower()
+    if len(invokable_agents) == 1:
+        return invokable_agents[0]
 
+    # Prefer ProxyAgent as the central intermediary/orchestrator
     for agent in invokable_agents:
-        name = _agent_runtime_name(agent)
-        if name and name.lower() in message_lower:
+        name = (_agent_runtime_name(agent) or "").lower()
+        if name == "proxyagent":
+            logger.info(
+                "Routing message through ProxyAgent (central intermediary) for team '%s'",
+                getattr(team, "name", "unknown"),
+            )
             return agent
 
-    return max(
-        invokable_agents,
-        key=lambda agent: _agent_selection_score(
-            message,
-            _agent_runtime_name(agent),
-            configs.get(_agent_runtime_name(agent).lower()),
-        ),
+    # No ProxyAgent found — fall back to LLM-based routing among specialist agents
+    logger.info(
+        "No ProxyAgent found in team '%s'; using LLM router across %d agents.",
+        getattr(team, "name", "unknown"),
+        len(invokable_agents),
     )
+
+    configs = _agent_config_by_name(team)
+    agent_lines = []
+    for a in invokable_agents:
+        name = _agent_runtime_name(a) or ""
+        cfg = configs.get(name.lower())
+        desc = _build_agent_description(a, cfg) if cfg else "(no description)"
+        agent_lines.append(f"- {name}: {desc}")
+    agent_list = "\n".join(agent_lines)
+
+    prompt = (
+        "You are an agent router. Given the list of agents and a user message, "
+        "reply with ONLY the exact name of the single agent that best handles the request. "
+        "No explanation, no punctuation — just the agent name.\n\n"
+        f"Agents:\n{agent_list}\n\n"
+        f"User message: {message}\n\n"
+        "Agent name:"
+    )
+
+    chosen_agent: Optional[Any] = None
+    try:
+        project = app_config.get_ai_project_client()
+        try:
+            openai = project.get_openai_client()
+            try:
+                resp = await openai.chat.completions.create(
+                    model=app_config.AZURE_OPENAI_DEPLOYMENT_NAME,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=30,
+                    temperature=0,
+                )
+                chosen_text = (resp.choices[0].message.content or "").strip()
+                logger.info("LLM router raw response: %r", chosen_text)
+                chosen_agent = _match_agent_by_name(chosen_text, invokable_agents)
+                if chosen_agent is None:
+                    logger.warning(
+                        "LLM router returned unrecognised agent name %r; "
+                        "falling back to first agent. Available: %s",
+                        chosen_text,
+                        [_agent_runtime_name(a) for a in invokable_agents],
+                    )
+            finally:
+                await openai.close()
+        finally:
+            if hasattr(project, "close"):
+                await project.close()
+    except Exception as exc:
+        logger.warning("LLM router failed (%s); falling back to first agent.", exc)
+
+    return chosen_agent or invokable_agents[0]
 
 
 def _team_agent_context(team: Any) -> str:
@@ -945,7 +1031,7 @@ def _build_plan_chat_prompt(
 ) -> str:
     selected_name = _agent_runtime_name(selected_agent) or "UnknownAgent"
     m_plan = getattr(plan, "m_plan", None)
-    if hasattr(m_plan, "model_dump"):
+    if m_plan and hasattr(m_plan, "model_dump"):
         m_plan = m_plan.model_dump()
 
     return (
@@ -1193,10 +1279,9 @@ async def chat_message_stream(
                 detail=f"Plan '{chat_request.plan_id}' not found",
             )
         active_m_plan_id = _get_m_plan_id_from_plan(active_plan)
-        if getattr(active_plan, "team_id", None):
-            active_plan_team = await memory_store.get_team_by_id(
-                team_id=active_plan.team_id
-            )
+        plan_team_id = getattr(active_plan, "team_id", None)
+        if plan_team_id:
+            active_plan_team = await memory_store.get_team_by_id(team_id=plan_team_id)
         if not active_plan_team:
             raise HTTPException(
                 status_code=404,
@@ -1395,8 +1480,10 @@ async def chat_message_stream(
         #    streams detailed events (code_interpreter, file uploads, reasoning).
         full_text = ""
         collected_generated_files: list[dict] = []
+        _cleanup = AsyncExitStack()
 
         try:
+            await _cleanup.__aenter__()
             code_interpreter_call_emitted = False
             from v4.magentic_agents.foundry_agent import FoundryAgentTemplate
 
@@ -1411,6 +1498,9 @@ async def chat_message_stream(
                 team_config_input=active_plan_team,
             )
             direct_team_name = getattr(direct_team, "name", "Direct Response Team")
+            for _a in direct_agents:
+                if callable(getattr(_a, "close", None)):
+                    _cleanup.push_async_callback(_a.close)
 
             # Select best agent from merged team using keyword scoring
             foundry_agents = [
@@ -1419,7 +1509,7 @@ async def chat_message_stream(
             if not foundry_agents:
                 raise ValueError("No FoundryAgent available in merged team")
 
-            agent = _select_team_agent(
+            agent = await _select_team_agent(
                 chat_request.message, direct_team, foundry_agents
             )
             selected_agent_name = _agent_runtime_name(agent) or "assistant"
@@ -1717,6 +1807,8 @@ async def chat_message_stream(
                         "message": "Stream interrupted unexpectedly. Please try again.",
                     }
                 )
+        finally:
+            await _cleanup.aclose()
 
         # 4. Persist full assistant response to Cosmos
         try:
@@ -3184,6 +3276,37 @@ async def get_plan_by_id(
             if plan.team_id:
                 team = await memory_store.get_team_by_id(team_id=plan.team_id)
             agent_messages = await memory_store.get_agent_messages(plan_id=plan.plan_id)
+
+            # Merge session chat history (pre-plan conversation) into agent_messages
+            if plan.session_id:
+                try:
+                    chat_svc = await get_chat_cosmos_service()
+                    session = await chat_svc.get_session(plan.session_id, user_id)
+                    if session and session.get("messages"):
+                        session_msgs = []
+                        for msg in session["messages"]:
+                            role = msg.get("role", "user")
+                            metadata = msg.get("metadata") or {}
+                            session_msgs.append(
+                                {
+                                    "agent": "human"
+                                    if role == "user"
+                                    else metadata.get("agent", "assistant"),
+                                    "agent_type": "human" if role == "user" else "ai",
+                                    "timestamp": msg.get("timestamp"),
+                                    "content": msg.get("content", ""),
+                                    "steps": [],
+                                    "next_steps": [],
+                                    "raw_data": msg.get("content", ""),
+                                }
+                            )
+                        # Prepend chat history before plan agent messages
+                        agent_messages = session_msgs + list(agent_messages or [])
+                except Exception as e:
+                    logging.warning(
+                        f"Could not load chat history for session {plan.session_id}: {e}"
+                    )
+
             mplan = plan.m_plan if plan.m_plan else None
             streaming_message = plan.streaming_message if plan.streaming_message else ""
             plan.streaming_message = ""  # clear streaming message after retrieval

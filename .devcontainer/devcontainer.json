@@ -92,7 +92,9 @@
                 "plibither8.remove-comments",
                 "visualstudioexptteam.vscodeintellicode-completions",
                 "vscjava.migrate-java-to-azure",
-                "ms-vscode.vscode-speech"
+                "ms-vscode.vscode-speech",
+                "WolfiesHorizon.python-auto-venv",
+                "ms-vscode.powershell"
             ]
         }
     },

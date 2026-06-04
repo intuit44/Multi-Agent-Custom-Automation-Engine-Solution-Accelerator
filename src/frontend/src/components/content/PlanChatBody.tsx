@@ -24,6 +24,7 @@ interface SimplifiedPlanChatProps extends PlanChatProps {
     generatedFiles?: Array<{ file_id: string; filename: string; download_url: string }>;
     onFileSelect?: (file: File) => void;
     onRemoveFile?: (file_id: string) => void;
+    onRemoveGeneratedFile?: (file_id: string) => void;
 }
 
 const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
@@ -37,6 +38,7 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
     generatedFiles = [],
     onFileSelect,
     onRemoveFile,
+    onRemoveGeneratedFile,
 }) => {
     const isDisabled = submittingChatDisableInput || waitingForPlan;
     const placeholder = waitingForPlan
@@ -223,6 +225,25 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
                                 }}>
                                     {f.filename}
                                 </span>
+                                {onRemoveGeneratedFile && (
+                                    <Button
+                                        appearance="transparent"
+                                        icon={<Dismiss20Regular />}
+                                        size="small"
+                                        aria-label={`Discard ${f.filename}`}
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            onRemoveGeneratedFile(f.file_id);
+                                        }}
+                                        style={{
+                                            minWidth: 'auto',
+                                            padding: '4px',
+                                            height: '20px',
+                                            width: '20px',
+                                        }}
+                                    />
+                                )}
                             </a>
                         ))}
                     </div>

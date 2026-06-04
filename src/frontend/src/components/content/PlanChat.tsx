@@ -30,6 +30,7 @@ interface SimplifiedPlanChatProps extends PlanChatProps {
   generatedFiles?: Array<{ file_id: string; filename: string; download_url: string }>;
   onFileSelect?: (file: File) => void;
   onRemoveFile?: (file_id: string) => void;
+  onRemoveGeneratedFile?: (file_id: string) => void;
 }
 
 const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
@@ -57,6 +58,7 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
   generatedFiles,
   onFileSelect,
   onRemoveFile,
+  onRemoveGeneratedFile,
 }) => {
   // Notify parent when an MPlan arrives via planData.
   useEffect(() => {
@@ -113,6 +115,7 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
           generatedFiles={generatedFiles}
           onFileSelect={onFileSelect}
           onRemoveFile={onRemoveFile}
+          onRemoveGeneratedFile={onRemoveGeneratedFile}
         />
       </div>
     );
@@ -177,8 +180,8 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
         generatedFiles={generatedFiles}
         onFileSelect={onFileSelect}
         onRemoveFile={onRemoveFile}
+        onRemoveGeneratedFile={onRemoveGeneratedFile}
       />
-
     </div>
   );
 };

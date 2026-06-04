@@ -33,9 +33,6 @@ from v4.magentic_agents.common.lifecycle import (
 )
 from v4.magentic_agents.models.agent_models import MCPConfig, SearchConfig
 
-# Number of recent messages injected into the agent context on each invoke().
-# Increase this value if long conversations lose relevant context.
-# Keep in mind that larger windows consume more tokens per request.
 CHAT_HISTORY_WINDOW: int = 20
 
 
@@ -397,8 +394,32 @@ class FoundryAgentTemplate(AzureAgentBase):
                 else:
                     tools = []
 
-                if tools:
-                    # Runtime tools present → AzureOpenAIResponsesClient
+                if self.enable_code_interpreter:
+                    # Code Interpreter is server-side in Foundry portal.
+                    # Must use AzureAIClient to access it — ResponsesClient
+                    # cannot reach server-side tools configured in the portal.
+                    client = self.get_chat_client()
+                    self.logger.info(
+                        "Using AzureAIClient for '%s' (server-side Code Interpreter).",
+                        self.agent_name,
+                    )
+                    self._agent = Agent(
+                        id=self.get_agent_id(),
+                        client=client,
+                        instructions=self.agent_instructions,
+                        name=self.agent_name,
+                        description=self.agent_description,
+                        default_options=cast(
+                            Any,
+                            AzureAIProjectAgentOptions(
+                                store=False,
+                                tool_choice="auto",
+                                temperature=temp,
+                            ),
+                        ),
+                    )
+                elif tools:
+                    # Runtime MCP tools present → AzureOpenAIResponsesClient
                     # supports dynamic MCP tools passed at runtime.
                     client = self.get_responses_client()
                     self.logger.info(
@@ -445,7 +466,7 @@ class FoundryAgentTemplate(AzureAgentBase):
                         ),
                     )
 
-                if tools and not self._ephemeral:
+                if tools and not self._ephemeral and not self.enable_code_interpreter:
                     await self._register_in_foundry()
 
             self.logger.info("Initialized Agent '%s'", self.agent_name)
@@ -530,30 +551,6 @@ class FoundryAgentTemplate(AzureAgentBase):
     # -------------------------
     # Cleanup (optional override if you want to delete server-side agent)
     # -------------------------
-    async def close(self) -> None:
-        """Extend base close to optionally delete server-side Azure agent."""
-        try:
-            if (
-                self._use_azure_search
-                and self._azure_server_agent_id
-                and self.project_client is not None
-            ):
-                try:
-                    await self.project_client.agents.delete_agent(
-                        self._azure_server_agent_id
-                    )
-                    self.logger.info(
-                        "Deleted Azure server agent (id=%s) during close.",
-                        self._azure_server_agent_id,
-                    )
-                except Exception as ex:
-                    self.logger.warning(
-                        "Failed to delete Azure server agent (id=%s): %s",
-                        self._azure_server_agent_id,
-                        ex,
-                    )
-        finally:
-            await super().close()
 
 
 # -------------------------

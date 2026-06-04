@@ -465,3 +465,4 @@ data/sample_code/
 # Bicep local files
 *.local*.bicepparam
 *.local*.parameters.json
+.blackboxcli/

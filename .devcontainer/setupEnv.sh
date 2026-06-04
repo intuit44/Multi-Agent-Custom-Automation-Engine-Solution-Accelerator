@@ -87,6 +87,29 @@ if [ -f requirements.txt ]; then
   pip install -r requirements.txt || echo "⚠️  pip install for frontend extras failed"
 fi
 
+# ── 5b. Auto-load project .env into every new shell ─────────────────
+# Makes ELEVENLABS_API_KEY, GITHUB_PERSONAL_ACCESS_TOKEN, etc. available
+# to MCP servers (npx/uvx) launched from any terminal session.
+echo "🔑 Configuring .env auto-load for new shells..."
+BASHRC="$HOME/.bashrc"
+AUTOLOAD_MARKER="# >>> MACAE auto-load .env >>>"
+if ! grep -q "$AUTOLOAD_MARKER" "$BASHRC" 2>/dev/null; then
+  cat >> "$BASHRC" << 'EOF'
+
+# >>> MACAE auto-load .env >>>
+# Auto-export variables from project .env so MCP servers (uvx/npx) see them.
+if [ -f "/workspaces/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator/.env" ]; then
+  set -a
+  . "/workspaces/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator/.env"
+  set +a
+fi
+# <<< MACAE auto-load .env <<<
+EOF
+  echo "   ✅ .env auto-load added to $BASHRC"
+else
+  echo "   ✅ .env auto-load already configured"
+fi
+
 # ── 6. Ensure gh CLI is available ───────────────────────────────────
 if ! command -v gh >/dev/null 2>&1; then
   echo "📦 Installing GitHub CLI..."

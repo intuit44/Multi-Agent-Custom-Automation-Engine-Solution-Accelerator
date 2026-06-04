@@ -20,10 +20,10 @@
       "description": "Produces comprehensive, structured summaries of NDAs and contracts, capturing all key terms, clauses, obligations, jurisdictions, and notable provisions.",
       "use_rag": true,
       "use_mcp": false,
-      "use_bing": false,
+      "use_bing": true,
       "use_reasoning": false,
       "index_name": "contract-summary-doc-index",
-      "coding_tools": false
+      "coding_tools": true
     },
     {
       "input_key": "",
@@ -38,7 +38,7 @@
       "use_bing": true,
       "use_reasoning": false,
       "index_name": "contract-risk-doc-index",
-      "coding_tools": false
+      "coding_tools": true
     },
     {
       "input_key": "",
@@ -50,10 +50,10 @@
       "description": "Performs compliance validation of NDAs and contracts against legal policy requirements, identifies gaps, and provides corrective recommendations and compliance status.",
       "use_rag": true,
       "use_mcp": false,
-      "use_bing": false,
+      "use_bing": true,
       "use_reasoning": false,
       "index_name": "contract-compliance-doc-index",
-      "coding_tools": false
+      "coding_tools": true
     }
   ],
   "protected": false,

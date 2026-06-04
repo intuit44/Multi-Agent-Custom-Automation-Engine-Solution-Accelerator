@@ -92,6 +92,10 @@ const PlanPage: React.FC = () => {
         setAttachedFiles(prev => prev.filter(f => f.file_id !== file_id));
     }, []);
 
+    const removeGeneratedFile = useCallback((file_id: string) => {
+        setGeneratedFiles(prev => prev.filter(f => f.file_id !== file_id));
+    }, []);
+
     // Plan cancellation dialog state
     const [showCancellationDialog, setShowCancellationDialog] = useState<boolean>(false);
     const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
@@ -341,20 +345,35 @@ const PlanPage: React.FC = () => {
                 console.warn('⚠️ Final result message missing data:', finalMessage);
                 return;
             }
-            const agentMessageData = {
-                agent: AgentType.GROUP_CHAT_MANAGER,
-                agent_type: AgentMessageType.AI_AGENT,
-                timestamp: Date.now(),
-                steps: [],
-                next_steps: [],
-                content: "🎉🎉 " + (finalMessage.data?.content || ''),
-                raw_data: finalMessage,
-            } as AgentMessageData;
-
+            // Deduplicate: if AGENT_MESSAGEs already populated the UI, skip adding FINAL_RESULT
+            // to avoid showing the same content twice (once per agent, once as Group Chat Manager).
+            setAgentMessages(prev => {
+                const hasAgentMessages = prev.some(
+                    m => m.agent_type === AgentMessageType.AI_AGENT && m.agent !== 'human'
+                );
+                if (hasAgentMessages) {
+                    console.log('📋 Skipping FINAL_RESULT duplicate — AGENT_MESSAGEs already rendered');
+                    return prev;
+                }
+                // No individual agent messages yet — use the final result as sole response
+                const lastAiAgent = [...prev].reverse().find(
+                    m => m.agent_type === AgentMessageType.AI_AGENT && m.agent !== 'human'
+                );
+                const agentName = lastAiAgent?.agent || AgentType.GROUP_CHAT_MANAGER;
+                const agentMessageData = {
+                    agent: agentName,
+                    agent_type: AgentMessageType.AI_AGENT,
+                    timestamp: Date.now(),
+                    steps: [],
+                    next_steps: [],
+                    content: finalMessage.data?.content || '',
+                    raw_data: finalMessage,
+                } as AgentMessageData;
+                return [...prev, agentMessageData];
+            });
             if (finalMessage?.data?.status === PlanStatus.COMPLETED) {
                 setShowBufferingText(true);
                 setShowProcessingPlanSpinner(false);
-                setAgentMessages(prev => [...prev, agentMessageData]);
                 setSelectedTeam(planData?.team || null);
                 setSubmittingChatDisableInput(false);
                 scrollToBottom();
@@ -368,7 +387,9 @@ const PlanPage: React.FC = () => {
                 webSocketService.disconnect();
                 const capturedBuffer = wsStreamingBufferRef.current;
                 wsStreamingBufferRef.current = '';
-                processAgentMessage(agentMessageData, planData, true, capturedBuffer);
+                // processAgentMessage for side-effects (plan state), no duplicate push needed
+                const dummyMsg = { agent: AgentType.GROUP_CHAT_MANAGER, agent_type: AgentMessageType.AI_AGENT, timestamp: Date.now(), steps: [], next_steps: [], content: finalMessage.data?.content || '', raw_data: finalMessage } as AgentMessageData;
+                processAgentMessage(dummyMsg, planData, true, capturedBuffer);
 
                 // Eliminar planId de la URL y limpiar el estado del plan cuando se completa
                 if (routeSessionId && queryPlanId) {
@@ -532,34 +553,8 @@ const PlanPage: React.FC = () => {
                     dispatch(setApprovalRequest(planResult.mplan));
                 }
                 if (planResult?.messages !== undefined) {
-                    // También cargar el historial del chat previo por session_id
-                    // para no perder el contexto cuando se navega desde /chat a /plan/{id}
-                    let chatHistory: AgentMessageData[] = [];
-                    const chatSessionId = planResult?.plan?.session_id;
-                    if (chatSessionId) {
-                        try {
-                            const sessionData = await apiService.getChatSession(chatSessionId);
-                            chatHistory = (sessionData?.messages || []).map((msg): AgentMessageData => ({
-                                agent: ((msg as any).role || (msg as any).sender) === 'user'
-                                    ? 'human'
-                                    : ((msg as any).metadata?.selected_agent || AgentType.GROUP_CHAT_MANAGER),
-                                agent_type: ((msg as any).role || (msg as any).sender) === 'user'
-                                    ? AgentMessageType.HUMAN_AGENT
-                                    : AgentMessageType.AI_AGENT,
-                                timestamp: new Date(msg.timestamp).getTime(),
-                                steps: [],
-                                next_steps: [],
-                                content: msg.content,
-                                raw_data: msg.content,
-                            }));
-                        } catch (sessionErr) {
-                            console.warn('⚠️ Could not load chat session history (non-fatal):', sessionErr);
-                        }
-                    }
-                    // Anteponer historial del chat y luego mensajes del plan (evitar duplicados por contenido)
-                    const planMsgContents = new Set(planResult.messages.map(m => m.content));
-                    const uniqueChatHistory = chatHistory.filter(m => !planMsgContents.has(m.content));
-                    setAgentMessages([...uniqueChatHistory, ...planResult.messages]);
+
+                    setAgentMessages([...planResult.messages]);
                 }
                 if (planResult?.streaming_message && planResult.streaming_message.trim() !== "") {
                     wsStreamingBufferRef.current = planResult.streaming_message;
@@ -957,6 +952,7 @@ const PlanPage: React.FC = () => {
                                 generatedFiles={generatedFiles}
                                 onFileSelect={handleFileSelect}
                                 onRemoveFile={removeAttachedFile}
+                                onRemoveGeneratedFile={removeGeneratedFile}
                             />
                         </>
                     )}
