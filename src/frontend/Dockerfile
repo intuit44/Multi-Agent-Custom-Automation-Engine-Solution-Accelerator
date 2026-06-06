@@ -51,9 +51,9 @@ ENV NODE_ENV=production \
 
 # Install curl for healthcheck
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl && \
+    apt-get install -y --no-install-recommends curl=7.74.0-1.3+deb11u13 && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/* 
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

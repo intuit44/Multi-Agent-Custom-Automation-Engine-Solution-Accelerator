@@ -32,6 +32,8 @@ export interface StreamCallbacks {
     onToolActivity?: (data: { activity: string; tool: string; server?: string; success?: boolean }) => void;
     /** Called when code_interpreter generates a downloadable file. */
     onGeneratedFile?: (data: { file_id: string; filename: string; download_url: string }) => void;
+    /** Called when an MCP tool (e.g. GitHub) needs the user to complete OAuth consent. */
+    onOAuthConsentRequest?: (consentLink: string) => void;
 }
 
 // In-memory cache of chat sessions (persists during page lifetime)
@@ -123,9 +125,10 @@ export class ChatService {
             fileIds?: string[];
             onGeneratedFile?: (f: { file_id: string; filename: string; download_url: string }) => void;
             planId?: string;
+            onOAuthConsentRequest?: (consentLink: string) => void;
         } = {},
     ): AsyncIterable<string> {
-        const { onPlanCreated, onSessionId, onDone, fileIds, onGeneratedFile, planId } = options;
+        const { onPlanCreated, onSessionId, onDone, fileIds, onGeneratedFile, planId, onOAuthConsentRequest } = options;
         return {
             [Symbol.asyncIterator](): AsyncIterator<string> {
                 // Queue of resolved chunks; resolve/reject hooks for the consumer.
@@ -153,6 +156,7 @@ export class ChatService {
                     onDone:        (data) => { onDone?.(data); finish(); },
                     onError:       (msg) => fail(new Error(msg)),
                     onGeneratedFile: (f) => { onGeneratedFile?.(f); },
+                    onOAuthConsentRequest: (link) => { onOAuthConsentRequest?.(link); finish(); },
                 }, fileIds, planId).catch(fail);
 
                 return {

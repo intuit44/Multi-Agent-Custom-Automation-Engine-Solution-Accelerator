@@ -1,63 +1,60 @@
 {
-	"folders": [
-		{
-			"name": "MACAE",
-			"path": "."
-		},
-		{
-			"name": "mcp-server",
-			"path": "./src/mcp_server"
-		},
-		{
-			"name": "e2e-tests",
-			"path": "./tests/e2e-test"
-		}
-	],
-	"settings": {
-		"terminal.integrated.suggest.suggestOnTriggerCharacters": true,
-		"terminal.integrated.suggest.selectionMode": "never",
-		"debug.internalConsoleOptions": "neverOpen",
-		"remote.autoForwardPortsFallback": 0,
-		"files.trimTrailingWhitespace": true,
-		"files.insertFinalNewline": true,
-		"[python]": {
-			"editor.defaultFormatter": "charliermarsh.ruff",
-			"editor.formatOnSave": true
-		},
-		"python.testing.pytestEnabled": true,
-		"python.testing.unittestEnabled": false,
-		"mcp": {
-			"servers": {
-				"microsoft/markitdown": {
-					"type": "stdio",
-					"command": "uvx",
-					"args": [
-						"markitdown-mcp==0.0.1a4"
-					],
-					"gallery": "https://api.mcp.github.com",
-					"version": "1.0.0"
-				}
-			},
-			"inputs": [
-				{
-					"id": "token",
-					"type": "promptString",
-					"description": "",
-					"password": true
-				}
-			]
-		},
-		"chat.mcp.serverSampling": {
-			"Multi-Agent-Custom-Automation-Engine-Solution-Accelerator.code-workspace: io.github.github/github-mcp-server": {
-				"allowedModels": [
-					"copilot/auto"
-				]
-			}
-		},
-		"workbench.editor.enablePreview": false,
-		"github.copilot.chat.virtualTools.threshold": 0,
-		"accessibility.voice.keywordActivation": "chatInView",
-		"editor.defaultFormatter": "charliermarsh.ruff",
-		"editor.formatOnSave": true
-	}
+  "folders": [
+    {
+      "name": "MACAE",
+      "path": ".",
+    },
+    {
+      "name": "mcp-server",
+      "path": "./src/mcp_server",
+    },
+    {
+      "name": "e2e-tests",
+      "path": "./tests/e2e-test",
+    },
+  ],
+  "settings": {
+    "terminal.integrated.suggest.suggestOnTriggerCharacters": true,
+    "terminal.integrated.suggest.selectionMode": "never",
+    "debug.internalConsoleOptions": "neverOpen",
+    "remote.autoForwardPortsFallback": 0,
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+    "[python]": {
+      "editor.defaultFormatter": "charliermarsh.ruff",
+      "editor.formatOnSave": true,
+    },
+    "python.testing.pytestEnabled": true,
+    "python.testing.unittestEnabled": false,
+    "mcp": {
+      "inputs": [
+        {
+          "id": "token",
+          "type": "promptString",
+          "description": "",
+          "password": true,
+        },
+      ],
+      "servers": {},
+    },
+    "chat.mcp.serverSampling": {
+      "Multi-Agent-Custom-Automation-Engine-Solution-Accelerator.code-workspace: io.github.github/github-mcp-server": {
+        "allowedModels": ["copilot/auto"],
+      },
+    },
+    "workbench.editor.enablePreview": false,
+    "github.copilot.chat.virtualTools.threshold": 0,
+    "accessibility.voice.keywordActivation": "chatInView",
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "[typescriptreact]": {
+      "editor.defaultFormatter": "esbenp.prettier-vscode",
+    },
+    "[jsonc]": {
+      "editor.defaultFormatter": "esbenp.prettier-vscode",
+    },
+    "[dockerfile]": {
+      "editor.defaultFormatter": "ms-azuretools.vscode-containers",
+    },
+  },
 }

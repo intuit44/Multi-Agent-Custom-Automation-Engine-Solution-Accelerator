@@ -330,6 +330,7 @@ export class APIService {
             onError: (error: string) => void;
             onToolActivity?: (data: { activity: string; tool: string; server?: string; success?: boolean }) => void;
             onGeneratedFile?: (data: { file_id: string; filename: string; download_url: string }) => void;
+            onOAuthConsentRequest?: (consentLink: string) => void;
         },
     ): Promise<void> {
         const t0 = performance.now();
@@ -389,6 +390,9 @@ export class APIService {
                                 break;
                             case 'generated_file':
                                 callbacks.onGeneratedFile?.(data);
+                                break;
+                            case 'oauth_consent_request':
+                                callbacks.onOAuthConsentRequest?.(data.consent_link);
                                 break;
                         }
                     } catch {

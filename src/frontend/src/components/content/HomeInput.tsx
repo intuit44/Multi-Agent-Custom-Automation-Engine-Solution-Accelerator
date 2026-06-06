@@ -134,6 +134,29 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
     setAttachedFiles(prev => prev.filter(f => f.file_id !== file_id));
   };
 
+  const MAX_INPUT_CHARS = 5000;
+
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const pasted = e.clipboardData.getData('text');
+    const combined = input + pasted;
+    if (combined.length <= MAX_INPUT_CHARS) return; // normal paste, browser handles it
+
+    // Exceeds limit — prevent default truncation and attach as .txt instead
+    e.preventDefault();
+    const filename = `pasted-text-${Date.now()}.txt`;
+    const file = new File([combined], filename, { type: 'text/plain' });
+    try {
+      const result = await apiService.uploadChatFile(file);
+      setAttachedFiles(prev => [...prev, { name: filename, file_id: result.file_id }]);
+      // Keep only what fits in the textarea (first 5000 chars of the combined text)
+      setInput(combined.slice(0, MAX_INPUT_CHARS));
+    } catch (err) {
+      console.error('Auto-attach of pasted text failed:', err);
+      // Fallback: just truncate silently
+      setInput(combined.slice(0, MAX_INPUT_CHARS));
+    }
+  };
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
   const location = useLocation(); // ✅ location.state used to control focus
@@ -163,8 +186,9 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
     return cleanup;
   }, []);
 
-  const handleSubmit = async () => {
-    if (input.trim()) {
+  const handleSubmit = async (overrideMessage?: string) => {
+    const messageToSend = overrideMessage || input.trim();
+    if (messageToSend) {
       setSubmitting(true);
       dispatch(setSubmittingDisabled(true));
       let id = showToast("Analyzing your request…", "progress");
@@ -175,7 +199,7 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
         // For conversational/mcp, it streams the real response.
         const randomValues = crypto.getRandomValues(new Uint32Array(1));
         const sessionId = currentSessionId || `chat_${Date.now()}_${randomValues[0]}`;
-        const userMessage = input.trim();
+        const userMessage = messageToSend;
         const fileIds = attachedFiles.map(f => f.file_id);
 
         dispatch(setSessionId(sessionId));
@@ -185,10 +209,12 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
         dispatch(initAssistantMessage());
         dispatch(startStreaming());
 
-        setInput("");
-        setAttachedFiles([]);
-        if (textareaRef.current) {
-          textareaRef.current.style.height = "auto";
+        if (!overrideMessage) {
+          setInput("");
+          setAttachedFiles([]);
+          if (textareaRef.current) {
+            textareaRef.current.style.height = "auto";
+          }
         }
 
         let redirectPlan: string | null = null;
@@ -215,6 +241,18 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
             dispatch(finishStreaming({ metadata: { intent } }));
           },
           onGeneratedFile: (f) => { collectedFiles.push(f); },
+          onOAuthConsentRequest: (consentLink) => {
+            const popup = window.open(consentLink, 'oauth_consent', 'width=620,height=720,noopener');
+            if (popup) {
+              const timer = setInterval(() => {
+                if (popup.closed) {
+                  clearInterval(timer);
+                  // Retry the same message now that the user has approved
+                  handleSubmit(userMessage);
+                }
+              }, 500);
+            }
+          },
         }, fileIds);
 
         if (collectedFiles.length > 0) {
@@ -393,6 +431,7 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
             placeholder="Tell us what needs planning, building, or connecting—we'll handle the rest."
             onChange={setInput}
             onEnter={handleSubmit}
+            onPaste={handlePaste}
             disabledChat={submitting}
           >
             {/* Hidden file inputs */}
@@ -462,7 +501,7 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
             <Button
               appearance="subtle"
               className="home-input-send-button"
-              onClick={handleSubmit}
+              onClick={() => handleSubmit()}
               disabled={submitting}
               icon={<Send />}
               aria-label="Send message"

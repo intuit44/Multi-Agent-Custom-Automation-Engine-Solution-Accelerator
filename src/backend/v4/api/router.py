@@ -1781,6 +1781,32 @@ async def chat_message_stream(
                             collected_generated_files.append(_gf_entry)
                             yield _sse_event(_gf_entry)
 
+                    elif ct == "oauth_consent_request":
+                        # Tool (e.g. GitHub MCP) needs the user to complete OAuth.
+                        # Emit the consent link so the frontend can open a popup.
+                        consent_link = getattr(content, "consent_link", None)
+                        if consent_link:
+                            logger.info("OAuth consent required: %s", consent_link)
+                            yield _sse_event(
+                                {
+                                    "type": "oauth_consent_request",
+                                    "consent_link": consent_link,
+                                }
+                            )
+
+                    elif ct == "function_approval_request":
+                        # Agent requires user approval before executing a tool call.
+                        # Emit an SSE event so the frontend can render the approval UI.
+                        fc = getattr(content, "function_call", None)
+                        yield _sse_event(
+                            {
+                                "type": "function_approval_request",
+                                "approval_id": getattr(content, "id", None),
+                                "tool": getattr(fc, "name", None) or "unknown",
+                                "args": str(getattr(fc, "arguments", "") or "")[:500],
+                            }
+                        )
+
                     elif ct == "text_reasoning":
                         # Agent's internal reasoning — send as thinking indicator
                         yield _sse_event(

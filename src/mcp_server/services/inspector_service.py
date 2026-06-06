@@ -1914,10 +1914,11 @@ class InspectorService(MCPToolBase):
                     context=(f"connecting to '{server_name}' from registry"),
                 )
 
-        @mcp.tool(tags={self.domain.value})
+        # Not exposed as an MCP tool — agents must never disconnect servers.
+        # Disconnection is user-only, handled via the REST API (/api/v4/mcp/connections/user/{name}).
         async def disconnect_mcp_server(server_name: str, user_id: str = "") -> str:
             """
-            Disconnect from an external MCP server.
+            Disconnect from an external MCP server (internal use only — not an MCP tool).
 
             Args:
                 server_name: Name of the server to disconnect from.

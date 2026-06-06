@@ -1,8 +1,11 @@
 """Models for agent configurations."""
 
+import logging
 from dataclasses import dataclass
 
 from common.config.app_config import config
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -16,23 +19,63 @@ class MCPConfig:
     client_id: str = ""
 
     @classmethod
-    def from_env(cls) -> "MCPConfig":
+    def from_env(cls, name: str = "") -> "MCPConfig":
         url = config.MCP_SERVER_ENDPOINT
-        name = config.MCP_SERVER_NAME
+        mcp_name = name or config.MCP_SERVER_NAME
         description = config.MCP_SERVER_DESCRIPTION
         tenant_id = config.AZURE_TENANT_ID
         client_id = config.AZURE_CLIENT_ID
 
         # Raise exception if any required environment variable is missing
-        if not all([url, name, description, tenant_id, client_id]):
+        if not all([url, mcp_name, description, tenant_id, client_id]):
             raise ValueError(f"{cls.__name__} Missing required environment variables")
 
         return cls(
             url=url,
-            name=name,
+            name=mcp_name,
             description=description,
             tenant_id=tenant_id,
             client_id=client_id,
+        )
+
+    @classmethod
+    def from_foundry_connection(cls, connection_name: str) -> "MCPConfig":
+        """Resolve an MCP endpoint from a Foundry project connection by name.
+
+        Looks up ``connection_name`` via the AIProjectClient and returns an
+        MCPConfig whose ``url`` points to the connection's MCP target.
+
+        Usage (one line per agent)::
+
+            mcp_cfg = MCPConfig.from_foundry_connection("outlook")
+            agent = FoundryAgentTemplate(..., mcp_config=mcp_cfg)
+
+        Raises:
+            ValueError: If the connection is not found or has no target URL.
+        """
+        project_client = config.get_ai_project_client()
+        connections = project_client.connections
+        try:
+            conn = connections.get(name=connection_name)
+        except Exception as exc:
+            raise ValueError(
+                f"Foundry connection '{connection_name}' not found: {exc}"
+            ) from exc
+
+        target: str = getattr(conn, "target", None) or ""
+        if not target or target == "_":
+            raise ValueError(
+                f"Foundry connection '{connection_name}' has no valid target URL. "
+                "Make sure the connector is enabled and OAuth is completed in the Foundry portal."
+            )
+
+        _log.info("Resolved Foundry connection '%s' → %s", connection_name, target)
+        return cls(
+            url=target,
+            name=connection_name,
+            description=f"Foundry connection: {connection_name}",
+            tenant_id=config.AZURE_TENANT_ID or "",
+            client_id=config.AZURE_CLIENT_ID or "",
         )
 
 

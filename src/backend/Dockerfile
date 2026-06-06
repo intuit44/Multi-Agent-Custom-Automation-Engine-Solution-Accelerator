@@ -16,7 +16,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 #RUN uv sync --frozen --no-install-project --no-dev
 
 # Backend app setup
-COPY . /app  
+COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 #RUN uv sync --frozen --no-dev
 

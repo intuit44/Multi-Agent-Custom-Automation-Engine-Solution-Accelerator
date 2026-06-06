@@ -777,6 +777,18 @@ const PlanPage: React.FC = () => {
                         planId: activePlanId,
                         onGeneratedFile: (f) => { collectedFiles.push(f); },
                         fileIds,
+                        onOAuthConsentRequest: (consentLink) => {
+                            const popup = window.open(consentLink, 'oauth_consent', 'width=620,height=720,noopener');
+                            if (popup) {
+                                const timer = setInterval(() => {
+                                    if (popup.closed) {
+                                        clearInterval(timer);
+                                        // Retry the same message now that the user has approved
+                                        handleOnchatSubmit(chatInput);
+                                    }
+                                }, 500);
+                            }
+                        },
                     }
                 )) {
                     accumulated += token;
