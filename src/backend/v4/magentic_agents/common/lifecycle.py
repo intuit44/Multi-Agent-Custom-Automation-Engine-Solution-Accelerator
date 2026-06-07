@@ -69,10 +69,15 @@ class MCPEnabledBase:
             return self
         self._stack = AsyncExitStack()
 
-        # Always use MI/CLI credential for Foundry API calls.
-        # user_access_token is only for MCP tool forwarding (agent365 OBO),
-        # not for the AzureAIClient/ResponsesClient credential.
-        self.creds = config.get_azure_credential_async(config.AZURE_CLIENT_ID)
+        # Use the end-user credential when a token is available so Foundry's ARA
+        # can perform its OBO exchange to user-delegated tool connections
+        # (e.g. agent365/WorkIQ). With ENABLE_OBO this is a real
+        # OnBehalfOfCredential; otherwise it forwards the EasyAuth token verbatim.
+        # Falls back to Managed Identity in local/dev (no user token present).
+        if self.user_access_token:
+            self.creds = config.build_user_credential(self.user_access_token)
+        else:
+            self.creds = config.get_azure_credential_async(config.AZURE_CLIENT_ID)
         if self._stack:
             await self._stack.enter_async_context(self.creds)
         # Create AgentsClient

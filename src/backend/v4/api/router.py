@@ -1152,6 +1152,7 @@ async def _create_direct_response_workflow(
     user_id: str,
     tenant_id: str,
     team_config_input: Optional[TeamConfiguration] = None,
+    user_access_token: Optional[str] = None,
 ) -> tuple[Any, list[Any], TeamConfiguration]:
     """Create a Magentic workflow for a single direct chat request."""
     from common.config.app_config import config
@@ -1198,6 +1199,7 @@ async def _create_direct_response_workflow(
         user_id=user_id,
         team_config_input=direct_team,
         memory_store=memory_store,
+        user_access_token=user_access_token,
     )
     agents = [agent for agent in agents if _agent_can_join_direct_orchestration(agent)]
     if not agents:
@@ -1256,7 +1258,7 @@ async def chat_message_stream(
     authenticated_user = get_authenticated_user_details(request_headers=request.headers)
     user_id = authenticated_user["user_principal_id"]
     tenant_id = authenticated_user.get("tenant_id", "")
-    authenticated_user.get("access_token")  # For OBO flow
+    user_access_token = authenticated_user.get("access_token")
 
     if not chat_request.session_id:
         chat_request.session_id = str(uuid.uuid4())
@@ -1496,6 +1498,7 @@ async def chat_message_stream(
                 user_id=user_id,
                 tenant_id=tenant_id,
                 team_config_input=active_plan_team,
+                user_access_token=user_access_token,
             )
             direct_team_name = getattr(direct_team, "name", "Direct Response Team")
             for _a in direct_agents:
@@ -1984,6 +1987,7 @@ async def _get_mcp_query_response(
         workflow, direct_agents, _direct_team = await _create_direct_response_workflow(
             user_id=user_id,
             tenant_id=tenant_id,
+            user_access_token=user_access_token,
         )
         for _agent in direct_agents:
             if isinstance(_agent, _ProxyAgent):

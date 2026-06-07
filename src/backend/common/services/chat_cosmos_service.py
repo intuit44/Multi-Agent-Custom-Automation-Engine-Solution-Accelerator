@@ -55,7 +55,7 @@ class ChatCosmosService:
             return
 
         endpoint = config.COSMOSDB_ENDPOINT
-        credential = config.get_azure_credential_async()
+        credential = config.get_azure_credential_async(config.AZURE_CLIENT_ID)
         db_name = config.COSMOSDB_DATABASE
 
         if not endpoint or not db_name:

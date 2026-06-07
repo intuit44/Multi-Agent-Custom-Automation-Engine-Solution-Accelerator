@@ -51,6 +51,7 @@ class MagenticAgentFactory:
         agent_obj: Union[SimpleNamespace, Any],
         team_config: TeamConfiguration,
         memory_store: DatabaseBase,
+        user_access_token: Optional[str] = None,
     ) -> Union[FoundryAgentTemplate, ProxyAgent]:
         """
         Create an agent from configuration object.
@@ -155,6 +156,7 @@ class MagenticAgentFactory:
             team_service=self.team_service,
             team_config=team_config,
             memory_store=memory_store,
+            user_access_token=user_access_token,
         )
 
         await agent.open()
@@ -168,6 +170,7 @@ class MagenticAgentFactory:
         user_id: str,
         team_config_input: TeamConfiguration,
         memory_store: DatabaseBase,
+        user_access_token: Optional[str] = None,
     ) -> List:
         """
         Create and return a team of agents from JSON configuration.
@@ -194,7 +197,11 @@ class MagenticAgentFactory:
                     )
 
                     agent = await self.create_agent_from_config(
-                        user_id, agent_cfg, team_config_input, memory_store
+                        user_id,
+                        agent_cfg,
+                        team_config_input,
+                        memory_store,
+                        user_access_token=user_access_token,
                     )
                     initalized_agents.append(agent)
                     self._agent_list.append(agent)  # Keep track for cleanup

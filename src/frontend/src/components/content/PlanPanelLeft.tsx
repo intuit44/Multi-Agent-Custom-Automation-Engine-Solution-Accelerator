@@ -1,5 +1,5 @@
-import PanelLeft from "@/coral/components/Panels/PanelLeft";
-import PanelLeftToolbar from "@/coral/components/Panels/PanelLeftToolbar";
+import PanelLeft from '@/coral/components/Panels/PanelLeft';
+import PanelLeftToolbar from '@/coral/components/Panels/PanelLeftToolbar';
 import {
   Body1Strong,
   Caption1,
@@ -10,27 +10,27 @@ import {
   Tooltip,
   useToastController,
   Button,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   Chat20Regular,
   ChatAdd20Regular,
   Settings24Regular,
-} from "@fluentui/react-icons";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { PlanPanelLefProps, UserInfo } from "@/models";
-import { ChatService } from "@/services/ChatService";
-import ContosoLogo from "../../coral/imports/ContosoLogo";
-import "../../styles/PlanPanelLeft.css";
-import "../../styles/EnhancedChat.css";
-import LoginButton from "../auth/LoginButton";
-import PanelFooter from "@/coral/components/Panels/PanelFooter";
-import { getUserInfoGlobal } from "@/api/config";
-import TeamSelector from "../common/TeamSelector";
-import { TeamConfig } from "../../models/Team";
-import TeamSelected from "../common/TeamSelected";
-import type { ChatSessionSummary } from "../../lib/types";
-import { SettingsModal } from "../settings/SettingsModal";
+} from '@fluentui/react-icons';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { PlanPanelLefProps, UserInfo } from '@/models';
+import { ChatService } from '@/services/ChatService';
+import ContosoLogo from '../../coral/imports/ContosoLogo';
+import '../../styles/PlanPanelLeft.css';
+import '../../styles/EnhancedChat.css';
+import LoginButton from '../auth/LoginButton';
+import PanelFooter from '@/coral/components/Panels/PanelFooter';
+import { getUserInfoGlobal } from '@/api/config';
+import TeamSelector from '../common/TeamSelector';
+import { TeamConfig } from '../../models/Team';
+import TeamSelected from '../common/TeamSelected';
+import type { ChatSessionSummary } from '../../lib/types';
+import { SettingsModal } from '../settings/SettingsModal';
 
 const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
   reloadTasks,
@@ -41,9 +41,9 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
   isHomePage,
   selectedTeam: parentSelectedTeam,
   onNavigationWithAlert,
-  isLoadingTeam
+  isLoadingTeam: _isLoadingTeam,
 }) => {
-  const { dispatchToast } = useToastController("toast");
+  const { dispatchToast } = useToastController('toast');
   const navigate = useNavigate();
 
   const [userInfo, setUserInfo] = useState<UserInfo | null>(
@@ -54,9 +54,10 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Use parent's selected team if provided, otherwise use local state
-  const [localSelectedTeam, setLocalSelectedTeam] = useState<TeamConfig | null>(null);
+  const [localSelectedTeam, setLocalSelectedTeam] = useState<TeamConfig | null>(
+    null
+  );
   const selectedTeam = parentSelectedTeam || localSelectedTeam;
-
 
   // Fetch recent chats — refresh when reloadTasks fires
   const loadRecentChats = useCallback(async () => {
@@ -75,7 +76,7 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
   useEffect(() => {
     setUserInfo(getUserInfoGlobal());
     loadRecentChats();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -85,10 +86,9 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
     }
   }, [reloadTasks, loadRecentChats, restReload]);
 
-
   const handleLogoClick = useCallback(() => {
     const performNavigation = () => {
-      navigate("/");
+      navigate('/');
     };
 
     if (onNavigationWithAlert) {
@@ -109,10 +109,11 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
             <Toast>
               <ToastTitle>Team Selected</ToastTitle>
               <ToastBody>
-                {team.name} team has been selected with {team.agents.length} agents
+                {team.name} team has been selected with {team.agents.length}{' '}
+                agents
               </ToastBody>
             </Toast>,
-            { intent: "success" }
+            { intent: 'success' }
           );
         } else {
           // Handle team deselection (null case)
@@ -120,11 +121,9 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
           dispatchToast(
             <Toast>
               <ToastTitle>Team Deselected</ToastTitle>
-              <ToastBody>
-                No team is currently selected
-              </ToastBody>
+              <ToastBody>No team is currently selected</ToastBody>
             </Toast>,
-            { intent: "info" }
+            { intent: 'info' }
           );
         }
       }
@@ -136,12 +135,12 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
     <div className="panel-left-container">
       <PanelLeft panelWidth={280} panelResize={true}>
         <PanelLeftToolbar
-          linkTo={onNavigationWithAlert ? undefined : "/"}
+          linkTo={onNavigationWithAlert ? undefined : '/'}
           onTitleClick={onNavigationWithAlert ? handleLogoClick : undefined}
           panelTitle="Contoso"
           panelIcon={<ContosoLogo />}
         >
-          <Tooltip content="New task" relationship={"label"} />
+          <Tooltip content="New task" relationship={'label'} />
         </PanelLeftToolbar>
 
         {/* Team Selector right under the toolbar */}
@@ -156,12 +155,7 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
             />
           )}
 
-          {!isHomePage && (
-            <TeamSelected
-              selectedTeam={selectedTeam}
-            />
-          )}
-
+          {!isHomePage && <TeamSelected selectedTeam={selectedTeam} />}
         </div>
         <div
           className="tab tab-new-task"
@@ -170,7 +164,7 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
           role="button" // ✅ announces as button
           aria-label="New task"
           onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
+            if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
               onNewTaskButton();
             }
@@ -199,7 +193,7 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
                   role="button"
                   tabIndex={0}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
+                    if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
                       navigate(`/session/${chat.id}`);
                     }
@@ -221,6 +215,11 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
           <div className="panel-footer-content">
             {/* User Card */}
             <LoginButton showName={false} />
+            {userInfo && (
+              <Caption1 title={userInfo.user_email}>
+                {userInfo.user_first_last_name || userInfo.user_email}
+              </Caption1>
+            )}
 
             {/* Settings Button */}
             <Tooltip content="Configuración" relationship="label">

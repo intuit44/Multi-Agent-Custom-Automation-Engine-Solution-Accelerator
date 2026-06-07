@@ -64,6 +64,25 @@ class AppConfig:
         self.AZURE_TENANT_ID = self._get_optional("AZURE_TENANT_ID")
         self.AZURE_CLIENT_ID = self._get_optional("AZURE_CLIENT_ID")
         self.AZURE_CLIENT_SECRET = self._get_optional("AZURE_CLIENT_SECRET")
+        # On-Behalf-Of (OBO) for data-plane user delegation. Uses a DEDICATED
+        # confidential-client app registration — NOT AZURE_CLIENT_ID, which in this
+        # app is the Managed Identity client_id used for MI auth. When ENABLE_OBO is
+        # true the data-plane credential exchanges the user's EasyAuth assertion for
+        # a per-scope delegated token; otherwise it forwards the token verbatim.
+        # Requires: EasyAuth issuing a token whose audience is OBO_CLIENT_ID
+        # (api://<OBO_CLIENT_ID>/user_impersonation), the OBO app registered as a
+        # confidential client (OBO_CLIENT_SECRET or OBO_CLIENT_CERTIFICATE_PATH), and
+        # admin-consented delegated permissions for each downstream resource.
+        # Default off so deploying this code does not change behavior (safe rollout).
+        self.ENABLE_OBO = self._get_bool("ENABLE_OBO")
+        self.OBO_CLIENT_ID = self._get_optional("OBO_CLIENT_ID")
+        self.OBO_CLIENT_SECRET = self._get_optional("OBO_CLIENT_SECRET")
+        self.OBO_TENANT_ID = (
+            self._get_optional("OBO_TENANT_ID") or self.AZURE_TENANT_ID
+        )
+        self.OBO_CLIENT_CERTIFICATE_PATH = self._get_optional(
+            "OBO_CLIENT_CERTIFICATE_PATH"
+        )
 
         # CosmosDB settings
         self.COSMOSDB_ENDPOINT = self._get_optional("COSMOSDB_ENDPOINT")
@@ -291,33 +310,94 @@ class AppConfig:
             )
             raise
 
-    def get_ai_project_client(self, user_access_token: Optional[str] = None):
-        """Create and return an AIProjectClient for Azure AI Foundry.
+    def _build_obo_credential(self, user_assertion: str):
+        """Build a real On-Behalf-Of credential for the signed-in user.
 
-        Uses AZURE_AI_AGENT_ENDPOINT with either Managed Identity (default) or user's
-        access token for OBO flow.
+        Exchanges ``user_assertion`` (the user's access token) for a per-scope
+        delegated token each time the SDK requests one. Unlike forwarding the raw
+        token, this yields a correctly-scoped token for whatever downstream the
+        SDK targets, which is what lets Foundry's ARA perform its own OBO exchange
+        to user-delegated tool connections (e.g. agent365/WorkIQ).
+
+        Requirements (provisioned outside this code):
+          - ``user_assertion`` audience must be the OBO app: set EasyAuth
+            loginParameters scope to ``api://<OBO_CLIENT_ID>/user_impersonation``
+            (plus ``offline_access``).
+          - OBO_CLIENT_ID must be a confidential client with either
+            OBO_CLIENT_SECRET or OBO_CLIENT_CERTIFICATE_PATH, and have
+            admin-consented delegated permissions for each downstream resource.
+            NOTE: this is the auth app registration, NOT AZURE_CLIENT_ID (which in
+            this app is the Managed Identity client_id).
+        """
+        from azure.identity.aio import OnBehalfOfCredential
+
+        if not (self.OBO_TENANT_ID and self.OBO_CLIENT_ID):
+            raise RuntimeError(
+                "OBO requires OBO_CLIENT_ID (the auth app registration) and a "
+                "tenant id (OBO_TENANT_ID or AZURE_TENANT_ID) to be set"
+            )
+
+        if self.OBO_CLIENT_SECRET:
+            return OnBehalfOfCredential(
+                tenant_id=self.OBO_TENANT_ID,
+                client_id=self.OBO_CLIENT_ID,
+                client_secret=self.OBO_CLIENT_SECRET,
+                user_assertion=user_assertion,
+            )
+
+        if self.OBO_CLIENT_CERTIFICATE_PATH:
+            with open(self.OBO_CLIENT_CERTIFICATE_PATH, "rb") as cert_file:
+                cert_bytes = cert_file.read()
+            return OnBehalfOfCredential(
+                tenant_id=self.OBO_TENANT_ID,
+                client_id=self.OBO_CLIENT_ID,
+                client_certificate=cert_bytes,
+                user_assertion=user_assertion,
+            )
+
+        raise RuntimeError(
+            "OBO enabled but no confidential-client credential configured: set "
+            "OBO_CLIENT_SECRET or OBO_CLIENT_CERTIFICATE_PATH for app "
+            f"{self.OBO_CLIENT_ID}"
+        )
+
+    def build_user_credential(self, user_assertion: str):
+        """Return the async credential representing the end user for data-plane
+        (inference) calls.
+
+        With ENABLE_OBO and a confidential-client credential configured, returns a
+        real OnBehalfOfCredential. Otherwise falls back to the legacy passthrough
+        (StaticTokenCredential), preserving current behavior until OBO is fully
+        provisioned. Any OBO build error degrades to passthrough so the chat path
+        stays up.
+        """
+        if self.ENABLE_OBO:
+            try:
+                return self._build_obo_credential(user_assertion)
+            except Exception as exc:
+                logging.warning(
+                    "ENABLE_OBO set but OBO credential unavailable (%s); "
+                    "falling back to token passthrough.",
+                    exc,
+                )
+        return StaticTokenCredential(user_assertion)
+
+    def get_ai_project_client(self, user_access_token: Optional[str] = None):
+        """Create and return an AIProjectClient for Azure AI Foundry (management plane).
+
+        Always authenticates with Managed Identity. Management-plane operations
+        (listing/creating agent versions) don't need the user's identity; the
+        user-delegated (OBO) credential is applied only to the data-plane inference
+        client — see ``build_user_credential`` and the agent lifecycle.
 
         Args:
-            user_access_token: Optional user access token for OBO flow (from EasyAuth x-ms-token-aad-access-token)
+            user_access_token: Ignored. Retained for call-site compatibility;
+                user-delegated auth now happens at the data-plane credential.
 
         Returns:
             An AIProjectClient instance
         """
-        # If user token provided, create new client with StaticTokenCredential for OBO
-        if user_access_token:
-            try:
-                endpoint = self.AZURE_AI_AGENT_ENDPOINT
-                return AIProjectClient(
-                    endpoint=endpoint,
-                    credential=StaticTokenCredential(user_access_token),
-                )
-            except Exception as exc:
-                logging.warning(
-                    "Failed to create AIProjectClient with user token, falling back to MI: %s",
-                    exc,
-                )
-
-        # Default: use cached Managed Identity client
+        # Managed Identity client (cached, shared across users)
         if self._ai_project_client is not None:
             return self._ai_project_client
 

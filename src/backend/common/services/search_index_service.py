@@ -67,7 +67,7 @@ class SearchIndexService:
             )
             return
 
-        self._credential = config.get_azure_credential_async()
+        self._credential = config.get_azure_credential_async(config.AZURE_CLIENT_ID)
         if not self._credential:
             logger.warning(
                 "SearchIndexService: Azure credential not available — search indexing DISABLED."

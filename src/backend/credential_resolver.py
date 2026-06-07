@@ -35,7 +35,7 @@ class CredentialResolver:
             if not kv_url:
                 raise ValueError("AZURE_KEY_VAULT_URL not configured")
 
-            credential = config.get_azure_credential_async()
+            credential = config.get_azure_credential_async(config.AZURE_CLIENT_ID)
             self._kv_client = SecretClient(vault_url=kv_url, credential=credential)
 
         return self._kv_client
