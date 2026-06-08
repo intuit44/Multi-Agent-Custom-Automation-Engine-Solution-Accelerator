@@ -79,6 +79,79 @@ export async function getUserInfo(): Promise<UserInfo> {
     return {} as UserInfo;
   }
 }
+
+/**
+ * Ensure the cached EasyAuth access token is fresh before it is forwarded to
+ * the backend (where it is used as the OBO assertion). EasyAuth tokens live ~1h;
+ * once expired the backend's OBO exchange fails with AADSTS500133. This refreshes
+ * the App Service token store (`/.auth/refresh`, using the offline_access refresh
+ * token) and re-reads `/.auth/me`, transparently — no logout/login required.
+ *
+ * Refreshes only when the token is missing or within `skewMs` of expiry, so it is
+ * cheap to call before every request.
+ */
+let _refreshInFlight: Promise<void> | null = null;
+const _REAUTH_GUARD_KEY = 'macae_last_reauth';
+
+export async function ensureFreshToken(skewMs: number = 5 * 60 * 1000): Promise<void> {
+  const info = getUserInfoGlobal();
+  const expMs = info?.expires_on ? Date.parse(info.expires_on) : 0;
+  const needsRefresh = !info?.access_token || !expMs || expMs - Date.now() < skewMs;
+  if (!needsRefresh) return;
+
+  // Collapse concurrent refreshes (e.g. parallel requests) into one.
+  if (!_refreshInFlight) {
+    _refreshInFlight = (async () => {
+      try {
+        await fetch('/.auth/refresh', { credentials: 'include' });
+        const fresh = await getUserInfo();
+        if (fresh?.access_token) {
+          setUserInfoGlobal(fresh);
+        }
+      } catch (e) {
+        console.warn('[auth] /.auth/refresh failed', e);
+      } finally {
+        _refreshInFlight = null;
+      }
+    })();
+  }
+  await _refreshInFlight;
+
+  // App Service does not always issue/store a refresh token for custom-resource
+  // scopes, so `/.auth/refresh` can return 403 and the token stays stale → the
+  // backend OBO exchange then fails with AADSTS500133. When the token is still
+  // (about to be) expired after the refresh attempt, fall back to a silent
+  // re-auth: with an active AAD session this is seamless (no password prompt).
+  const after = getUserInfoGlobal();
+  const afterExpMs = after?.expires_on ? Date.parse(after.expires_on) : 0;
+  const stillStale =
+    !after?.access_token || !afterExpMs || afterExpMs - Date.now() < 60 * 1000;
+  if (stillStale) {
+    reauthSilently();
+  }
+}
+
+/**
+ * Silently re-authenticate against EasyAuth, preserving the current location.
+ * Used only when the token is effectively expired and `/.auth/refresh` could not
+ * renew it. Guarded so it cannot loop (at most once per 2 min).
+ */
+function reauthSilently(): void {
+  try {
+    const now = Date.now();
+    const last = Number(sessionStorage.getItem(_REAUTH_GUARD_KEY) || 0);
+    if (now - last < 2 * 60 * 1000) return; // avoid redirect loops
+    sessionStorage.setItem(_REAUTH_GUARD_KEY, String(now));
+    const here =
+      window.location.pathname + window.location.search + window.location.hash;
+    window.location.assign(
+      `/.auth/login/aad?post_login_redirect_uri=${encodeURIComponent(here)}`
+    );
+  } catch (e) {
+    console.warn('[auth] silent re-auth redirect failed', e);
+  }
+}
+
 export function getApiUrl() {
   if (!API_URL) {
     // Check if window.appConfig exists

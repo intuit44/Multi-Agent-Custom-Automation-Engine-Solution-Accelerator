@@ -1,4 +1,4 @@
-import { headerBuilder, getApiUrl } from './config';
+import { headerBuilder, getApiUrl, ensureFreshToken } from './config';
 
 // Helper function to build URL with query parameters
 const buildUrl = (url: string, params?: Record<string, any>): string => {
@@ -17,16 +17,12 @@ const buildUrl = (url: string, params?: Record<string, any>): string => {
 
 // Fetch with Authentication Headers
 const fetchWithAuth = async (url: string, method: string = "GET", body: BodyInit | null = null) => {
-    const token = localStorage.getItem('token'); // Get the token from localStorage
-    const authHeaders = headerBuilder(); // Get authentication headers
+    await ensureFreshToken(); // Refresh EasyAuth token if near expiry (OBO assertion freshness)
+    const authHeaders = headerBuilder(); // Get authentication headers (Authorization from fresh token)
 
     const headers: Record<string, string> = {
         ...authHeaders, // Include auth headers from headerBuilder
     };
-
-    if (token) {
-        headers['Authorization'] = `Bearer ${token}`; // Add the token to the Authorization header
-    }
 
     // If body is FormData, do not set Content-Type header
     if (body && body instanceof FormData) {
@@ -108,16 +104,13 @@ export const apiClient = {
      * Does NOT parse JSON; caller reads response.body as a ReadableStream.
      */
     stream: async (url: string, body?: any): Promise<Response> => {
+        await ensureFreshToken(); // Refresh EasyAuth token if near expiry (OBO assertion freshness)
         const apiUrl = getApiUrl();
         const authHeaders = headerBuilder();
         const headers: Record<string, string> = {
             ...authHeaders,
             'Content-Type': 'application/json',
         };
-        const token = localStorage.getItem('token');
-        if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-        }
         const response = await fetch(`${apiUrl}${url}`, {
             method: 'POST',
             headers,
