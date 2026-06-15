@@ -55,6 +55,10 @@ class MCPEnabledBase:
         self.client: Optional[AgentsClient] = None
         self.project_endpoint = project_endpoint
         self.creds = None
+        # True only when self.creds is a per-user (OBO/passthrough) credential this
+        # agent created and must close. The process-scoped Managed Identity
+        # credential is borrowed (owned by config) and must NOT be closed here.
+        self._owns_creds = False
         self.memory_store: Optional[DatabaseBase] = memory_store
         self.agent_name: str | None = agent_name
         self.agent_description: str | None = agent_description
@@ -74,12 +78,24 @@ class MCPEnabledBase:
         # (e.g. agent365/WorkIQ). With ENABLE_OBO this is a real
         # OnBehalfOfCredential; otherwise it forwards the EasyAuth token verbatim.
         # Falls back to Managed Identity in local/dev (no user token present).
-        if self.user_access_token:
+        if self.user_access_token and config.APP_ENV != "dev":
+            # Per-user credential: this agent owns it and closes it on close().
             self.creds = config.build_user_credential(self.user_access_token)
+            self._owns_creds = True
+            if self._stack:
+                await self._stack.enter_async_context(self.creds)
         else:
-            self.creds = config.get_azure_credential_async(config.AZURE_CLIENT_ID)
-        if self._stack:
-            await self._stack.enter_async_context(self.creds)
+            # In local dev the device-code/EasyAuth user token is NOT audienced for
+            # the Foundry data plane (https://ai.azure.com), so forwarding it verbatim
+            # is rejected ("audience is incorrect"). Use the shared az/Managed Identity
+            # credential for the data plane — it mints a correctly-audienced token. The
+            # raw user token is still forwarded to MCP in _prepare_mcp_tool (unaffected).
+            # Borrow the process-scoped Managed Identity credential. It is NOT
+            # entered into this agent's stack and is NOT closed by close(), so
+            # closing/rebuilding this agent can never tear down the transport that
+            # other in-flight tasks (e.g. a background orchestration run) share.
+            self.creds = config.get_shared_async_credential()
+            self._owns_creds = False
         # Create AgentsClient
         if self.project_endpoint is None:
             raise ValueError("project_endpoint cannot be None")
@@ -151,8 +167,11 @@ class MCPEnabledBase:
                         exc,
                     )
 
-            # 4. Close credential token cache
-            if self.creds and hasattr(self.creds, "close"):
+            # 4. Close credential token cache — ONLY if this agent owns it.
+            # The shared process-scoped Managed Identity credential is borrowed
+            # and closed once at app shutdown (config.aclose_shared_resources);
+            # closing it here would break other agents/tasks still using it.
+            if self._owns_creds and self.creds and hasattr(self.creds, "close"):
                 try:
                     await self.creds.close()
                 except Exception as exc:
@@ -175,6 +194,7 @@ class MCPEnabledBase:
             self._agent = None
             self.client = None
             self.creds = None
+            self._owns_creds = False
 
     # Context manager
     async def __aenter__(self) -> "MCPEnabledBase":

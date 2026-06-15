@@ -35,6 +35,15 @@ async def lifespan(app: FastAPI):
         await agent_registry.cleanup_all_agents()
         logger.info("✅ Agent cleanup completed successfully")
 
+        # Close process-scoped shared async resources (Managed Identity credential
+        # and AIProjectClient). These are borrowed by agents but owned by the
+        # process, so they are closed exactly once here — never on agent close().
+        try:
+            await config.aclose_shared_resources()
+            logger.info("✅ Shared async resources closed")
+        except Exception as cfg_e:
+            logger.warning(f"Shared resource cleanup warning (non-fatal): {cfg_e}")
+
         # Clean up global MCP resource service if it exists
         try:
             from v4.common.services.mcp_resource_service import _mcp_resource_service

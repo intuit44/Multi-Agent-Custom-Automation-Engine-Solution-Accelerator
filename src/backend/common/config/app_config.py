@@ -77,9 +77,7 @@ class AppConfig:
         self.ENABLE_OBO = self._get_bool("ENABLE_OBO")
         self.OBO_CLIENT_ID = self._get_optional("OBO_CLIENT_ID")
         self.OBO_CLIENT_SECRET = self._get_optional("OBO_CLIENT_SECRET")
-        self.OBO_TENANT_ID = (
-            self._get_optional("OBO_TENANT_ID") or self.AZURE_TENANT_ID
-        )
+        self.OBO_TENANT_ID = self._get_optional("OBO_TENANT_ID") or self.AZURE_TENANT_ID
         self.OBO_CLIENT_CERTIFICATE_PATH = self._get_optional(
             "OBO_CLIENT_CERTIFICATE_PATH"
         )
@@ -176,6 +174,12 @@ class AppConfig:
         self._cosmos_client = None
         self._cosmos_database = None
         self._ai_project_client = None
+        # Process-scoped async Managed Identity credential. Shared (borrowed) by
+        # agents that don't carry a user token. It is owned by the process and
+        # closed once at app shutdown (see aclose_shared_resources) — NEVER by an
+        # individual agent's close(), so reusing/closing an agent can't tear down
+        # the transport another in-flight task is still using.
+        self._ai_async_credential = None
 
         self._agents = {}
 
@@ -224,6 +228,40 @@ class AppConfig:
         if self._azure_credentials is None:
             self._azure_credentials = self.get_azure_credential(self.AZURE_CLIENT_ID)
         return self._azure_credentials
+
+    def get_shared_async_credential(self):
+        """Return the process-scoped async Managed Identity credential.
+
+        This single instance is reused (borrowed) by every agent that does not
+        carry an end-user token. It is created lazily and closed exactly once at
+        application shutdown via ``aclose_shared_resources`` — agents must NOT
+        enter it into their own AsyncExitStack nor call ``close`` on it, otherwise
+        closing/reusing one agent would tear down the aiohttp transport that other
+        in-flight tasks (e.g. a background orchestration run) still depend on.
+        """
+        if self._ai_async_credential is None:
+            self._ai_async_credential = self.get_azure_credential_async(
+                self.AZURE_CLIENT_ID
+            )
+        return self._ai_async_credential
+
+    async def aclose_shared_resources(self) -> None:
+        """Close process-scoped async resources. Call once at app shutdown."""
+        client = self._ai_project_client
+        if client is not None and hasattr(client, "close"):
+            try:
+                await client.close()
+            except Exception as exc:  # pragma: no cover - best-effort shutdown
+                logging.warning("Error closing shared AIProjectClient: %s", exc)
+        self._ai_project_client = None
+
+        cred = self._ai_async_credential
+        if cred is not None and hasattr(cred, "close"):
+            try:
+                await cred.close()
+            except Exception as exc:  # pragma: no cover - best-effort shutdown
+                logging.warning("Error closing shared async credential: %s", exc)
+        self._ai_async_credential = None
 
     async def get_access_token(self) -> str:
         """Get Azure access token for API calls."""
@@ -402,7 +440,7 @@ class AppConfig:
             return self._ai_project_client
 
         try:
-            credential = self.get_azure_credential_async(self.AZURE_CLIENT_ID)
+            credential = self.get_shared_async_credential()
             if credential is None:
                 raise RuntimeError(
                     "Unable to acquire Azure credentials; ensure Managed Identity is configured"

@@ -93,10 +93,13 @@ export async function getUserInfo(): Promise<UserInfo> {
 let _refreshInFlight: Promise<void> | null = null;
 const _REAUTH_GUARD_KEY = 'macae_last_reauth';
 
-export async function ensureFreshToken(skewMs: number = 5 * 60 * 1000): Promise<void> {
+export async function ensureFreshToken(
+  skewMs: number = 5 * 60 * 1000
+): Promise<void> {
   const info = getUserInfoGlobal();
   const expMs = info?.expires_on ? Date.parse(info.expires_on) : 0;
-  const needsRefresh = !info?.access_token || !expMs || expMs - Date.now() < skewMs;
+  const needsRefresh =
+    !info?.access_token || !expMs || expMs - Date.now() < skewMs;
   if (!needsRefresh) return;
 
   // Collapse concurrent refreshes (e.g. parallel requests) into one.
@@ -138,6 +141,14 @@ export async function ensureFreshToken(skewMs: number = 5 * 60 * 1000): Promise<
  */
 function reauthSilently(): void {
   try {
+    // EasyAuth's /.auth/login/aad only exists when the app is served behind Azure
+    // App Service / Container Apps. On localhost it 404s, so the hard redirect
+    // bounces the SPA through the catch-all route to "/", producing a full-page
+    // reload (the "flicker"). Never hard-redirect to EasyAuth in local dev.
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]') {
+      return;
+    }
     const now = Date.now();
     const last = Number(sessionStorage.getItem(_REAUTH_GUARD_KEY) || 0);
     if (now - last < 2 * 60 * 1000) return; // avoid redirect loops

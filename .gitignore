@@ -466,3 +466,11 @@ data/sample_code/
 *.local*.bicepparam
 *.local*.parameters.json
 .blackboxcli/
+
+# MACAE local runtime artifacts / logs (not covered by *.log above)
+.inspector.*
+__azurite_db_*
+azure_env_variables.txt
+azure_ml_report.txt
+ml_workspace_config.json
+blackbox_mcp_settings.json

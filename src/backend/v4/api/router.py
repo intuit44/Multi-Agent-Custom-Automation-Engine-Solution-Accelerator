@@ -42,6 +42,14 @@ from common.utils.utils_af import (
 )
 from v4.common.services.plan_service import PlanService
 from v4.common.services.team_service import TeamService
+from v4.common.tool_errors import (
+    ToolError,
+    ToolErrorCategory,
+    classify_tool_error,
+    emit_tool_error,
+    run_with_backoff,
+    user_message_for,
+)
 from v4.config.settings import (
     connection_config,
     orchestration_config,
@@ -454,10 +462,17 @@ async def process_request(
     try:
 
         async def run_orchestration_task():
-            await OrchestrationManager().run_orchestration(
-                user_id, input_task.session_id, input_task
-            )
+            try:
+                await OrchestrationManager().run_orchestration(
+                    user_id, input_task.session_id, input_task
+                )
+            finally:
+                orchestration_config.clear_run_active(input_task.session_id)
 
+        # Mark the session's run in flight BEFORE returning, so a near-immediate
+        # resume_plan from PlanPage (orphan recovery on a freshly-created plan)
+        # is skipped instead of starting a duplicate orchestration.
+        orchestration_config.mark_run_active(input_task.session_id)
         background_tasks.add_task(run_orchestration_task)
 
         return {
@@ -512,8 +527,8 @@ async def _get_previous_intent(
 
 @app_v4.post("/chat/upload-file")
 async def chat_upload_file(
+    request: Request,
     file: UploadFile = File(...),
-    request: Request = None,  # type: ignore
 ):
     """
     Upload a file to Azure AI Foundry for use with code_interpreter.
@@ -1005,7 +1020,6 @@ def _build_direct_chat_prompt(message: str, team: Any, selected_agent: Any) -> s
         f"Selected responding agent for this turn: {selected_name}\n"
         f"{_team_agent_context(team)}\n\n"
         "Instructions:\n"
-        "- Use the routing context as authoritative platform metadata.\n"
         "- If the user asks which agent is responding, answer with the selected "
         "responding agent name above.\n"
         "- Do not say you lack access to the current agent/team when the routing "
@@ -1823,17 +1837,46 @@ async def chat_message_stream(
                     # usage, hosted_file, etc. — skip silently
 
         except Exception as e:
-            logger.warning("FoundryAgent streaming failed (%s), using fallback", e)
+            tool_err = classify_tool_error(e)
+            emit_tool_error("chat_message_stream", tool_err)
+            logger.error(
+                "FoundryAgent streaming failed - Category: %s, Status: %s, AADSTS: %s",
+                tool_err.category.value,
+                tool_err.status_code,
+                tool_err.aadsts,
+                exc_info=True,
+            )
             if not full_text:
-                full_text = _mcp_fallback(chat_request.message)
-                yield _sse_event({"type": "token", "content": full_text})
+                # No tokens sent yet → act on the classified category, driven by the
+                # real error: consent → trigger OAuth flow; permission → escalate;
+                # otherwise stream the real reason.
+                if tool_err.category == ToolErrorCategory.AUTH_CONSENT:
+                    yield _sse_event(
+                        {
+                            "type": "oauth_consent_request",
+                            "message": user_message_for(tool_err),
+                            "aadsts": tool_err.aadsts,
+                        }
+                    )
+                elif tool_err.category == ToolErrorCategory.PERMISSION:
+                    yield _sse_event(
+                        {
+                            "type": "permission_required",
+                            "message": user_message_for(tool_err),
+                            "suggested_action": _suggest_action_for_error(tool_err),
+                        }
+                    )
+                else:
+                    yield _sse_event(
+                        {"type": "token", "content": user_message_for(tool_err)}
+                    )
             else:
-                # Partial text was already sent — notify frontend of the interruption
-                # so the user sees an error instead of silent truncation.
+                # Partial text already sent — emit the full structured error payload
+                # so the frontend can reason about category/consent/retryable.
                 yield _sse_event(
                     {
+                        **_build_error_response(tool_err, chat_request.message),
                         "type": "error",
-                        "message": "Stream interrupted unexpectedly. Please try again.",
                     }
                 )
         finally:
@@ -1984,18 +2027,6 @@ async def _get_mcp_query_response(
 
         from v4.magentic_agents.proxy_agent import ProxyAgent as _ProxyAgent
 
-        workflow, direct_agents, _direct_team = await _create_direct_response_workflow(
-            user_id=user_id,
-            tenant_id=tenant_id,
-            user_access_token=user_access_token,
-        )
-        for _agent in direct_agents:
-            if isinstance(_agent, _ProxyAgent):
-                _agent.session_id = session_id
-
-        active_agents: set[str] = set()
-        agent_buffers: dict[str, str] = {}
-        final_output = ""
         direct_prompt = (
             "DIRECT CHAT REQUEST\n"
             "Answer the user without creating or exposing an application Plan. "
@@ -2004,63 +2035,154 @@ async def _get_mcp_query_response(
             f"USER MESSAGE:\n{message}"
         )
 
-        try:
-            async for event in workflow.run(direct_prompt, stream=True):
-                event_type = (
-                    event.type if hasattr(event, "type") else type(event).__name__
-                )
-                if event_type == "group_chat":
-                    if isinstance(event.data, GroupChatRequestSentEvent):
-                        active_agents.add(event.data.participant_name)
-                    elif isinstance(event.data, GroupChatResponseReceivedEvent):
-                        active_agents.discard(event.data.participant_name)
-                    continue
-                if event_type != "output":
-                    continue
+        async def _attempt() -> str:
+            """One full direct-response attempt with fresh agents.
 
-                executor_id = getattr(event, "executor_id", None)
-                output_data = event.data
-                if isinstance(output_data, AgentResponseUpdate) and executor_id:
-                    if executor_id not in active_agents:
+            Re-run by ``run_with_backoff`` on transient/connectivity/expired-token
+            errors; non-retryable errors (consent, permission) propagate straight
+            out so the caller surfaces the right message instead of retrying.
+            """
+            (
+                workflow,
+                direct_agents,
+                _direct_team,
+            ) = await _create_direct_response_workflow(
+                user_id=user_id,
+                tenant_id=tenant_id,
+                user_access_token=user_access_token,
+            )
+            for _agent in direct_agents:
+                if isinstance(_agent, _ProxyAgent):
+                    _agent.session_id = session_id
+
+            active_agents: set[str] = set()
+            agent_buffers: dict[str, str] = {}
+            final_output = ""
+            try:
+                async for event in workflow.run(direct_prompt, stream=True):
+                    event_type = (
+                        event.type if hasattr(event, "type") else type(event).__name__
+                    )
+                    if event_type == "group_chat":
+                        if isinstance(event.data, GroupChatRequestSentEvent):
+                            active_agents.add(event.data.participant_name)
+                        elif isinstance(event.data, GroupChatResponseReceivedEvent):
+                            active_agents.discard(event.data.participant_name)
                         continue
-                    token = output_data.text or ""
-                    if token:
-                        agent_buffers[executor_id] = (
-                            agent_buffers.get(executor_id, "") + token
-                        )
-                elif isinstance(output_data, Message):
-                    final_output = output_data.text or ""
-                elif isinstance(output_data, list):
-                    texts = []
-                    for item in output_data:
-                        if isinstance(item, Message) and item.text:
-                            texts.append(item.text)
-                        elif not isinstance(item, Message):
-                            texts.append(str(item))
-                    final_output = "\n".join(texts)
-                elif hasattr(output_data, "text"):
-                    final_output = output_data.text or ""
-                elif output_data:
-                    final_output = str(output_data)
-        finally:
-            await _close_direct_response_agents(direct_agents)
+                    if event_type != "output":
+                        continue
 
-        if final_output:
-            return final_output
-        if agent_buffers:
-            return "\n\n".join(text for text in agent_buffers.values() if text.strip())
-        return _mcp_fallback(message)
+                    executor_id = getattr(event, "executor_id", None)
+                    output_data = event.data
+                    if isinstance(output_data, AgentResponseUpdate) and executor_id:
+                        if executor_id not in active_agents:
+                            continue
+                        token = output_data.text or ""
+                        if token:
+                            agent_buffers[executor_id] = (
+                                agent_buffers.get(executor_id, "") + token
+                            )
+                    elif isinstance(output_data, Message):
+                        final_output = output_data.text or ""
+                    elif isinstance(output_data, list):
+                        texts = []
+                        for item in output_data:
+                            if isinstance(item, Message) and item.text:
+                                texts.append(item.text)
+                            elif not isinstance(item, Message):
+                                texts.append(str(item))
+                        final_output = "\n".join(texts)
+                    elif hasattr(output_data, "text"):
+                        final_output = output_data.text or ""
+                    elif output_data:
+                        final_output = str(output_data)
+            finally:
+                await _close_direct_response_agents(direct_agents)
+
+            if final_output:
+                return final_output
+            if agent_buffers:
+                return "\n\n".join(t for t in agent_buffers.values() if t.strip())
+            return ""
+
+        try:
+            result = await run_with_backoff(_attempt, op="direct_response_chat")
+            return result if result else "No response generated."
+        except Exception as e:
+            return _classified_error_text(e, op="direct_response_chat")
 
     except Exception as e:
-        logger.warning("MCP agent query failed (%s), using fallback", e)
-        return _mcp_fallback(message)
+        return _classified_error_text(e, op="direct_response_chat")
 
 
-def _mcp_fallback(message: str) -> str:
-    """Fallback response if MCP agent fails."""
+def _suggest_action_for_error(error: ToolError) -> str:
+    """Suggest the next action based on the classified error category."""
+    if error.category == ToolErrorCategory.AUTH_CONSENT:
+        return "Request user consent via OAuth flow"
+    if error.category == ToolErrorCategory.PERMISSION:
+        return "Escalate to administrator for permission approval"
+    if error.category == ToolErrorCategory.TRANSIENT:
+        return "Retry with backoff (already attempted)"
+    if error.category == ToolErrorCategory.CONNECTIVITY:
+        return "Check network connectivity and firewall rules"
+    return "Contact support with error details"
+
+
+def _build_error_response(error: ToolError, original_message: str) -> dict:
+    """Structured, classified error payload the agent/frontend can reason about."""
+    return {
+        "type": "tool_error",
+        "category": error.category.value,
+        "status_code": error.status_code,
+        "message": user_message_for(error),
+        "consent_required": error.consent_required,
+        "aadsts": error.aadsts,
+        "retryable": error.retryable,
+        "original_message": original_message,
+        "suggested_action": _suggest_action_for_error(error),
+    }
+
+
+def _classified_error_text(exc: BaseException, op: str) -> str:
+    """Classify a tool/agent failure and return an actionable, category-specific
+    message driven by the real error — never a single hardcoded fallback string."""
+    error = classify_tool_error(exc)
+    emit_tool_error(op, error, attempt=1)
+    logger.error(
+        "%s failed - Category: %s, Status: %s, AADSTS: %s, Detail: %s",
+        op,
+        error.category.value,
+        error.status_code,
+        error.aadsts,
+        (error.detail[:200] if error.detail else "none"),
+    )
+    body = user_message_for(error)
+    if error.category == ToolErrorCategory.AUTH_CONSENT:
+        return (
+            f"🔐 **Authorization Required**\n\n{body}\n\n"
+            "Please complete the authentication flow to continue."
+        )
+    if error.category == ToolErrorCategory.PERMISSION:
+        return (
+            f"⚠️ **Permission Required**\n\n{body}\n\n"
+            "An administrator needs to approve access for this operation."
+        )
+    if error.category == ToolErrorCategory.CONNECTIVITY:
+        return (
+            f"🌐 **Connectivity Issue**\n\n{body}\n\n"
+            "Check that the service is reachable and firewall rules allow the connection."
+        )
+    if error.category == ToolErrorCategory.TRANSIENT:
+        return (
+            f"🔄 **Service Temporarily Unavailable**\n\n{body}\n\n"
+            "The system automatically retried but the issue persists. "
+            "Please try again in a few moments."
+        )
     return (
-        "Sorry, I'm having trouble connecting to my tools right now. "
-        "Please try again later."
+        f"❌ **Unexpected Error**\n\n{body}\n\n"
+        f"Error reference: {error.status_code or 'unknown'}\n"
+        f"Request ID: {getattr(exc, 'request_id', 'not available')}\n\n"
+        "Please contact support with this information."
     )
 
 
@@ -2127,6 +2249,11 @@ async def resume_plan(
     """
     Resume orchestration for an existing in_progress plan whose m_plan is null.
     Used by the frontend when it detects an orphaned plan on page load.
+
+    Idempotent: if an orchestration run is already in flight for this session
+    (e.g. the plan was just created by process_request and PlanPage's orphan
+    recovery fires immediately), this is a no-op — it does NOT start a second
+    run, which would create a duplicate plan.
     """
     user_id, tenant_id = _extract_auth(request)
     plan_id = payload.get("plan_id", "")
@@ -2144,6 +2271,14 @@ async def resume_plan(
         return {
             "status": "skipped",
             "reason": f"Plan status is '{plan.overall_status}', not in_progress",
+        }
+
+    # Idempotency guard: a run is already in flight for this session → don't
+    # start another (that is the duplicate-plan bug).
+    if orchestration_config.is_run_active(plan.session_id):
+        return {
+            "status": "skipped",
+            "reason": "orchestration already in progress for this session",
         }
 
     if not plan.team_id:
@@ -2165,10 +2300,14 @@ async def resume_plan(
     input_task = InputTask(description=plan.initial_goal, session_id=plan.session_id)
 
     async def run_orchestration_task():
-        await OrchestrationManager().run_orchestration(
-            user_id, plan.session_id, input_task
-        )
+        try:
+            await OrchestrationManager().run_orchestration(
+                user_id, plan.session_id, input_task
+            )
+        finally:
+            orchestration_config.clear_run_active(plan.session_id)
 
+    orchestration_config.mark_run_active(plan.session_id)
     background_tasks.add_task(run_orchestration_task)
 
     return {"status": "resumed", "plan_id": plan_id, "session_id": plan.session_id}

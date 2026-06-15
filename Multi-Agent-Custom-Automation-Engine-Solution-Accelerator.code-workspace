@@ -44,7 +44,7 @@
     },
     "workbench.editor.enablePreview": false,
     "github.copilot.chat.virtualTools.threshold": 0,
-    "accessibility.voice.keywordActivation": "chatInView",
+    "accessibility.voice.keywordActivation": "chatInContext",
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true,
     "[typescriptreact]": {
@@ -56,5 +56,6 @@
     "[dockerfile]": {
       "editor.defaultFormatter": "ms-azuretools.vscode-containers",
     },
+    "chatgpt.runCodexInWindowsSubsystemForLinux": true,
   },
 }

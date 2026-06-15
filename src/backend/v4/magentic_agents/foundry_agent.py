@@ -412,7 +412,7 @@ class FoundryAgentTemplate(AzureAgentBase):
                         default_options=cast(
                             Any,
                             AzureAIProjectAgentOptions(
-                                store=False,
+                                store=True,
                                 tool_choice="auto",
                                 temperature=temp,
                             ),
@@ -436,7 +436,7 @@ class FoundryAgentTemplate(AzureAgentBase):
                         default_options=cast(
                             Any,
                             ChatOptions(
-                                store=False,
+                                store=True,
                                 tool_choice="auto",
                                 temperature=temp,
                             ),
@@ -459,7 +459,7 @@ class FoundryAgentTemplate(AzureAgentBase):
                         default_options=cast(
                             Any,
                             AzureAIProjectAgentOptions(
-                                store=False,
+                                store=True,
                                 tool_choice="auto",
                                 temperature=temp,
                             ),

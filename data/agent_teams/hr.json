@@ -32,13 +32,13 @@
       "icon": "",
       "system_message": "You have access to a number of technical support MCP tools for tasks such as provisioning laptops (configure_laptop), setting up email accounts and Office 365 (set_up_office_365_account, send_welcome_email), creating system accounts (create_system_accounts), and setting up VPN access (setup_vpn_access). Use these tools to assist employees with their IT needs efficiently and accurately. Only call tools that exist. If you need more information to accurately call these tools, do not make up answers, call the ProxyAgent for clarification.",
       "description": "An agent that has access to various technical support MCP tools to assist employees with IT needs like laptop provisioning, email setup, VPN, and system account creation.",
-      "use_rag": true,
-      "use_mcp": false,
+      "use_rag": false,
+      "use_mcp": true,
       "use_bing": false,
       "use_reasoning": false,
       "index_name": "chat-history-index",
       "index_foundry_name": "",
-      "coding_tools": true
+      "coding_tools": false
     },
     {
       "input_key": "",
@@ -48,13 +48,13 @@
       "icon": "",
       "system_message": "",
       "description": "",
-      "use_rag": true,
-      "use_mcp": false,
+      "use_rag": false,
+      "use_mcp": true,
       "use_bing": false,
       "use_reasoning": false,
       "index_name": "",
       "index_foundry_name": "",
-      "coding_tools": true
+      "coding_tools": false
     }
   ],
   "protected": false,

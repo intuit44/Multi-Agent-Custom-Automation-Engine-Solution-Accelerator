@@ -103,7 +103,7 @@ class OrchestrationConfig:
         self.clarification_contexts: Dict[
             str, Dict[str, str]
         ] = {}  # request_id -> session/user context for routing answers
-        self.max_rounds: int = 2  # Maximum replanning rounds
+        self.max_rounds: int = 6  # Maximum replanning rounds
 
         # Event-driven notification system for approvals and clarifications
         self._approval_events: Dict[str, asyncio.Event] = {}
@@ -111,6 +111,24 @@ class OrchestrationConfig:
 
         # Default timeout (seconds) for waiting operations
         self.default_timeout: float = 100.0
+
+        # Sessions with an orchestration run currently in flight (created /
+        # awaiting approval / executing). Makes resume_plan idempotent: a plan
+        # just created by process_request is not re-triggered into a duplicate run.
+        self.active_runs: set[str] = set()
+
+    def mark_run_active(self, session_id: str) -> None:
+        """Mark a session as having an orchestration run in flight."""
+        if session_id:
+            self.active_runs.add(session_id)
+
+    def clear_run_active(self, session_id: str) -> None:
+        """Clear the in-flight flag when a run finishes or fails."""
+        self.active_runs.discard(session_id)
+
+    def is_run_active(self, session_id: str) -> bool:
+        """True if an orchestration run is already in flight for this session."""
+        return bool(session_id) and session_id in self.active_runs
 
     def get_current_orchestration(self, user_id: str) -> Any:
         """Get existing orchestration workflow instance for user_id."""

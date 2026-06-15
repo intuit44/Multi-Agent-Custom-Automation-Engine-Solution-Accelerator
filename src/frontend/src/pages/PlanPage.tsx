@@ -778,7 +778,10 @@ const PlanPage: React.FC = () => {
                         onGeneratedFile: (f) => { collectedFiles.push(f); },
                         fileIds,
                         onOAuthConsentRequest: (consentLink) => {
-                            const popup = window.open(consentLink, 'oauth_consent', 'width=620,height=720,noopener');
+                            // NOTE: no 'noopener' — with it window.open() returns null (per
+                            // spec), so popup.closed polling never runs and the auto-retry
+                            // after consent approval is silently skipped (user had to re-send).
+                            const popup = window.open(consentLink, 'oauth_consent', 'width=620,height=720');
                             if (popup) {
                                 const timer = setInterval(() => {
                                     if (popup.closed) {

@@ -406,10 +406,10 @@ module userAssignedIdentity 'br/public:avm/res/managed-identity/user-assigned-id
 // WAF best practices for virtual networks: https://learn.microsoft.com/en-us/azure/well-architected/service-guides/virtual-network
 // WAF recommendations for networking and connectivity: https://learn.microsoft.com/en-us/azure/well-architected/security/networking
 var virtualNetworkResourceName = 'vnet-${solutionSuffix}'
-module virtualNetwork 'modules/virtualNetwork.bicep' = if (enablePrivateNetworking) {
+module virtualNetwork 'modules/virtualnetwork.bicep' = if (enablePrivateNetworking) {
   name: take('module.virtualNetwork.${solutionSuffix}', 64)
   params: {
-    name: 'vnet-${solutionSuffix}'
+    name: virtualNetworkResourceName
     location: location
     tags: tags
     enableTelemetry: enableTelemetry

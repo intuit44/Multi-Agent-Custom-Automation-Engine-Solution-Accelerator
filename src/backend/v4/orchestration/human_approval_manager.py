@@ -75,7 +75,7 @@ Only re-call an agent if their previous response was explicitly an error or fail
 """
 
         final_append = """
-DO NOT EVER OFFER TO HELP FURTHER IN THE FINAL ANSWER! Just provide the final answer and end with a polite closing.
+You must ALWAYS offer additional help at the end of your response. Never end the conversation without asking whether the user wants to go deeper, continue, or receive further assistance..
 """
 
         kwargs["task_ledger_plan_prompt"] = (
