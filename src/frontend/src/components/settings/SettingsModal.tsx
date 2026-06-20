@@ -26,9 +26,10 @@ import {
   Link24Regular,
   Delete24Regular,
   Add24Regular,
+  Edit24Regular,
 } from '@fluentui/react-icons';
 import { apiService } from '../../api/apiService';
-import { AddMcpServerForm } from './AddMcpServerForm';
+import { AddMcpServerForm, EditableMcpServer } from './AddMcpServerForm';
 import './SettingsModal.css';
 
 interface SettingsModalProps {
@@ -47,9 +48,15 @@ interface MCPConnection {
     endpoint: string;
     transport: string;
     auth_type: string;
+    auth_fields?: string[];
+    oauth_scopes?: string[];
+    oauth_authorize_url?: string | null;
+    oauth_token_url?: string | null;
+    oauth_client_id_env?: string | null;
     capabilities?: string[];
     tool_count?: number;
     icon_url?: string;
+    allowed_agents?: string[];
   };
   connection: {
     status: string;
@@ -66,6 +73,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) =
   const [loading, setLoading] = useState(false);
   const [connectingServer, setConnectingServer] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingServer, setEditingServer] = useState<EditableMcpServer | null>(null);
 
   useEffect(() => {
     if (open && activeTab === 'applications') {
@@ -160,6 +168,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) =
     }
   };
 
+  const handleEditServer = (server: MCPConnection['server']) => {
+    setEditingServer({
+      id: server.id,
+      server_name: server.server_name,
+      display_name: server.display_name,
+      endpoint: server.endpoint,
+      transport: server.transport,
+      auth_type: server.auth_type,
+      description: server.description,
+      icon_url: server.icon_url,
+      auth_fields: server.auth_fields,
+      oauth_scopes: server.oauth_scopes,
+      oauth_authorize_url: server.oauth_authorize_url,
+      oauth_token_url: server.oauth_token_url,
+      oauth_client_id_env: server.oauth_client_id_env,
+      capabilities: server.capabilities,
+      allowed_agents: server.allowed_agents,
+    });
+    setShowAddForm(true);
+  };
+
+  const handleDeleteServer = async (server: MCPConnection['server']) => {
+    if (
+      !window.confirm(
+        `¿Eliminar el servidor "${server.display_name}"? Esta acción no se puede deshacer.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await apiService.deleteMcpServer(server.id);
+      await loadConnections();
+    } catch (e) {
+      console.error('Error deleting MCP server:', e);
+      alert(`Error al eliminar: ${e instanceof Error ? e.message : 'Error desconocido'}`);
+    }
+  };
+
   const connectedCount = connections.filter(c => c.is_connected).length;
 
   return (
@@ -215,11 +261,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) =
               {activeTab === 'applications' && (
                 showAddForm ? (
                   <AddMcpServerForm
+                    editingServer={editingServer}
                     onSuccess={() => {
                       setShowAddForm(false);
+                      setEditingServer(null);
                       loadConnections();
                     }}
-                    onCancel={() => setShowAddForm(false)}
+                    onCancel={() => {
+                      setShowAddForm(false);
+                      setEditingServer(null);
+                    }}
                   />
                 ) : (
                   <ApplicationsTab
@@ -228,7 +279,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) =
                     connectingServer={connectingServer}
                     onConnect={handleConnect}
                     onDisconnect={handleDisconnect}
-                    onAddServer={() => setShowAddForm(true)}
+                    onAddServer={() => {
+                      setEditingServer(null);
+                      setShowAddForm(true);
+                    }}
+                    onEditServer={handleEditServer}
+                    onDeleteServer={handleDeleteServer}
                   />
                 )
               )}
@@ -261,6 +317,8 @@ interface ApplicationsTabProps {
   onConnect: (name: string, needsAuth: boolean, authType?: string) => void;
   onDisconnect: (name: string) => void;
   onAddServer: () => void;
+  onEditServer: (server: MCPConnection['server']) => void;
+  onDeleteServer: (server: MCPConnection['server']) => void;
 }
 
 const ApplicationsTab: React.FC<ApplicationsTabProps> = ({
@@ -270,6 +328,8 @@ const ApplicationsTab: React.FC<ApplicationsTabProps> = ({
   onConnect,
   onDisconnect,
   onAddServer,
+  onEditServer,
+  onDeleteServer,
 }) => {
   if (loading) {
     return (
@@ -439,6 +499,32 @@ const ApplicationsTab: React.FC<ApplicationsTabProps> = ({
                   </Tooltip>
                 </>
               )}
+
+              {/* Editar / Eliminar — gestión del catálogo */}
+              <div style={{ display: 'flex', gap: 4 }}>
+                <Tooltip content="Editar este servidor" relationship="label">
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    icon={<Edit24Regular />}
+                    aria-label="Editar"
+                    onClick={() => onEditServer(server)}
+                  >
+                    Editar
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Eliminar este servidor del catálogo" relationship="label">
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    icon={<Delete24Regular />}
+                    aria-label="Eliminar"
+                    onClick={() => onDeleteServer(server)}
+                  >
+                    Eliminar
+                  </Button>
+                </Tooltip>
+              </div>
             </div>
           </div>
         ))}

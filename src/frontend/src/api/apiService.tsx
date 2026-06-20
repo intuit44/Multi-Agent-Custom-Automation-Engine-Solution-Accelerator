@@ -571,6 +571,45 @@ export class APIService {
     }> {
         return apiClient.post('/v4/mcp/connections/servers', entry);
     }
+
+    /**
+     * Update an existing MCP server in the catalog (admin operation).
+     */
+    async updateMcpServer(
+        serverId: string,
+        payload: {
+            server_name?: string;
+            display_name?: string;
+            description?: string;
+            endpoint?: string;
+            transport?: string;
+            auth_type?: string;
+            auth_fields?: string[];
+            oauth_scopes?: string[];
+            oauth_authorize_url?: string | null;
+            oauth_token_url?: string | null;
+            oauth_client_id_env?: string | null;
+            capabilities?: string[];
+            icon_url?: string | null;
+            allowed_agents?: string[];
+            enabled?: boolean;
+        }
+    ): Promise<{
+        server: Record<string, unknown>;
+        updated: boolean;
+    }> {
+        return apiClient.put(`/v4/mcp/connections/servers/${serverId}`, payload);
+    }
+
+    /**
+     * Delete an MCP server from the catalog (admin operation).
+     */
+    async deleteMcpServer(serverId: string): Promise<{
+        deleted: boolean;
+        server_id: string;
+    }> {
+        return apiClient.delete(`/v4/mcp/connections/servers/${serverId}`);
+    }
 }
 
 // Export a singleton instance

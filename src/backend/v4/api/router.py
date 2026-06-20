@@ -1552,6 +1552,67 @@ async def chat_message_stream(
                 )
             )
 
+            # --- Ensure MCP OAuth before invoking the agent ---
+            try:
+                mcp_cfg = getattr(agent, "mcp_cfg", None)
+                if mcp_cfg and getattr(mcp_cfg, "name", None):
+                    import os
+
+                    from v4.api.oauth_helpers import build_authorize_url, sign_state
+                    from v4.common.models.mcp_connection_models import (
+                        MCPAuthType,
+                        MCPConnectionStatus,
+                    )
+                    from v4.common.services.mcp_connections_service import (
+                        MCPConnectionsService,
+                    )
+
+                    svc = await MCPConnectionsService.get_instance()
+                    server = await svc.get_server_by_name(
+                        mcp_cfg.name, tenant_id=tenant_id
+                    )
+                    if server and server.auth_type == MCPAuthType.OAUTH2:
+                        user_conn = await svc.get_user_connection(
+                            user_id, server.server_name, tenant_id=tenant_id
+                        )
+                        if (
+                            not user_conn
+                            or user_conn.status != MCPConnectionStatus.ACTIVE
+                        ):
+                            # Build consent link if possible
+                            client_id_env = server.oauth_client_id_env or ""
+                            client_id = (
+                                os.environ.get(client_id_env, "")
+                                if client_id_env
+                                else ""
+                            )
+                            consent_link = None
+                            if server.oauth_authorize_url and client_id:
+                                state = sign_state(user_id, server.server_name)
+                                consent_link = build_authorize_url(
+                                    server.oauth_authorize_url,
+                                    client_id,
+                                    server.oauth_scopes or [],
+                                    state,
+                                )
+                            else:
+                                consent_link = server.oauth_authorize_url or ""
+                            logger.info(
+                                "Pre-invoke: user needs OAuth for MCP server: %s",
+                                server.server_name,
+                            )
+                            yield _sse_event(
+                                {
+                                    "type": "oauth_consent_request",
+                                    "consent_link": consent_link,
+                                    "message": "Authorization required to use this MCP server",
+                                }
+                            )
+                            return
+            except Exception as _pre_check_exc:
+                logger.warning("MCP auth pre-check failed: %s", _pre_check_exc)
+            # --- end pre-check ---
+
             # Dedup state for tool_activity SSE events.
             # The Responses API streams function-call args chunk-by-chunk, which
             # would otherwise produce one "Calling X..." UI bubble per chunk.
@@ -3740,6 +3801,53 @@ async def register_mcp_server(request: Request):
         raise HTTPException(status_code=500, detail="Failed to register MCP server")
 
 
+@app_v4.put("/mcp/connections/servers/{server_id}")
+async def update_mcp_server(server_id: str, request: Request):
+    """
+    Update an existing MCP server in the catalog.
+
+    Body: partial MCPServerEntry fields to overwrite (server_name, display_name,
+    endpoint, auth_type, oauth_scopes, oauth_authorize_url, oauth_token_url,
+    oauth_client_id_env, etc.). The id and server_id are preserved.
+    """
+    try:
+        from v4.common.services.mcp_connections_service import MCPConnectionsService
+
+        body = await request.json()
+
+        user_id, tenant_id = _extract_auth(request)
+
+        svc = await MCPConnectionsService.get_instance()
+
+        existing = await svc.get_server(server_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Server not found")
+
+        # Apply provided fields onto the existing entry. Never allow the body to
+        # change the document identity / partition metadata.
+        protected = {"id", "pk", "doc_type", "created_at"}
+        for key, value in body.items():
+            if key in protected:
+                continue
+            if hasattr(existing, key):
+                setattr(existing, key, value)
+
+        result = await svc.upsert_server(existing)
+
+        track_event_if_configured(
+            "MCP_Server_Updated",
+            {"server_id": result.id, "server_name": result.server_name},
+        )
+
+        return {"server": result.model_dump(mode="json"), "updated": True}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating MCP server: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update MCP server")
+
+
 @app_v4.delete("/mcp/connections/servers/{server_id}")
 async def delete_mcp_server(server_id: str, request: Request):
     """Remove a server from the catalog."""
@@ -4113,42 +4221,3 @@ async def disconnect_user_from_mcp_server(server_name: str, request: Request):
     except Exception as e:
         logger.error(f"Error disconnecting from MCP server: {e}")
         raise HTTPException(status_code=500, detail="Failed to disconnect")
-
-
-# =========================================================================
-# MCP Inspector: Status & Management Endpoints
-# =========================================================================
-
-
-@app_v4.get("/mcp/inspector/status")
-async def get_inspector_status():
-    """
-    Get MCP Inspector proxy status and UI link.
-
-    Returns:
-        Inspector running state, proxy URL, UI URL, and pre-filled link.
-    """
-    try:
-        from v4.common.services.mcp_inspector_bridge import get_inspector_bridge
-
-        bridge = get_inspector_bridge()
-        status = await bridge.get_status()
-
-        track_event_if_configured(
-            "MCP_Inspector_Status",
-            {"running": status.get("running", False)},
-        )
-
-        return status
-
-    except Exception as e:
-        logger.error(f"Error checking Inspector status: {str(e)}")
-        return {
-            "running": False,
-            "ui_link": (
-                "http://localhost:6274/"
-                "?transport=streamable-http"
-                "&serverUrl=http://localhost:9000/mcp"
-            ),
-            "error": "Failed to check Inspector status",
-        }

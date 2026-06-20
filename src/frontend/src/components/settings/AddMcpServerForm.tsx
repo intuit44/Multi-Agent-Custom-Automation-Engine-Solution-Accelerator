@@ -30,6 +30,27 @@ import { TokenInput } from './TokenInput';
 interface AddMcpServerFormProps {
   onSuccess: () => void;
   onCancel: () => void;
+  /** When set, the form edits this existing server instead of creating a new one. */
+  editingServer?: EditableMcpServer | null;
+}
+
+/** Subset of MCPServerEntry fields the form can prefill/update. */
+export interface EditableMcpServer {
+  id: string;
+  server_name: string;
+  display_name: string;
+  endpoint?: string;
+  transport?: string;
+  auth_type?: string;
+  description?: string;
+  icon_url?: string | null;
+  auth_fields?: string[];
+  oauth_scopes?: string[];
+  oauth_authorize_url?: string | null;
+  oauth_token_url?: string | null;
+  oauth_client_id_env?: string | null;
+  capabilities?: string[];
+  allowed_agents?: string[];
 }
 
 interface FormState {
@@ -42,6 +63,9 @@ interface FormState {
   icon_url: string;
   auth_fields: string[];
   oauth_scopes: string[];
+  oauth_authorize_url: string;
+  oauth_token_url: string;
+  oauth_client_id_env: string;
   capabilities: string[];
   allowed_agents: string[];
   // Stdio-specific fields
@@ -68,12 +92,42 @@ const INITIAL_STATE: FormState = {
   icon_url: '',
   auth_fields: [],
   oauth_scopes: [],
+  oauth_authorize_url: '',
+  oauth_token_url: '',
+  oauth_client_id_env: '',
   capabilities: ['tools'],
   allowed_agents: [],
   command: '',
   args: [],
   env: {},
 };
+
+function stateFromServer(server: EditableMcpServer): FormState {
+  const transport =
+    server.transport === 'stdio' ? 'stdio' : 'streamable-http';
+  const authType = ['none', 'oauth2', 'api_key', 'bearer_token'].includes(
+    server.auth_type ?? ''
+  )
+    ? (server.auth_type as FormState['auth_type'])
+    : 'none';
+  return {
+    ...INITIAL_STATE,
+    server_name: server.server_name ?? '',
+    display_name: server.display_name ?? '',
+    endpoint: server.endpoint ?? '',
+    transport,
+    auth_type: authType,
+    description: server.description ?? '',
+    icon_url: server.icon_url ?? '',
+    auth_fields: server.auth_fields ?? [],
+    oauth_scopes: server.oauth_scopes ?? [],
+    oauth_authorize_url: server.oauth_authorize_url ?? '',
+    oauth_token_url: server.oauth_token_url ?? '',
+    oauth_client_id_env: server.oauth_client_id_env ?? '',
+    capabilities: server.capabilities ?? ['tools'],
+    allowed_agents: server.allowed_agents ?? [],
+  };
+}
 
 const CAPABILITY_OPTIONS = ['tools', 'resources', 'prompts'];
 
@@ -100,13 +154,21 @@ function validateSlug(slug: string): boolean {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-export const AddMcpServerForm: React.FC<AddMcpServerFormProps> = ({ onSuccess, onCancel }) => {
-  const [form, setForm] = useState<FormState>(INITIAL_STATE);
+export const AddMcpServerForm: React.FC<AddMcpServerFormProps> = ({
+  onSuccess,
+  onCancel,
+  editingServer,
+}) => {
+  const isEditing = !!editingServer;
+  const [form, setForm] = useState<FormState>(
+    editingServer ? stateFromServer(editingServer) : INITIAL_STATE
+  );
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [slugManual, setSlugManual] = useState(false);
+  // When editing, the slug is already set and should not be auto-derived.
+  const [slugManual, setSlugManual] = useState(isEditing);
 
   // ── Helpers de edición ──────────────────────────────────────────────────────
 
@@ -183,6 +245,12 @@ export const AddMcpServerForm: React.FC<AddMcpServerFormProps> = ({ onSuccess, o
         icon_url: form.icon_url || null,
         auth_fields: form.auth_fields,
         oauth_scopes: form.oauth_scopes,
+        oauth_authorize_url:
+          form.auth_type === 'oauth2' ? form.oauth_authorize_url || null : null,
+        oauth_token_url:
+          form.auth_type === 'oauth2' ? form.oauth_token_url || null : null,
+        oauth_client_id_env:
+          form.auth_type === 'oauth2' ? form.oauth_client_id_env || null : null,
         capabilities: form.capabilities,
         allowed_agents: form.allowed_agents,
         enabled: true,
@@ -194,14 +262,23 @@ export const AddMcpServerForm: React.FC<AddMcpServerFormProps> = ({ onSuccess, o
         }),
       };
 
-      await apiService.registerMcpServer(payload);
+      if (isEditing && editingServer) {
+        await apiService.updateMcpServer(editingServer.id, payload);
+      } else {
+        await apiService.registerMcpServer(payload);
+      }
       setSuccess(true);
 
       setTimeout(() => {
         onSuccess();
       }, 800);
     } catch (err: any) {
-      const msg = err?.response?.data?.detail || err?.message || 'Error al registrar el servidor';
+      const msg =
+        err?.response?.data?.detail ||
+        err?.message ||
+        (isEditing
+          ? 'Error al actualizar el servidor'
+          : 'Error al registrar el servidor');
       setServerError(msg);
     } finally {
       setSubmitting(false);
@@ -225,7 +302,9 @@ export const AddMcpServerForm: React.FC<AddMcpServerFormProps> = ({ onSuccess, o
         <CheckmarkCircle24Filled
           style={{ width: 48, height: 48, color: 'var(--colorBrandForeground1)' }}
         />
-        <div style={{ fontWeight: 600, fontSize: 16 }}>Servidor registrado correctamente</div>
+        <div style={{ fontWeight: 600, fontSize: 16 }}>
+          {isEditing ? 'Servidor actualizado correctamente' : 'Servidor registrado correctamente'}
+        </div>
         <div style={{ color: 'var(--colorNeutralForeground3)', fontSize: 13 }}>
           Ahora puedes conectarte desde la lista de aplicaciones.
         </div>
@@ -245,7 +324,9 @@ export const AddMcpServerForm: React.FC<AddMcpServerFormProps> = ({ onSuccess, o
         }}
       >
         <div>
-          <div style={{ fontWeight: 700, fontSize: 16 }}>Agregar servidor MCP</div>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>
+            {isEditing ? 'Editar servidor MCP' : 'Agregar servidor MCP'}
+          </div>
           <div style={{ color: 'var(--colorNeutralForeground3)', fontSize: 12, marginTop: 2 }}>
             Registra un endpoint MCP remoto para que los agentes puedan usarlo.
           </div>
@@ -492,17 +573,61 @@ export const AddMcpServerForm: React.FC<AddMcpServerFormProps> = ({ onSuccess, o
             </Field>
 
             {form.auth_type === 'oauth2' && (
-              <Field
-                label="OAuth Scopes"
-                hint="Permisos solicitados durante el flujo OAuth (ej: repo, read:user)"
-              >
-                <TokenInput
-                  values={form.oauth_scopes}
-                  onChange={(vals) => set('oauth_scopes', vals)}
-                  placeholder="repo"
-                  disabled={submitting}
-                />
-              </Field>
+              <>
+                <Field
+                  label="OAuth Scopes"
+                  hint="Permisos solicitados durante el flujo OAuth (ej: repo, read:user)"
+                >
+                  <TokenInput
+                    values={form.oauth_scopes}
+                    onChange={(vals) => set('oauth_scopes', vals)}
+                    placeholder="repo"
+                    disabled={submitting}
+                  />
+                </Field>
+
+                <Field
+                  label="OAuth Authorize URL"
+                  hint="Endpoint de autorización OAuth2 (ej: https://github.com/login/oauth/authorize)"
+                >
+                  <Input
+                    value={form.oauth_authorize_url}
+                    onChange={(_, d) => set('oauth_authorize_url', d.value)}
+                    placeholder="https://github.com/login/oauth/authorize"
+                    disabled={submitting}
+                    contentBefore={
+                      <Globe24Regular style={{ width: 16, color: 'var(--colorNeutralForeground3)' }} />
+                    }
+                  />
+                </Field>
+
+                <Field
+                  label="OAuth Token URL"
+                  hint="Endpoint de intercambio de token OAuth2 (ej: https://github.com/login/oauth/access_token)"
+                >
+                  <Input
+                    value={form.oauth_token_url}
+                    onChange={(_, d) => set('oauth_token_url', d.value)}
+                    placeholder="https://github.com/login/oauth/access_token"
+                    disabled={submitting}
+                    contentBefore={
+                      <Globe24Regular style={{ width: 16, color: 'var(--colorNeutralForeground3)' }} />
+                    }
+                  />
+                </Field>
+
+                <Field
+                  label="OAuth Client ID (env var)"
+                  hint="Nombre de la variable de entorno con el client_id (ej: GITHUB_CLIENT_ID)"
+                >
+                  <Input
+                    value={form.oauth_client_id_env}
+                    onChange={(_, d) => set('oauth_client_id_env', d.value)}
+                    placeholder="GITHUB_CLIENT_ID"
+                    disabled={submitting}
+                  />
+                </Field>
+              </>
             )}
           </div>
         )}
@@ -569,7 +694,13 @@ export const AddMcpServerForm: React.FC<AddMcpServerFormProps> = ({ onSuccess, o
           onClick={handleSubmit}
           disabled={submitting}
         >
-          {submitting ? 'Registrando...' : 'Agregar servidor'}
+          {submitting
+            ? isEditing
+              ? 'Guardando...'
+              : 'Registrando...'
+            : isEditing
+              ? 'Guardar cambios'
+              : 'Agregar servidor'}
         </Button>
       </div>
     </div>
