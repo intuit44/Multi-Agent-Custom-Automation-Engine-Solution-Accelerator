@@ -157,7 +157,7 @@ var identity = !empty(managedIdentities)
       userAssignedIdentities: !empty(formattedUserAssignedIdentities) ? formattedUserAssignedIdentities : null
     }
   : null
-  
+
 #disable-next-line no-deployments-resources
 resource avmTelemetry 'Microsoft.Resources/deployments@2024-03-01' = if (enableTelemetry) {
   name: '46d3xbcp.res.cognitiveservices-account.${replace('-..--..-', '.', '-')}.${substring(uniqueString(deployment().name, location), 0, 4)}'
@@ -258,7 +258,7 @@ module cognigive_service_dependencies 'modules/dependencies.bicep' = if(!useExis
   params: {
     projectName: projectName
     projectDescription: projectDescription
-    name:  cognitiveServiceNew.name 
+    name:  cognitiveServiceNew.name
     location: location
     deployments: deployments
     diagnosticSettings: diagnosticSettings
@@ -273,7 +273,7 @@ module cognigive_service_dependencies 'modules/dependencies.bicep' = if(!useExis
 
 module existing_cognigive_service_dependencies 'modules/dependencies.bicep' = if(useExistingService) {
   params: {
-    name:  cognitiveServiceExisting.name 
+    name:  cognitiveServiceExisting.name
     projectName: projectName
     projectDescription: projectDescription
     azureExistingAIProjectResourceId: existingFoundryProjectResourceId
@@ -312,17 +312,17 @@ output endpoints endpointType = useExistingService ? cognitiveServiceExisting.pr
 
 @description('The principal ID of the system assigned identity.')
 output systemAssignedMIPrincipalId string? = useExistingService ? cognitiveServiceExisting.identity.principalId : cognitiveService.?identity.?principalId
- 
+
 @description('The location the resource was deployed into.')
 output location string = useExistingService ? cognitiveServiceExisting.location : cognitiveService.location
- 
+
 import { secretsOutputType } from 'br/public:avm/utl/types/avm-common-types:0.5.1'
 @description('A hashtable of references to the secrets exported to the provided Key Vault. The key of each reference is each secret\'s name.')
 output exportedSecrets secretsOutputType = useExistingService ? existing_cognigive_service_dependencies.outputs.exportedSecrets : cognigive_service_dependencies.outputs.exportedSecrets
- 
+
 @description('The private endpoints of the congitive services account.')
 output privateEndpoints privateEndpointOutputType[] = useExistingService ? existing_cognigive_service_dependencies.outputs.privateEndpoints : cognigive_service_dependencies.outputs.privateEndpoints
- 
+
 import { aiProjectOutputType } from './modules/project.bicep'
 output aiProjectInfo aiProjectOutputType = useExistingService ? existing_cognigive_service_dependencies.outputs.aiProjectInfo : cognigive_service_dependencies.outputs.aiProjectInfo
 

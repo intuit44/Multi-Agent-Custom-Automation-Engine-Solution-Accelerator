@@ -1,5 +1,5 @@
-name: Multi-Agent-Custom-Automation-Engine-Solution-Accelerator
-dockerfile_path: src/backend/Dockerfile
+name: BackgroundResearchAgent
+dockerfile_path: my-agent-vzq3de/Dockerfile
 resources:
   cpu: '0.5'
   memory: 1.0Gi

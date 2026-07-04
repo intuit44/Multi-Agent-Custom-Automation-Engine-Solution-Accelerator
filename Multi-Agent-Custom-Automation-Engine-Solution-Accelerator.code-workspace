@@ -57,5 +57,6 @@
       "editor.defaultFormatter": "ms-azuretools.vscode-containers",
     },
     "chatgpt.runCodexInWindowsSubsystemForLinux": true,
+    "github.copilot.chat.codeGeneration.useInstructionFiles": true,
   },
 }

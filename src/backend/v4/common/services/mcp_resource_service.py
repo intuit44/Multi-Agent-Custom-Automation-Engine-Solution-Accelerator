@@ -174,7 +174,9 @@ class MCPResourceService:
 
                 # Read response body and parse based on content-type
                 body = await response.aread()
-                result = self._parse_jsonrpc_response_bytes(body, response.headers.get("content-type", ""))
+                result = self._parse_jsonrpc_response_bytes(
+                    body, response.headers.get("content-type", "")
+                )
 
                 # Check for JSON-RPC error
                 if "error" in result:

@@ -84,7 +84,7 @@ especializados de dominios distintos y no podría ser resuelto correctamente por
 un único agente? → TASK.
 4. En cualquier otro caso → CONVERSATIONAL.
 
-Responde con EXACTAMENTE una palabra: task, conversational, o mcp_query."""
+Responde con EXACTAMENTE una palabra: task, o mcp_query."""
 
 
 class IntentRouter:

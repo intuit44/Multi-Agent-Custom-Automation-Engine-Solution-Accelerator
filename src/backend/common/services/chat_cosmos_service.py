@@ -190,29 +190,29 @@ class ChatCosmosService:
             logger.error("Error listing sessions for user %s: %s", user_id, e)
             return []
 
-    async def delete_session(
-        self,
-        session_id: str,
-        user_id: str,
-    ) -> bool:
-        """Delete a chat session."""
-        if not await self._ensure():
-            return False
-        try:
-            if self._container is None:
-                return False
+    # async def delete_session(
+    #     self,
+    #     session_id: str,
+    #     user_id: str,
+    # ) -> bool:
+    #     """Delete a chat session."""
+    #     if not await self._ensure():
+    #         return False
+    #     try:
+    #         if self._container is None:
+    #             return False
 
-            await self._container.delete_item(
-                item=session_id,
-                partition_key=user_id,
-            )
-            logger.info("Deleted chat session %s", session_id)
-            return True
-        except exceptions.CosmosResourceNotFoundError:
-            return False
-        except Exception as e:
-            logger.error("Error deleting session %s: %s", session_id, e)
-            return False
+    #         await self._container.delete_item(
+    #             item=session_id,
+    #             partition_key=user_id,
+    #         )
+    #         logger.info("Deleted chat session %s", session_id)
+    #         return True
+    #     except exceptions.CosmosResourceNotFoundError:
+    #         return False
+    #     except Exception as e:
+    #         logger.error("Error deleting session %s: %s", session_id, e)
+    #         return False
 
     # ── Messages ─────────────────────────────────────────────────
 
@@ -313,7 +313,7 @@ class ChatCosmosService:
                     """Index with up to 3 attempts and exponential back-off.
 
                     Fire-and-forget: errors are logged but never raised to the
-                    caller so chat persistence is never blocked by search failures.
+                    caller so chat persistence is    blocked by search failures.
                     """
                     for attempt in range(3):
                         try:

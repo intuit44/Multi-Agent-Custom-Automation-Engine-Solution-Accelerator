@@ -46,7 +46,6 @@ class HumanApprovalMagenticManager(StandardMagenticManager):
 
         plan_append = """
 
-IMPORTANT: Never ask the user for information or clarification until all agents on the team have been asked first.
 
 EXAMPLE: If the user request involves product information, first ask all agents on the team to provide the information.
 Do not ask the user unless all agents have been consulted and the information is still missing.
@@ -59,10 +58,6 @@ CRITICAL: Each agent should only be called ONCE to perform their task. Do NOT ca
 After an agent has provided their response, move on to the next agent in the plan.
 
 Here is an example of a well-structured plan:
-- **EnhancedResearchAgent** to gather authoritative data on the latest industry trends and best practices in employee onboarding
-- **EnhancedResearchAgent** to gather authoritative data on Innovative onboarding techniques that enhance new hire engagement and retention.
-- **DocumentCreationAgent** to draft a comprehensive onboarding plan that includes a detailed schedule of onboarding activities and milestones.
-- **DocumentCreationAgent** to draft a comprehensive onboarding plan that includes a checklist of resources and materials needed for effective onboarding.
 - **ProxyAgent** to review the drafted onboarding plan for clarity and completeness.
 - **MagenticManager** to finalize the onboarding plan and prepare it for presentation to stakeholders.
 """

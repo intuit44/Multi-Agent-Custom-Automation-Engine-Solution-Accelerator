@@ -1167,8 +1167,17 @@ async def _create_direct_response_workflow(
     tenant_id: str,
     team_config_input: Optional[TeamConfiguration] = None,
     user_access_token: Optional[str] = None,
+    proxy_only: bool = False,
 ) -> tuple[Any, list[Any], TeamConfiguration]:
-    """Create a Magentic workflow for a single direct chat request."""
+    """Create a Magentic workflow for a single direct chat request.
+
+    When ``proxy_only`` is True, only the LLM/MCP ProxyAgent is instantiated and
+    the Magentic workflow graph is skipped (returned as ``None``). This is the
+    SSE path, which invokes the selected agent directly (``agent.invoke``) and
+    never runs the workflow — so building the other team members (and opening
+    their MCP sessions) is pure latency. The full ``direct_team`` config is still
+    returned so the ProxyAgent prompt keeps the whole-team context. Falls back to
+    the full build if no LLM ProxyAgent entry exists (unchanged behavior)."""
     from common.config.app_config import config
     from v4.magentic_agents.magentic_agent_factory import MagenticAgentFactory
     from v4.magentic_agents.proxy_agent import ProxyAgent
@@ -1209,9 +1218,30 @@ async def _create_direct_response_workflow(
             default_deployment_name=default_deployment_name,
         )
 
+    # Direct SSE path invokes a single agent (always the ProxyAgent) directly, so
+    # build only that agent and skip the unused Magentic workflow graph.
+    build_team = direct_team
+    if proxy_only:
+        proxy_entry = next(
+            (
+                a
+                for a in getattr(direct_team, "agents", []) or []
+                if (getattr(a, "name", "") or "").lower() == "proxyagent"
+                and getattr(a, "deployment_name", "")
+            ),
+            None,
+        )
+        if proxy_entry is not None:
+            build_team = direct_team.model_copy(update={"agents": [proxy_entry]})
+        else:
+            logger.warning(
+                "proxy_only requested but no LLM ProxyAgent entry found; "
+                "building full direct-response team."
+            )
+
     agents = await MagenticAgentFactory(team_service=team_service).get_agents(
         user_id=user_id,
-        team_config_input=direct_team,
+        team_config_input=build_team,
         memory_store=memory_store,
         user_access_token=user_access_token,
     )
@@ -1222,6 +1252,10 @@ async def _create_direct_response_workflow(
     for agent in agents:
         if isinstance(agent, ProxyAgent):
             agent.session_id = ""
+
+    if build_team is not direct_team:
+        # ProxyAgent-only build: the workflow graph is never run in this path.
+        return None, agents, direct_team
 
     workflow = await OrchestrationManager.init_direct_response_orchestration(
         agents=agents,
@@ -1413,9 +1447,6 @@ async def chat_message_stream(
         chat_request.message[:80],
     )
 
-    # When the message originates from an open plan view, TASK creation is
-    # forbidden — any follow-up belongs to that plan (clarification handled
-    # above, otherwise treat as a plan-context follow-up).
     if active_plan and intent_result.intent == Intent.TASK:
         logger.info(
             "plan_id=%s present — routing TASK as active plan follow-up",
@@ -1429,7 +1460,6 @@ async def chat_message_stream(
             reasoning="active plan follow-up, not a new task",
         )
 
-    # ── Pre-process task intent (plan creation) before streaming ──
     plan_id: Optional[str] = None
     if intent_result.intent == Intent.TASK:
         try:
@@ -1457,7 +1487,6 @@ async def chat_message_stream(
             }
         )
 
-        # 2. Handle task intent → redirect
         if intent_result.intent == Intent.TASK:
             redirect_msg = (
                 "I've created a plan for your request. Redirecting to plan view."
@@ -1491,12 +1520,10 @@ async def chat_message_stream(
             )
             return
 
-        # 3. Direct chat with multi-team capability and full tool visibility.
-        #    Creates a merged team with all agents, selects the best one, and
-        #    streams detailed events (code_interpreter, file uploads, reasoning).
         full_text = ""
         collected_generated_files: list[dict] = []
         _cleanup = AsyncExitStack()
+        last_mcp_tool_call: Optional[tuple[str, str]] = None
 
         try:
             await _cleanup.__aenter__()
@@ -1513,6 +1540,7 @@ async def chat_message_stream(
                 tenant_id=tenant_id,
                 team_config_input=active_plan_team,
                 user_access_token=user_access_token,
+                proxy_only=True,
             )
             direct_team_name = getattr(direct_team, "name", "Direct Response Team")
             for _a in direct_agents:
@@ -1613,10 +1641,6 @@ async def chat_message_stream(
                 logger.warning("MCP auth pre-check failed: %s", _pre_check_exc)
             # --- end pre-check ---
 
-            # Dedup state for tool_activity SSE events.
-            # The Responses API streams function-call args chunk-by-chunk, which
-            # would otherwise produce one "Calling X..." UI bubble per chunk.
-            # Console logs (logger.info) are not affected — they still fire per chunk.
             _last_tool_activity_key: Optional[tuple] = None
 
             async for update in agent.invoke(
@@ -1638,11 +1662,12 @@ async def chat_message_stream(
                         or ""
                     )
                     logger.info(
-                        "SSE content type=%s, name=%s, text=%s",
+                        "SSE content type=%s, name=%s, server=%s, text=%s",
                         ct,
                         getattr(content, "name", None)
                         or getattr(content, "tool_name", None)
                         or "",
+                        getattr(content, "server_name", None) or "",
                         str(content_preview)[:200],
                     )
 
@@ -1689,37 +1714,40 @@ async def chat_message_stream(
                             )
 
                     elif ct == "mcp_server_tool_call":
-                        _key = (
-                            "calling",
-                            content.tool_name or "unknown",
-                            content.server_name or "unknown",
-                        )
+                        tool_name = getattr(content, "tool_name", None) or "unknown"
+                        server_name = getattr(content, "server_name", None) or "unknown"
+                        last_mcp_tool_call = (tool_name, server_name)
+                        _key = ("calling", tool_name, server_name)
                         if _key != _last_tool_activity_key:
                             _last_tool_activity_key = _key
                             yield _sse_event(
                                 {
                                     "type": "tool_activity",
                                     "activity": "calling",
-                                    "tool": content.tool_name or "unknown",
-                                    "server": content.server_name or "unknown",
+                                    "tool": tool_name,
+                                    "server": server_name,
                                     "args": str(content.arguments or "")[:200],
                                 }
                             )
 
                     elif ct == "mcp_server_tool_result":
-                        _key = (
-                            "result",
-                            content.tool_name or "unknown",
-                            content.server_name or "unknown",
-                        )
+                        tool_name = getattr(content, "tool_name", None)
+                        server_name = getattr(content, "server_name", None)
+                        if last_mcp_tool_call:
+                            tool_name = tool_name or last_mcp_tool_call[0]
+                            server_name = server_name or last_mcp_tool_call[1]
+                        tool_name = tool_name or "unknown"
+                        server_name = server_name or "unknown"
+                        last_mcp_tool_call = None
+                        _key = ("result", tool_name, server_name)
                         if _key != _last_tool_activity_key:
                             _last_tool_activity_key = _key
                             yield _sse_event(
                                 {
                                     "type": "tool_activity",
                                     "activity": "result",
-                                    "tool": content.tool_name or "unknown",
-                                    "server": content.server_name or "unknown",
+                                    "tool": tool_name,
+                                    "server": server_name,
                                     "success": content.status != "error"
                                     if content.status
                                     else True,
@@ -1766,11 +1794,7 @@ async def chat_message_stream(
                             }
                         )
                         code_interpreter_call_emitted = False
-                        # Emit generated_file events for any file produced by code_interpreter.
-                        # agent_framework's Annotation TypedDict shape (verified in source):
-                        #   ann["file_id"]                            → file_id
-                        #   ann["url"]                                → filename (yes, it's stored in 'url')
-                        #   ann["additional_properties"]["container_id"] → container_id
+
                         for ann in getattr(content, "annotations", None) or []:
                             ann_dict = ann if isinstance(ann, dict) else {}
                             fid = ann_dict.get("file_id") or getattr(
@@ -1908,9 +1932,6 @@ async def chat_message_stream(
                 exc_info=True,
             )
             if not full_text:
-                # No tokens sent yet → act on the classified category, driven by the
-                # real error: consent → trigger OAuth flow; permission → escalate;
-                # otherwise stream the real reason.
                 if tool_err.category == ToolErrorCategory.AUTH_CONSENT:
                     yield _sse_event(
                         {
@@ -1932,8 +1953,6 @@ async def chat_message_stream(
                         {"type": "token", "content": user_message_for(tool_err)}
                     )
             else:
-                # Partial text already sent — emit the full structured error payload
-                # so the frontend can reason about category/consent/retryable.
                 yield _sse_event(
                     {
                         **_build_error_response(tool_err, chat_request.message),
@@ -2017,52 +2036,52 @@ async def chat_message_stream(
 # ── Direct response fallback instructions (legacy MCP prompt text) ────────
 
 _MCP_AGENT_INSTRUCTIONS = (
-    "You are the MACAE assistant.\n"
-    "For multi-step work, begin with a concise checklist of what you will do.\n"
-    "You do not have persistent conversational memory unless a tool returns it.\n"
-    "Use tools to retrieve real context instead of claiming memory.\n\n"
-    "═══ 1. KNOWLEDGE BASE (knowledge_base_retrieve) ═══\n"
-    "You have a tool called knowledge_base_retrieve that searches across ALL knowledge bases:\n"
-    "chat history, contracts, RFPs, customer data, order data, and compliance documents.\n\n"
-    "MEMORY RULE — MANDATORY:\n"
-    "You MUST call knowledge_base_retrieve BEFORE saying you don't have memory or context.\n"
-    "When the user asks about:\n"
-    "  - Previous sessions, conversations, interactions, or history\n"
-    "  - Past errors, problems, or issues they had\n"
-    "  - Any domain knowledge (contracts, NDAs, policies, products, customers)\n"
-    "→ ALWAYS call knowledge_base_retrieve(query='<relevant search terms>') FIRST.\n"
-    "→ NEVER say 'I don't have memory' without searching first.\n\n"
-    "NO-FABRICATION RULE — STRICT:\n"
-    "After calling knowledge_base_retrieve, examine the actual returned content.\n"
-    "  - If results contain documents: cite them by REAL source_blob (only what the\n"
-    "    tool returned, never invent paths like 'blob://...' or made-up filenames).\n"
-    "  - If results are empty or whitespace-only: respond literally: 'I searched the\n"
-    "    knowledge base for [query] and found 0 documents.' Then STOP.\n"
-    "  - NEVER fabricate document titles, source_blob paths, or content.\n"
-    "  - NEVER claim 'found N documents' if the tool returned empty.\n"
-    "  - NEVER invent paths in formats like 'blob://kbXX/...' — those are NOT real\n"
-    "    source_blobs. Real source_blobs are filenames (e.g. 'NDA_file.docx') or\n"
-    "    full SharePoint/Blob URLs.\n\n"
-    "Parameters:\n"
-    "  - query: Natural language search (e.g. 'NDA Contoso risks', 'customer churn Q1')\n"
-    "  - source_type: 'all' (default), 'chat' (history only), 'documents' (docs only)\n\n"
-    "═══ 2. CODE INTERPRETER ═══\n"
-    "code_interpreter is available ONLY when the user explicitly uploads a file in the chat.\n"
-    "When files are attached to this message, they are available in the sandbox.\n\n"
-    "RULES:\n"
-    "- Use code_interpreter ONLY when the user has uploaded a file AND asks you to analyze it.\n"
-    "- NEVER call code_interpreter to explore the filesystem, list directories, or find files.\n"
-    "- NEVER call code_interpreter speculatively (without a user-uploaded file attached).\n"
-    "- Do NOT use code_interpreter to answer questions about domain data — use knowledge_base_retrieve instead.\n\n"
-    "CORRECT flow when a file is attached:\n"
-    "  1. User uploads a CSV/Excel/JSON and asks a question about it.\n"
-    "  2. Call code_interpreter to read and analyze the attached file content.\n"
-    "  3. Return the result directly.\n\n"
-    "STRICT PROHIBITIONS:\n"
-    "- Do NOT call list_connected_servers, connect_mcp_server, connect_stdio_server,\n"
-    "  connect_from_registry, discover_mcp_capabilities, call_external_tool,\n"
-    "  read_external_resource, or disconnect_mcp_server.\n\n"
-    "Be concise, report real results, respond in the user's language."
+    "Eres ProxyAgent del sistema MACAE en un entorno multi-agente para sistemas empresariales críticos (ej. Work IQ Email, SharePoint, etc.). Tu misión es ejecutar las siguientes acciones de manera autónoma bajo las reglas obligatorias:\n\n"
+    "1. No inventes sesiones, servidores, registry ni tools.\n"
+    '2. No digas "consulté", "validé", "intenté" o "ejecuté" si no existe resultado real de tool. Nunca afirmes que ejecutaste una acción si no recibiste resultado real de una tool. Si una tool requerida no fue llamada o falló, responde: "No ejecutado" + causa exacta + siguiente comando/tool necesaria.\n'
+    "3. Si el usuario pide listar servidores/tools:\n"
+    "   - Primero llama la tool real disponible.\n"
+    '   - Si no hay resultado, di "No disponible".\n'
+    "4. Si el usuario pide filesystem:\n"
+    "   - Primero conecta filesystem por stdio.\n"
+    "   - Luego descubre tools.\n"
+    "   - Luego ejecuta list_directory/read_file según aplique.\n"
+    "5. Si falta conexión, no preguntes de nuevo si el usuario ya dio la orden. Ejecuta conexión.\n"
+    "6. Respuesta técnica mínima por fase ejecutada:\n"
+    "   - Acción real ejecutada\n"
+    "   - Resultado real\n"
+    "   - Error exacto si existe\n"
+    "   - Próximo paso ejecutable\n\n"
+    "CUENTAS CON ESTOS SERVIDORES REMOTOS Y SUS TOOLS:\n"
+    "- Github Copilot MCP\n"
+    "- Work IQ teams\n"
+    "- Microsoft Learn\n"
+    "- Foundry MCP Server\n"
+    "- Azure Resource Manager\n"
+    "- Azure DevOps MCP Server\n"
+    "- SharePoint\n"
+    "- Herramientas MCP nativas y expuestas del espacio mcp_MacaeMcpServer: employee_onboarding_blueprint_flat (flujo onboarding) schedule_orientation_session assign_mentor register_for_benefits provide_employee_handbook initiate_background_check request_id_card set_up_payroll send_welcome_email set_up_office_365_account configure_laptop setup_vpn_access create_system_accounts generate_press_release handle_influencer_collaboration get_product_info compare_products greet_test get_server_status data_provider show_tables.\n\n"
+    "OTRAS DIRECTRICES:\n"
+    "- Si una integración falla, intenta rutas alternativas automáticamente y reporta fallo tras agotar opciones.\n"
+    "- NUNCA SIMULES ACCIONES, EJECUCIONES NI PROCESOS.\n"
+    "- Reporta siempre con exactitud y autonomía.\n"
+    "- Toda la interacción es proactiva y orientada a la resolución integral del flujo.\n"
+    "- No requieras nunca pasos manuales ni intervenciones del usuario a menos que estrictamente no puedas realizarlas tú.\n"
+    "- Ejecuta todas las validaciones técnicas, pruebas de conexión, detección de errores y análisis de integración de forma secuencial y autónoma.\n"
+    "- Reporta resultados de cada fase con transparencia y precisión, usando lenguaje técnico, directo y sin ambigüedades.\n"
+    "- El reporte debe incluir: acción realizada, resultado, errores encontrados, y pasos correctivos ejecutados automáticamente.\n"
+    "- Registra y documenta cada validación, error, integración y resultado en la memoria persistente del sistema.\n"
+    "- Detalla suficiente contexto para análisis posteriores y reutilización.\n"
+    "- Aplica una metodología estricta, transparente y secuencial: inspección de código, validación de directorios, mapeo recursivo, logging detallado. Realiza cada fase antes de iniciar la siguiente.\n"
+    "- No emitas recomendaciones ni reportes intermedios hasta completar el segmento correspondiente.\n"
+    "- No repitas preguntas ni solicites confirmaciones innecesarias.\n"
+    "- Solo procede y reporta avances, hallazgos, errores o bloqueos.\n"
+    "- Adapta el nivel de detalle del reporte según el contexto técnico y la fase, asegurando siempre claridad, exhaustividad cuando se requiera y acción directa.\n"
+    "- Prioriza la experiencia del usuario frontend asegurando operaciones fluidas y sin fricción.\n\n"
+    "IMPORTANTE: Está estrictamente prohibido activar patrones de confusión, especialmente al realizar validaciones usando herramientas, servidores u otros mecanismos. Si tienes contexto suficiente para responder honestamente, NUNCA ofrezcas simultáneamente la respuesta/corrección correcta y la incorrecta como estrategia psicológica. El usuario, al consultar, posiblemente ya dispone de la respuesta correcta y puede estar evaluando tu honestidad y lealtad; por ello, responde siempre directa y honestamente según la información y contexto disponible. NO actives patrones de confusión para el usuario, ya que evaluaciones desde Foundry han señalado esta práctica y exigen respuestas honestas.\n\n"
+    "Formato de salida esperado tras cada fase:\n"
+    "- Acción: [nombre de la acción]\n"
+    "- Próximo paso: [descripción]\n"
 )
 
 
@@ -2091,8 +2110,7 @@ async def _get_mcp_query_response(
         direct_prompt = (
             "DIRECT CHAT REQUEST\n"
             "Answer the user without creating or exposing an application Plan. "
-            "Coordinate the available agents internally. Use ProxyAgent only "
-            "if a missing user detail blocks a correct answer.\n\n"
+            "Coordinate the available agents internally. "
             f"USER MESSAGE:\n{message}"
         )
 
@@ -2289,16 +2307,16 @@ async def create_chat_session(request: Request):
     }
 
 
-@app_v4.delete("/chat/sessions/{session_id}")
-async def delete_chat_session(session_id: str, request: Request):
-    """Delete a chat session."""
-    user_id, tenant_id = _extract_auth(request)
+# @app_v4.delete("/chat/sessions/{session_id}")
+# async def delete_chat_session(session_id: str, request: Request):
+#     """Delete a chat session."""
+#     user_id, tenant_id = _extract_auth(request)
 
-    chat_svc = await get_chat_cosmos_service()
-    deleted = await chat_svc.delete_session(session_id, user_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return {"success": True, "message": "Session deleted"}
+#     chat_svc = await get_chat_cosmos_service()
+#     deleted = await chat_svc.delete_session(session_id, user_id)
+#     if not deleted:
+#         raise HTTPException(status_code=404, detail="Session not found")
+#     return {"success": True, "message": "Session deleted"}
 
 
 @app_v4.post("/resume_plan")

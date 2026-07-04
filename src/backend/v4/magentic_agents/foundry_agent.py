@@ -31,9 +31,10 @@ from v4.magentic_agents.common.lifecycle import (
     _FOUNDRY_REGISTERED_AGENT_NAMES,
     AzureAgentBase,
 )
+from v4.magentic_agents.common.self_heal_middleware import SelfHealToolMiddleware
 from v4.magentic_agents.models.agent_models import MCPConfig, SearchConfig
 
-CHAT_HISTORY_WINDOW: int = 20
+CHAT_HISTORY_WINDOW: int = 60
 
 
 class FoundryAgentTemplate(AzureAgentBase):
@@ -433,6 +434,11 @@ class FoundryAgentTemplate(AzureAgentBase):
                         name=self.agent_name,
                         description=self.agent_description,
                         tools=tools,
+                        # Runtime tools (MCPStreamableHTTPTool) execute in-process
+                        # inside the function-invocation loop, so a recoverable
+                        # tool failure can be returned to the model for in-turn
+                        # retry instead of crashing the request.
+                        middleware=[SelfHealToolMiddleware()],
                         default_options=cast(
                             Any,
                             ChatOptions(
