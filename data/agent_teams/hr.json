@@ -51,10 +51,10 @@
       "use_rag": true,
       "use_mcp": false,
       "use_bing": false,
-      "use_reasoning": false,
+      "use_reasoning": true,
       "index_name": "",
       "index_foundry_name": "",
-      "coding_tools": true
+      "coding_tools": false
     }
   ],
   "protected": false,

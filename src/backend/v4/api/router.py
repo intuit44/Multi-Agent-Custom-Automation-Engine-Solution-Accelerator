@@ -205,7 +205,7 @@ async def init_team(
     # Falls back to HR if no teams are available.
     print(f"Init team called, team_switched={team_switched}")
     try:
-        user_id, tenant_id = _extract_auth(request)
+        user_id, tenant_id, user_access_token = _extract_auth_with_token(request)
 
         # Initialize memory store and service
         memory_store = await DatabaseFactory.get_database(
@@ -275,6 +275,7 @@ async def init_team(
             team_config=team_configuration,
             team_switched=team_switched,
             team_service=team_service,
+            user_access_token=user_access_token,  # OBO: run agents as the user
         )
 
         return {
@@ -347,7 +348,7 @@ async def process_request(
               type: string
               description: Error message
     """
-    user_id, tenant_id = _extract_auth(request)
+    user_id, tenant_id, user_access_token = _extract_auth_with_token(request)
     try:
         memory_store = await DatabaseFactory.get_database(
             user_id=user_id, tenant_id=tenant_id
@@ -432,6 +433,11 @@ async def process_request(
             team_switched=False,
             team_service=team_service,
             force_rebuild=True,  # Always rebuild workflow for new tasks
+            # OBO: agents built here run in a BackgroundTask under the app MI unless
+            # they carry the user's assertion. Thread it so orchestration agents
+            # authenticate as the user (same as direct chat) — required for
+            # user-delegated tool connections (e.g. WorkIQ/agent365).
+            user_access_token=user_access_token,
         )
 
         track_event_if_configured(
@@ -1360,71 +1366,77 @@ async def chat_message_stream(
         chat_svc, chat_request.session_id, user_id
     )
 
-    if previous_intent == "task":
-        pending_request_id = orchestration_config.get_pending_clarification_for_session(
+    # A pending clarification is authoritative on its own, regardless of
+    # previous_intent: if the orchestration registered a question for this
+    # session, THIS message is the answer — deliver it to the waiting plan and
+    # never fall through to a direct (conversational) response. Gating this on
+    # previous_intent=="task" broke the loop: once any turn went to direct
+    # response it persisted intent="conversational", so the next answer skipped
+    # this guard and went to direct response again.
+    pending_request_id = orchestration_config.get_pending_clarification_for_session(
+        chat_request.session_id,
+        user_id,
+    )
+    if pending_request_id:
+        logger.info(
+            "Routing message as clarification answer for request_id=%s session=%s",
+            pending_request_id,
             chat_request.session_id,
-            user_id,
         )
-        if pending_request_id:
-            logger.info(
-                "Routing message as clarification answer for request_id=%s session=%s",
-                pending_request_id,
-                chat_request.session_id,
+        # Deliver the answer to the waiting orchestration.
+        orchestration_config.set_clarification_result(
+            pending_request_id, chat_request.message
+        )
+        # Persist the exchange to the single chat history.
+        try:
+            await chat_svc.add_message(
+                session_id=chat_request.session_id,
+                user_id=user_id,
+                content="✅ Clarification submitted. Processing…",
+                role="assistant",
+                metadata={"intent": "task"},
             )
-            # Deliver the answer to the waiting orchestration.
-            orchestration_config.set_clarification_result(
-                pending_request_id, chat_request.message
-            )
-            # Persist the exchange to the single chat history.
-            try:
-                await chat_svc.add_message(
-                    session_id=chat_request.session_id,
-                    user_id=user_id,
-                    content="✅ Clarification submitted. Processing…",
-                    role="assistant",
-                    metadata={"intent": "task"},
-                )
-            except Exception as _e:
-                logger.warning("Could not persist clarification ack: %s", _e)
+        except Exception as _e:
+            logger.warning("Could not persist clarification ack: %s", _e)
 
-            async def _clarification_stream():
-                yield _sse_event(
-                    {
-                        "type": "intent",
-                        "intent": "task",
-                        "confidence": 1.0,
-                        "session_id": chat_request.session_id,
-                        "plan_id": chat_request.plan_id,
-                        "m_plan_id": active_m_plan_id,
-                    }
-                )
-                yield _sse_event(
-                    {
-                        "type": "token",
-                        "content": "✅ Clarification submitted. Processing…",
-                    }
-                )
-                yield _sse_event(
-                    {
-                        "type": "done",
-                        "intent": "task",
-                        "agent": "assistant",
-                        "confidence": 1.0,
-                        "session_id": chat_request.session_id,
-                        "plan_id": chat_request.plan_id,
-                        "m_plan_id": active_m_plan_id,
-                    }
-                )
-
-            return StreamingResponse(
-                _clarification_stream(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no",
-                },
+        async def _clarification_stream():
+            yield _sse_event(
+                {
+                    "type": "intent",
+                    "intent": "task",
+                    "confidence": 1.0,
+                    "session_id": chat_request.session_id,
+                    "plan_id": chat_request.plan_id,
+                    "m_plan_id": active_m_plan_id,
+                }
             )
+            yield _sse_event(
+                {
+                    "type": "token",
+                    "content": "✅ Clarification submitted. Processing…",
+                }
+            )
+            yield _sse_event(
+                {
+                    "type": "done",
+                    "intent": "task",
+                    "agent": "assistant",
+                    "confidence": 1.0,
+                    "session_id": chat_request.session_id,
+                    "plan_id": chat_request.plan_id,
+                    "m_plan_id": active_m_plan_id,
+                }
+            )
+
+        return StreamingResponse(
+            _clarification_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
     # ── End clarification guard ──────────────────────────────────
 
     if active_plan:
@@ -1643,11 +1655,34 @@ async def chat_message_stream(
 
             _last_tool_activity_key: Optional[tuple] = None
 
+            # Recover Foundry conversation thread across re-auth / process restarts.
+            # The conversation_id is persisted in Cosmos after each turn so the
+            # next invoke can resume the same Foundry thread instead of starting fresh.
+            _foundry_conv_id: Optional[str] = None
+            try:
+                _foundry_conv_id = await chat_svc.get_foundry_conversation_id(
+                    chat_request.session_id, user_id
+                )
+                if _foundry_conv_id:
+                    logger.info(
+                        "Resuming Foundry conversation thread: conv_id=%s session=%s",
+                        _foundry_conv_id,
+                        chat_request.session_id[:12],
+                    )
+            except Exception as _conv_err:
+                logger.warning("Could not load foundry_conversation_id: %s", _conv_err)
+
+            _invoke_kwargs: dict = {
+                "session_id": chat_request.session_id,
+                "user_id": user_id,
+                "file_ids": chat_request.file_ids,
+            }
+            if _foundry_conv_id:
+                _invoke_kwargs["previous_response_id"] = _foundry_conv_id
+
             async for update in agent.invoke(
                 direct_chat_prompt,
-                session_id=chat_request.session_id,
-                user_id=user_id,
-                file_ids=chat_request.file_ids,
+                **_invoke_kwargs,
             ):
                 # Process ALL content types from the agent framework
                 for content in update.contents or []:
@@ -1994,6 +2029,30 @@ async def chat_message_stream(
         except Exception as e:
             logger.warning("Could not persist streamed response: %s", e)
 
+        # Persist the Foundry conversation_id so the next turn resumes the same thread.
+        # Extract it from the agent's last response_id if available.
+        try:
+            _new_conv_id = getattr(agent, "_last_response_id", None) or getattr(
+                agent, "last_response_id", None
+            )
+            if not _new_conv_id and hasattr(agent, "_agent"):
+                _new_conv_id = getattr(
+                    agent._agent, "_last_response_id", None
+                ) or getattr(agent._agent, "last_response_id", None)
+            if _new_conv_id and _new_conv_id != _foundry_conv_id:
+                await chat_svc.set_foundry_conversation_id(
+                    chat_request.session_id, user_id, _new_conv_id
+                )
+                logger.info(
+                    "Persisted new Foundry conversation_id=%s for session=%s",
+                    _new_conv_id,
+                    chat_request.session_id[:12],
+                )
+        except Exception as _persist_conv_err:
+            logger.warning(
+                "Could not persist foundry_conversation_id: %s", _persist_conv_err
+            )
+
         track_event_if_configured(
             "Chat_MultiTeam_Streaming",
             {
@@ -2307,6 +2366,28 @@ async def create_chat_session(request: Request):
     }
 
 
+@app_v4.post("/chat/sessions/{session_id}/reauth")
+async def notify_session_reauth(session_id: str, request: Request):
+    """Notify the backend that the user re-authenticated.
+
+    Clears the persisted Foundry conversation_id so the next chat turn
+    starts a fresh Foundry thread instead of trying to resume a thread
+    that is no longer accessible with the new OBO token.
+
+    The frontend must call this endpoint immediately after the device-code
+    flow completes (DeviceCodeCredential.get_token succeeded).
+    """
+    user_id, tenant_id = _extract_auth(request)
+    chat_svc = await get_chat_cosmos_service()
+    await chat_svc.clear_foundry_conversation_id(session_id, user_id)  # type: ignore
+    logger.info(
+        "Re-auth notified: cleared foundry_conversation_id for session=%s user=%s",
+        session_id,
+        user_id,
+    )
+    return {"ok": True, "session_id": session_id}
+
+
 # @app_v4.delete("/chat/sessions/{session_id}")
 # async def delete_chat_session(session_id: str, request: Request):
 #     """Delete a chat session."""
@@ -2334,7 +2415,7 @@ async def resume_plan(
     recovery fires immediately), this is a no-op — it does NOT start a second
     run, which would create a duplicate plan.
     """
-    user_id, tenant_id = _extract_auth(request)
+    user_id, tenant_id, user_access_token = _extract_auth_with_token(request)
     plan_id = payload.get("plan_id", "")
     if not plan_id:
         raise HTTPException(status_code=400, detail="plan_id is required")
@@ -2374,6 +2455,7 @@ async def resume_plan(
         team_switched=False,
         team_service=team_service,
         force_rebuild=True,
+        user_access_token=user_access_token,  # OBO: run agents as the user
     )
 
     input_task = InputTask(description=plan.initial_goal, session_id=plan.session_id)

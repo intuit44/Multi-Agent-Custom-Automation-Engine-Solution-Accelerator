@@ -1257,10 +1257,30 @@ class InspectorService(MCPToolBase):
                             "[connect_mcp_server] No inbound auth header: %s", e
                         )
 
-                # If still no token and we have user_id + server_name, try to resolve from registry
-                if not bearer and user_id and server_name:
+                # If still no token, resolve the registered connection's secret from
+                # the registry/Key Vault. The lookup MUST key on the AUTHENTICATED user
+                # (x-ms-client-principal-id header) — NOT the user_id the agent passed.
+                # The model guesses that value (e.g. "current_user" / a display name),
+                # which never matches how the connection was registered, so the lookup
+                # silently missed and forced passing a token by hand. Prefer the header;
+                # fall back to the passed user_id only when the header is absent.
+                lookup_user_id = user_id
+                try:
+                    from fastmcp.server.dependencies import get_http_headers
+
+                    _principal = get_http_headers(
+                        include={"x-ms-client-principal-id"}
+                    ).get("x-ms-client-principal-id")
+                    if _principal:
+                        lookup_user_id = _principal
+                except Exception:
+                    pass
+
+                if not bearer and lookup_user_id and server_name:
                     try:
-                        conn = await registry.get_user_connection(user_id, server_name)
+                        conn = await registry.get_user_connection(
+                            lookup_user_id, server_name
+                        )
                         if conn and conn.get("status") == "active":
                             secret_ref = conn.get("secret_ref", "")
                             if secret_ref and credential_resolver:
@@ -1277,7 +1297,7 @@ class InspectorService(MCPToolBase):
                                     if bearer:
                                         logger.info(
                                             f"[connect_mcp_server] Resolved access token for "
-                                            f"'{server_name}' from Key Vault (user: {user_id})"
+                                            f"'{server_name}' from Key Vault (user: {lookup_user_id})"
                                         )
                     except Exception as kv_err:
                         logger.debug(

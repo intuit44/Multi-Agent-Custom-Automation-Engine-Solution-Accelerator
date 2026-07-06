@@ -338,6 +338,7 @@ DIRECT RESPONSE MODE:
         team_switched: bool,
         team_service: Optional[TeamService] = None,
         force_rebuild: bool = False,
+        user_access_token: Optional[str] = None,
     ):
         """
         Return an existing workflow for the user or create a new one if:
@@ -411,6 +412,11 @@ DIRECT RESPONSE MODE:
                         user_id=user_id,
                         team_config_input=team_config,
                         memory_store=team_service.memory_context,
+                        # OBO: agents authenticate as the user (build_user_credential
+                        # → OnBehalfOfCredential). With offline_access the credential
+                        # self-renews downstream, so it survives long/approval-gated
+                        # runs without recreating agents. Falls back to app MI if None.
+                        user_access_token=user_access_token,
                     )
                     cls.logger.info(
                         "Created %d agents for user '%s'", len(agents), user_id

@@ -1768,6 +1768,11 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = {
       }
       {
         principalId: aiFoundryAiProjectPrincipalId
+        roleDefinitionIdOrName: 'Search Index Data Contributor'
+        principalType: 'ServicePrincipal'
+      }
+      {
+        principalId: aiFoundryAiProjectPrincipalId
         roleDefinitionIdOrName: 'Search Service Contributor'
         principalType: 'ServicePrincipal'
       }
