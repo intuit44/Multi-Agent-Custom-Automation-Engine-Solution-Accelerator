@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Enumerations
@@ -47,6 +47,26 @@ class MCPAuthType(str, Enum):
     API_KEY = "api_key"
     OAUTH2 = "oauth2"
     BEARER_TOKEN = "bearer_token"
+    MANAGED_IDENTITY = "managed_identity"
+
+
+class MCPCredentialSource(str, Enum):
+    """How the platform OBTAINS a valid token for the server.
+
+    Distinct from ``auth_type`` (what the target server sees on the wire — almost
+    always a Bearer). This says HOW we produce that token:
+
+    - ``static_secret``     — a fixed token stored in Key Vault. Expires; dev/fallback only.
+    - ``oauth_refresh``     — OAuth2 with a stored refresh_token; the resolver refreshes
+                              the access_token on expiry and writes the rotation back to
+                              Key Vault (Claude/Codex-style, for user-connected servers).
+    - ``managed_identity``  — mint a fresh AAD token per call from the platform's Managed
+                              Identity for ``audience``. Azure-only, operator-configured;
+                              nothing is stored.
+    """
+
+    STATIC_SECRET = "static_secret"
+    OAUTH_REFRESH = "oauth_refresh"
     MANAGED_IDENTITY = "managed_identity"
 
 
@@ -96,6 +116,17 @@ class MCPServerEntry(BaseModel):
 
     # Auth metadata (NO secrets — just what type and what fields are needed)
     auth_type: MCPAuthType = MCPAuthType.NONE
+
+    # How the platform OBTAINS the token (independent of auth_type, which is what
+    # the wire looks like). See MCPCredentialSource. The resolver dispatches on this.
+    credential_source: MCPCredentialSource = MCPCredentialSource.STATIC_SECRET
+    audience: Optional[str] = Field(
+        default=None,
+        description=(
+            "AAD audience/scope to mint a token for when credential_source is "
+            "managed_identity, e.g. 'ce34e7e5-485f-4d76-964f-b3d2b16d1e4f/.default'."
+        ),
+    )
     auth_fields: List[str] = Field(
         default_factory=list,
         description="Credential field names required, e.g. ['api_key'] or ['client_id','client_secret']",
@@ -148,6 +179,29 @@ class MCPServerEntry(BaseModel):
     def _normalize_added_by(cls, value):
         """Accept legacy/null catalog rows and coerce them to an empty string."""
         return value or ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_credential_source(cls, data):
+        """Infer credential_source from auth_type when it isn't given explicitly.
+
+        Keeps the App UI free of infra concepts: a user only picks an auth_type
+        (OAuth / API Key / Bearer) and the durable token strategy is derived —
+        oauth2 → oauth_refresh (refresh + write-back), api_key/bearer → static_secret.
+        An EXPLICIT credential_source (e.g. an operator PUT registering a Grafana-like
+        server as managed_identity) is always respected and never overwritten.
+        """
+        if isinstance(data, dict) and not data.get("credential_source"):
+            auth_type = data.get("auth_type")
+            auth_type = getattr(auth_type, "value", auth_type)  # accept enum or str
+            if auth_type == MCPAuthType.OAUTH2.value:
+                data["credential_source"] = MCPCredentialSource.OAUTH_REFRESH.value
+            elif auth_type in (
+                MCPAuthType.API_KEY.value,
+                MCPAuthType.BEARER_TOKEN.value,
+            ):
+                data["credential_source"] = MCPCredentialSource.STATIC_SECRET.value
+        return data
 
 
 class MCPUserConnection(BaseModel):

@@ -1232,6 +1232,44 @@ class InspectorService(MCPToolBase):
                 # Resolve bearer token: explicit arg wins, otherwise forward the
                 # Authorization header from the inbound MCP request (OBO flow).
                 bearer = access_token
+
+                # Read the server's credential_source from the catalog. This is the
+                # single knob for HOW we obtain a token (auth_type stays = what the
+                # wire sees, a Bearer). managed_identity is resolved here from the
+                # catalog alone (no user connection / no stored secret); static_secret
+                # and oauth_refresh are resolved from the user's Key Vault blob below.
+                _cred_source = "static_secret"
+                _audience = None
+                if not bearer and server_name:
+                    try:
+                        _entry = await registry.lookup_server(server_name)
+                        if _entry:
+                            _cred_source = (
+                                _entry.get("credential_source") or "static_secret"
+                            )
+                            _audience = _entry.get("audience") or (
+                                (_entry.get("oauth_scopes") or [None])[0]
+                            )
+                        if _cred_source == "managed_identity" and credential_resolver:
+                            bearer = await credential_resolver.resolve_valid_token(
+                                credential_source="managed_identity",
+                                audience=_audience,
+                            )
+                            if bearer:
+                                logger.info(
+                                    "[connect_mcp_server] Resolved managed-identity "
+                                    "token for '%s' (audience=%s)",
+                                    server_name,
+                                    _audience,
+                                )
+                    except Exception as mi_err:
+                        logger.error(
+                            "[connect_mcp_server] credential_source resolution failed "
+                            "for '%s': %s",
+                            server_name,
+                            mi_err,
+                        )
+
                 if not bearer:
                     try:
                         from fastmcp.server.dependencies import get_http_headers
@@ -1284,21 +1322,16 @@ class InspectorService(MCPToolBase):
                         if conn and conn.get("status") == "active":
                             secret_ref = conn.get("secret_ref", "")
                             if secret_ref and credential_resolver:
-                                creds = await credential_resolver.resolve_by_secret_ref(
-                                    secret_ref
+                                bearer = await credential_resolver.resolve_valid_token(
+                                    credential_source=_cred_source,
+                                    secret_ref=secret_ref,
                                 )
-                                if creds:
-                                    bearer = (
-                                        creds.get("access_token")
-                                        or creds.get("token")
-                                        or creds.get("api_key")
-                                        or next(iter(creds.values()), "")
+                                if bearer:
+                                    logger.info(
+                                        f"[connect_mcp_server] Resolved token for "
+                                        f"'{server_name}' from Key Vault "
+                                        f"(source={_cred_source}, user={lookup_user_id})"
                                     )
-                                    if bearer:
-                                        logger.info(
-                                            f"[connect_mcp_server] Resolved access token for "
-                                            f"'{server_name}' from Key Vault (user: {lookup_user_id})"
-                                        )
                     except Exception as kv_err:
                         logger.debug(
                             f"[connect_mcp_server] Could not resolve token from registry: {kv_err}"
@@ -1769,6 +1802,23 @@ class InspectorService(MCPToolBase):
                 Connection result or auth instructions.
             """
             try:
+                # Resolve the AUTHENTICATED user from the x-ms-client-principal-id
+                # header. The agent passes an unreliable user_id (default
+                # "sample_user"), which never matches how the connection was
+                # registered — so initiate_connection returns pending_auth and the
+                # Key Vault secret (only resolved when status==active) is never
+                # reached. Prefer the header; keep the passed value as fallback.
+                try:
+                    from fastmcp.server.dependencies import get_http_headers
+
+                    _principal = get_http_headers(
+                        include={"x-ms-client-principal-id"}
+                    ).get("x-ms-client-principal-id")
+                    if _principal:
+                        user_id = _principal
+                except Exception:
+                    pass
+
                 # 1. Lookup server in catalog
                 server = await registry.lookup_server(server_name)
                 if not server:
@@ -1837,45 +1887,40 @@ class InspectorService(MCPToolBase):
                         context="endpoint resolution",
                     )
 
-                # Build extra headers for auth servers
+                # Build extra headers by resolving a VALID token per the server's
+                # credential_source (managed_identity mints fresh from the platform MI;
+                # static_secret / oauth_refresh come from the user's Key Vault blob).
+                # auth_type stays = what the wire sees (a Bearer); HOW we get it lives
+                # in the resolver.
                 extra_headers: Dict[str, str] = {}
-                if auth_type != "none" and status == "active":
-                    secret_ref = connection.get("secret_ref", "")
-                    if secret_ref:
-                        # Resolve token from Key Vault using CredentialResolver
-                        if credential_resolver:
-                            try:
-                                creds = await credential_resolver.resolve_by_secret_ref(
-                                    secret_ref
-                                )
-                                # Extract access_token or fallback to 'token' field
-                                if creds:
-                                    bearer_token = creds.get(
-                                        "access_token"
-                                    ) or creds.get("token")
-                                    if bearer_token:
-                                        extra_headers["Authorization"] = (
-                                            f"Bearer {bearer_token}"
-                                        )
-                                        logger.info(
-                                            f"[connect_from_registry] Resolved token from Key Vault for '{server_name}'"
-                                        )
-                                    else:
-                                        logger.warning(
-                                            f"[connect_from_registry] secret_ref '{secret_ref}' resolved but no access_token found"
-                                        )
-                                else:
-                                    logger.warning(
-                                        f"[connect_from_registry] secret_ref '{secret_ref}' returned None from Key Vault"
-                                    )
-                            except Exception as kv_err:
-                                logger.error(
-                                    f"[connect_from_registry] Failed to resolve secret_ref '{secret_ref}': {kv_err}"
-                                )
+                if auth_type != "none" and status == "active" and credential_resolver:
+                    _cred_source = server.get("credential_source") or "static_secret"
+                    _audience = server.get("audience") or (
+                        (server.get("oauth_scopes") or [None])[0]
+                    )
+                    _secret_ref = connection.get("secret_ref", "")
+                    try:
+                        bearer_token = await credential_resolver.resolve_valid_token(
+                            credential_source=_cred_source,
+                            audience=_audience,
+                            secret_ref=_secret_ref,
+                        )
+                        if bearer_token:
+                            extra_headers["Authorization"] = f"Bearer {bearer_token}"
+                            logger.info(
+                                f"[connect_from_registry] Resolved token for "
+                                f"'{server_name}' (source={_cred_source})"
+                            )
                         else:
                             logger.warning(
-                                f"[connect_from_registry] CredentialResolver not available, cannot resolve secret_ref for '{server_name}'"
+                                f"[connect_from_registry] No token resolved for "
+                                f"'{server_name}' (source={_cred_source})"
                             )
+                    except Exception as kv_err:
+                        logger.error(
+                            f"[connect_from_registry] Token resolution failed for "
+                            f"'{server_name}': {kv_err}"
+                        )
 
                 # Already connected?
                 _reg_key = (user_id, server_name)

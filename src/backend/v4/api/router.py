@@ -3926,11 +3926,8 @@ async def update_mcp_server(server_id: str, request: Request):
         # Apply provided fields onto the existing entry. Never allow the body to
         # change the document identity / partition metadata.
         protected = {"id", "pk", "doc_type", "created_at"}
-        for key, value in body.items():
-            if key in protected:
-                continue
-            if hasattr(existing, key):
-                setattr(existing, key, value)
+        update_data = {k: v for k, v in body.items() if k not in protected}
+        existing = existing.model_copy(update=update_data)
 
         result = await svc.upsert_server(existing)
 
@@ -4265,6 +4262,27 @@ async def mcp_oauth_callback(code: str, state: str):
         return _html(
             f"No se pudo intercambiar el código: {exc}", ok=False, status_code=502
         )
+
+    # Enrich the raw provider response with everything credential_resolver needs to
+    # REFRESH this token later from ca-mcp — which has neither the token endpoint nor
+    # the OAuth client env vars. Without these, oauth_refresh cannot mint a new
+    # access_token when the current one expires. Providers rotate refresh_token, so
+    # the resolver also writes the rotation back (needs KV Secrets Officer on its MI).
+    import time as _time
+
+    token_data = dict(token_data)
+    token_data.setdefault("token_endpoint", server.oauth_token_url)
+    token_data.setdefault("client_id", client_id)
+    if client_secret:
+        token_data.setdefault("client_secret", client_secret)
+    if server.oauth_scopes:
+        token_data.setdefault("scopes", server.oauth_scopes)
+    _expires_in = token_data.get("expires_in")
+    if _expires_in and "expires_at" not in token_data:
+        try:
+            token_data["expires_at"] = str(int(_time.time()) + int(_expires_in))
+        except (TypeError, ValueError):
+            pass
 
     try:
         resolver = CredentialResolver()
