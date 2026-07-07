@@ -1229,18 +1229,15 @@ class InspectorService(MCPToolBase):
                 # Create and initialize new session
                 session = ExternalMCPSession(server_url, server_name)
 
-                # Resolve bearer token: explicit arg wins, otherwise forward the
-                # Authorization header from the inbound MCP request (OBO flow).
-                bearer = access_token
-
-                # Read the server's credential_source from the catalog. This is the
-                # single knob for HOW we obtain a token (auth_type stays = what the
-                # wire sees, a Bearer). managed_identity is resolved here from the
-                # catalog alone (no user connection / no stored secret); static_secret
-                # and oauth_refresh are resolved from the user's Key Vault blob below.
+                # Determine the server's credential_source from the catalog FIRST.
+                # A registry-managed source OWNS the token — for managed_identity the
+                # platform mints it and it MUST win over any access_token the caller
+                # passed (the agent helpfully sends a stale/wrong token, which 401s).
+                # An explicit access_token is honored only for direct/manual
+                # connections (raw URL or servers with no managed source).
                 _cred_source = "static_secret"
                 _audience = None
-                if not bearer and server_name:
+                if server_name:
                     try:
                         _entry = await registry.lookup_server(server_name)
                         if _entry:
@@ -1250,25 +1247,40 @@ class InspectorService(MCPToolBase):
                             _audience = _entry.get("audience") or (
                                 (_entry.get("oauth_scopes") or [None])[0]
                             )
-                        if _cred_source == "managed_identity" and credential_resolver:
-                            bearer = await credential_resolver.resolve_valid_token(
-                                credential_source="managed_identity",
-                                audience=_audience,
+                    except Exception as e:
+                        logger.debug(
+                            "[connect_mcp_server] catalog lookup failed for '%s': %s",
+                            server_name,
+                            e,
+                        )
+
+                bearer = None
+                if _cred_source == "managed_identity" and credential_resolver:
+                    # Platform-minted token WINS over anything the caller passed.
+                    try:
+                        bearer = await credential_resolver.resolve_valid_token(
+                            credential_source="managed_identity",
+                            audience=_audience,
+                        )
+                        if bearer:
+                            logger.info(
+                                "[connect_mcp_server] Resolved managed-identity token "
+                                "for '%s' (audience=%s)",
+                                server_name,
+                                _audience,
                             )
-                            if bearer:
-                                logger.info(
-                                    "[connect_mcp_server] Resolved managed-identity "
-                                    "token for '%s' (audience=%s)",
-                                    server_name,
-                                    _audience,
-                                )
                     except Exception as mi_err:
                         logger.error(
-                            "[connect_mcp_server] credential_source resolution failed "
-                            "for '%s': %s",
+                            "[connect_mcp_server] managed-identity mint failed for "
+                            "'%s': %s",
                             server_name,
                             mi_err,
                         )
+
+                # Caller-provided token — honored only for direct/manual connections
+                # (non-managed_identity servers).
+                if not bearer:
+                    bearer = access_token
 
                 if not bearer:
                     try:
