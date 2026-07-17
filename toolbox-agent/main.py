@@ -104,10 +104,12 @@ def main():
         credential=credential,
     )
 
+    code_interpreter_tool = {"type": "code_interpreter", "container": {"type": "auto"}}
+
     agent = Agent(
         client=client,
         instructions="You are a friendly assistant. Keep your answers brief.",
-        tools=toolbox,
+        tools=[toolbox, code_interpreter_tool],
         # History is managed by the hosting infrastructure; we don't need
         # the service to store it. See:
         # https://developers.openai.com/api/reference/resources/responses/methods/create

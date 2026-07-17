@@ -1,0 +1,25 @@
+# Use the COMPONENT package, NOT the `agent-framework` meta-package.
+# `agent-framework[foundry]` pins agent-framework-core to its OWN exact version:
+#   - at <1.9 that conflicts with agent-framework-foundry-hosting (needs core>=1.9.0)
+#   - at >=1.9 the meta pulls agent-framework-core[all] (anthropic, azure-ai-search,
+#     azurefunctions, ...) and pip dies with `resolution-too-deep`.
+# agent-framework-foundry depends on agent-framework-core UNBOUNDED, so it coexists
+# with core 1.9.0 (what foundry-hosting requires) and still provides BOTH
+# `agent_framework` (Agent, MCPStreamableHTTPTool) and
+# `agent_framework.foundry.FoundryChatClient` that main.py imports.
+agent-framework-foundry==1.8.2
+
+# Latest hosting release (protocol 2.0.0). REQUIRES agent.yaml AND
+# agent.manifest.yaml to declare `protocol: responses, version: 2.0.0` — with
+# 2.0.0 declared, the platform sends `call_id` and the agent runs, with full
+# code_interpreter_tool_call/result + hosted_file streaming. (If declared 1.0.0,
+# this raises "running on protocol 1.0.0, but the agent requires 2.0.0".)
+agent-framework-foundry-hosting==1.0.0a260709
+
+# REQUIRED but NOT declared by foundry-hosting (packaging bug in this alpha):
+# agent_framework_foundry_hosting/_responses.py does `from mcp import McpError`,
+# and MCPStreamableHTTPTool needs it too. Without `mcp` the container crashes at
+# import -> /readiness never returns 200 -> 424 session_not_ready.
+mcp==1.28.1
+
+debugpy

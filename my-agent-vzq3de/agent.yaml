@@ -20,6 +20,6 @@ metadata:
     - Background Mode
     - Python
 resources:
-  cpu: '0.5'
-  memory: 1.0Gi
+  cpu: '1.0'
+  memory: 2.0Gi
 dockerfile_path: Dockerfile

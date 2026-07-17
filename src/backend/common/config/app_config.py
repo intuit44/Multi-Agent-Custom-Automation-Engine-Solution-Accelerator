@@ -132,6 +132,34 @@ class AppConfig:
         self.AZURE_AI_AGENT_ENDPOINT = self._get_required("AZURE_AI_AGENT_ENDPOINT")
         self.AZURE_AI_PROJECT_ENDPOINT = self._get_optional("AZURE_AI_PROJECT_ENDPOINT")
 
+        # Deployed Foundry Hosted Agent that answers all chat (ReAct + Toolbox,
+        # server-side tools). The backend references it by name via
+        # AzureAIClient(use_latest_version=True) — it never republishes it.
+        self.CHAT_ORCHESTRATOR_AGENT_NAME = self._get_optional(
+            "CHAT_ORCHESTRATOR_AGENT_NAME", "my-agent-vzq3de"
+        )
+        # Chat is driven by the model's Responses API directly (account
+        # /openai endpoint) with the Toolbox attached as an MCP tool + a native
+        # code interpreter, instead of the deployed Hosted Agent — the hosted
+        # runtime silently drops code_interpreter items over the wire, so
+        # generated files can never be surfaced/downloaded. The direct call
+        # reproduces the Toolbox (tool search) AND exposes container_id/file_id
+        # for downloads. CHAT_ORCHESTRATOR_MODEL is the model deployment the
+        # Hosted Agent used (o4-mini); CHAT_TOOLBOX_NAME is its Toolbox name.
+        self.CHAT_ORCHESTRATOR_MODEL = self._get_optional(
+            "CHAT_ORCHESTRATOR_MODEL", "o4-mini"
+        )
+        self.CHAT_TOOLBOX_NAME = self._get_optional("CHAT_TOOLBOX_NAME", "Toolbox")
+        # Model Router front-door: chat is entered through the deployed Model
+        # Router (chat/completions), which routes to the best model per request
+        # and signals — via a function tool — when a task needs the Responses
+        # execution layer (code interpreter). The router itself cannot carry
+        # code_interpreter/mcp and is not usable on Responses/as an agent.
+        self.CHAT_ROUTER_MODEL = self._get_optional("CHAT_ROUTER_MODEL", "model-router")
+        self.CHAT_ROUTER_API_VERSION = self._get_optional(
+            "CHAT_ROUTER_API_VERSION", "2025-01-01-preview"
+        )
+
         # Azure Search settings
         self.AZURE_SEARCH_ENDPOINT = self._get_optional("AZURE_AI_SEARCH_ENDPOINT")
 
@@ -147,6 +175,29 @@ class AppConfig:
         # Optional MCP server endpoint (for local MCP server or remote)
         # Example: http://127.0.0.1:8000/mcp
         self.MCP_SERVER_ENDPOINT = self._get_optional("MCP_SERVER_ENDPOINT")
+        # PUBLIC ca-mcp (MacaeMcpServer) endpoint reachable by the Azure model
+        # service when the Responses API attaches ca-mcp DIRECTLY (needed so the
+        # identity header survives — the Foundry Toolbox proxy strips it). In prod
+        # this is the ca-mcp container's public ingress; in dev MCP_SERVER_ENDPOINT
+        # is usually localhost (unreachable by Azure), so point this at the deployed
+        # ca-mcp URL. Falls back to MCP_SERVER_ENDPOINT when unset.
+        self.MACAE_MCP_PUBLIC_ENDPOINT = (
+            self._get_optional("MACAE_MCP_PUBLIC_ENDPOINT")
+            or self.MCP_SERVER_ENDPOINT
+        )
+        # Foundry MCP Server (preview) — a NATIVE Foundry MCP (agents, models,
+        # evaluations, datasets, prompts, sessions, connections). Attached DIRECTLY
+        # by the backend as a capability (run_foundry_mcp), NOT registered by the
+        # user. It is Entra-OAuth protected; the token must carry the scope from its
+        # OAuth metadata (verified live): resource https://mcp.ai.azure.com, scope
+        # https://mcp.ai.azure.com/Foundry.Mcp.Tools. A ".default" token for that
+        # resource works (server accepts bearer via header).
+        self.FOUNDRY_MCP_ENDPOINT = self._get_optional(
+            "FOUNDRY_MCP_ENDPOINT", "https://mcp.ai.azure.com"
+        )
+        self.FOUNDRY_MCP_SCOPE = self._get_optional(
+            "FOUNDRY_MCP_SCOPE", "https://mcp.ai.azure.com/.default"
+        )
         self.MCP_SERVER_NAME = self._get_optional(
             "MCP_SERVER_NAME", "MCPGreetingServer"
         )

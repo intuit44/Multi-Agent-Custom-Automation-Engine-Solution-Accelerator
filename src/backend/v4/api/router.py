@@ -4,7 +4,7 @@ import logging
 import os
 import uuid
 from contextlib import AsyncExitStack
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from fastapi import (
     APIRouter,
@@ -623,9 +623,42 @@ async def chat_download_file(
                     detail="container_id is required to download generated container files",
                 )
 
-            project = app_config.get_ai_project_client()
+            # The container was created by the chat's direct Responses API call
+            # ({account}/openai, api-version 2025-03-01-preview). It must be read
+            # back through the SAME endpoint + identity: the project client
+            # (get_openai_client) targets a different scope and 404s ("Container
+            # not found"), and a user-scoped container is invisible to a
+            # different identity — so mirror _RouterChatClient's OBO bearer.
+            from openai import AsyncOpenAI
+
+            access_token = None
+            if request is not None:
+                try:
+                    _, _, access_token = _extract_auth_with_token(request)
+                except Exception:
+                    access_token = None
+            _obo_cred = None
             try:
-                openai = project.get_openai_client()
+                if access_token and app_config.ENABLE_OBO:
+                    _obo_cred = app_config.build_user_credential(access_token)
+                    bearer = (
+                        await _obo_cred.get_token("https://ai.azure.com/.default")
+                    ).token
+                else:
+                    bearer = (
+                        await app_config.get_shared_async_credential().get_token(
+                            "https://ai.azure.com/.default"
+                        )
+                    ).token
+                account = (app_config.AZURE_AI_PROJECT_ENDPOINT or "").split(
+                    "/api/projects/"
+                )[0]
+                openai = AsyncOpenAI(
+                    api_key=bearer,
+                    base_url=f"{account}/openai",
+                    default_query={"api-version": _DIRECT_RESPONSES_API_VERSION},
+                    timeout=60,
+                )
                 try:
                     file_info = await openai.containers.files.retrieve(
                         file_id=file_id,
@@ -643,8 +676,11 @@ async def chat_download_file(
                 finally:
                     await openai.close()
             finally:
-                if hasattr(project, "close"):
-                    await project.close()
+                if _obo_cred is not None:
+                    try:
+                        await _obo_cred.close()
+                    except Exception:
+                        pass
         else:
             from azure.ai.agents.aio import AgentsClient
 
@@ -840,6 +876,130 @@ async def chat_message(
 def _sse_event(data: dict) -> str:
     """Format a dict as an SSE data event."""
     return f"data: {json.dumps(data)}\n\n"
+
+
+def _safe_json_dumps(value: Any) -> str:
+    """Safely serialize arbitrary SDK objects for logs/SSE previews."""
+    try:
+        return json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        return str(value)
+
+
+def _to_safe_dict(value: Any, max_depth: int = 4, _depth: int = 0) -> Any:
+    """Best-effort conversion of SDK event objects to JSON-safe structures."""
+    if _depth >= max_depth:
+        return str(value)
+
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+
+    if isinstance(value, dict):
+        return {
+            str(k): _to_safe_dict(v, max_depth=max_depth, _depth=_depth + 1)
+            for k, v in value.items()
+        }
+
+    if isinstance(value, (list, tuple, set)):
+        return [_to_safe_dict(v, max_depth=max_depth, _depth=_depth + 1) for v in value]
+
+    # Pydantic-like models
+    for attr in ("model_dump", "dict"):
+        meth = getattr(value, attr, None)
+        if callable(meth):
+            try:
+                dumped = meth()
+                return _to_safe_dict(dumped, max_depth=max_depth, _depth=_depth + 1)
+            except Exception:
+                pass
+
+    # Generic object attributes
+    try:
+        if hasattr(value, "__dict__"):
+            return _to_safe_dict(
+                {
+                    k: v
+                    for k, v in vars(value).items()
+                    if not str(k).startswith("_") and not callable(v)
+                },
+                max_depth=max_depth,
+                _depth=_depth + 1,
+            )
+    except Exception:
+        pass
+
+    return str(value)
+
+
+def _extract_function_result_payload(item: Any) -> dict[str, Any]:
+    """Extract rich tool-result payload from response output items."""
+    safe_item = _to_safe_dict(item)
+    payload: dict[str, Any] = {
+        "type": getattr(item, "type", None),
+        "call_id": getattr(item, "call_id", None),
+        "status": getattr(item, "status", None),
+        "name": getattr(item, "name", None),
+        "arguments": getattr(item, "arguments", None),
+    }
+
+    # Common payload-bearing fields across SDK/event variants
+    for field in (
+        "output",
+        "result",
+        "content",
+        "text",
+        "value",
+        "message",
+        "stdout",
+        "stderr",
+    ):
+        val = getattr(item, field, None)
+        if val not in (None, ""):
+            payload[field] = _to_safe_dict(val)
+
+    # Include the raw normalized snapshot for forward compatibility/debugging
+    payload["raw"] = safe_item
+    return payload
+
+
+def _item_payload_str(item: Any, *fields: str) -> str:
+    """Return first non-empty string-ish payload from candidate fields."""
+    for field in fields:
+        val = getattr(item, field, None)
+        if val not in (None, ""):
+            if isinstance(val, str):
+                return val
+            return _safe_json_dumps(_to_safe_dict(val))
+    return ""
+
+
+def _extract_annotations(item: Any) -> list[dict]:
+    """Normalize annotations from output item into list[dict]."""
+    anns = getattr(item, "annotations", None) or []
+    out: list[dict] = []
+    for ann in anns:
+        if isinstance(ann, dict):
+            out.append(ann)
+        else:
+            out.append(
+                _to_safe_dict(ann) if isinstance(_to_safe_dict(ann), dict) else {}
+            )
+    return out
+
+
+def _build_hosted_file_from_annotation(ann: dict) -> Optional[Any]:
+    file_id = ann.get("file_id")
+    if not file_id:
+        return None
+    add_props = ann.get("additional_properties")
+    if not isinstance(add_props, dict):
+        add_props = {}
+    name = ann.get("url") or add_props.get("filename") or ann.get("text") or file_id
+    return _HostedHostedFile(
+        file_id=file_id,
+        name=name,
+        additional_properties=add_props,
+    )
 
 
 def _is_invokable_agent(agent: Any) -> bool:
@@ -1142,7 +1302,7 @@ def _merge_teams_for_direct_response(
                 input_key="",
                 type="",
                 name="ProxyAgent",
-                deployment_name="",
+                deployment_name=default_deployment_name,
                 icon="",
                 system_message="",
                 description="Clarification agent for missing user details.",
@@ -1166,6 +1326,1042 @@ def _merge_teams_for_direct_response(
         starting_tasks=[],
         user_id=user_id,
     )
+
+
+class _HostedTextContent:
+    """Content shim mimicking an agent_framework text content (.type / .text)."""
+
+    type = "text"
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _HostedFunctionCall:
+    """Content shim mimicking an agent_framework function_call (.name/.arguments)."""
+
+    type = "function_call"
+
+    def __init__(self, name: Optional[str], arguments: str = "") -> None:
+        self.name = name
+        self.arguments = arguments
+
+
+class _HostedFunctionResult:
+    """Content shim mimicking an agent_framework function_result (.name/.exception)."""
+
+    type = "function_result"
+
+    def __init__(
+        self,
+        name: Optional[str],
+        result: Optional[object] = None,
+        exception: Optional[object] = None,
+    ) -> None:
+        # name: tool name
+        # result: optional result payload
+        # exception: optional exception / error payload (truthy indicates failure)
+        self.name = name
+        self.result = result
+        self.exception = exception
+
+
+class _HostedCodeInterpreterToolCall:
+    """Hosted shim for code interpreter call activity."""
+
+    type = "code_interpreter_tool_call"
+
+    def __init__(self, input: str = "", arguments: str = "") -> None:
+        self.input = input
+        self.arguments = arguments
+
+
+class _HostedCodeInterpreterToolResult:
+    """Hosted shim for code interpreter result activity."""
+
+    type = "code_interpreter_tool_result"
+
+    def __init__(
+        self,
+        output: str = "",
+        stdout: str = "",
+        stderr: str = "",
+        annotations: Optional[list] = None,
+    ) -> None:
+        self.output = output
+        self.stdout = stdout
+        self.stderr = stderr
+        self.annotations = annotations or []
+
+
+class _HostedHostedFile:
+    """Hosted shim for generated/container file metadata."""
+
+    type = "hosted_file"
+
+    def __init__(
+        self,
+        file_id: Optional[str] = None,
+        name: Optional[str] = None,
+        additional_properties: Optional[dict] = None,
+    ) -> None:
+        self.file_id = file_id
+        self.name = name
+        self.additional_properties = additional_properties or {}
+
+
+class _HostedMcpServerToolCall:
+    """Hosted shim for a Toolbox/MCP tool call (attribute shape matches the SSE
+    handler's ``mcp_server_tool_call`` branch: tool_name/server_name/arguments)."""
+
+    type = "mcp_server_tool_call"
+
+    def __init__(
+        self,
+        tool_name: Optional[str] = None,
+        server_name: Optional[str] = None,
+        arguments: Optional[str] = None,
+    ) -> None:
+        self.tool_name = tool_name
+        self.server_name = server_name
+        self.arguments = arguments
+
+
+class _HostedMcpServerToolResult:
+    """Hosted shim for a Toolbox/MCP tool result (matches the SSE handler's
+    ``mcp_server_tool_result`` branch: tool_name/server_name/status)."""
+
+    type = "mcp_server_tool_result"
+
+    def __init__(
+        self,
+        tool_name: Optional[str] = None,
+        server_name: Optional[str] = None,
+        status: Optional[str] = None,
+        output: Optional[str] = None,
+    ) -> None:
+        self.tool_name = tool_name
+        self.server_name = server_name
+        self.status = status
+        self.output = output
+
+
+class _HostedUpdate:
+    """Update shim mimicking an agent_framework streaming update (.contents)."""
+
+    def __init__(self, contents: list) -> None:
+        self.contents = contents
+
+
+_HOSTED_ORCHESTRATOR_INSTRUCTIONS = (
+    "You are a helpful assistant with a Toolbox of tools — including "
+    "knowledge-base retrieval (knowledge_base_retrieve) over the user's "
+    "authoritative sources — and a code interpreter. Use knowledge_base_retrieve "
+    "when the user asks about their documents, organization, or domain knowledge. "
+    "Use the other Toolbox tools when the task needs external data or actions, and "
+    "the code interpreter to run code, do computation/analysis, and produce "
+    "downloadable files when the user asks for an artifact. You do NOT have a "
+    "persistent write-memory tool: within a conversation you remember from context, "
+    "but never claim to have permanently saved something you did not. Keep your "
+    "answers brief."
+)
+
+# api-version that enables the model's direct Responses API + code-interpreter
+# containers. Used by both the chat invoke and the file-download endpoint so the
+# container is created and read through the SAME scope (a mismatched scope 404s
+# with "Container not found").
+_DIRECT_RESPONSES_API_VERSION = "2025-03-01-preview"
+
+
+# Router function catalog: the coarse capability the Model Router
+# (chat/completions) can signal via a `function` tool call. chat/completions
+# accepts `function` tools but NOT hosted `code_interpreter`/`mcp` (verified
+# live), so this is HOW the router hands a code/file task down to the Responses
+# execution layer. Everything else (Toolbox, agents via FoundryMCPServer's
+# agent_invoke) is attached dynamically IN that layer, not here.
+def _capability(name: str, description: str, arg: str, arg_desc: str) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": {arg: {"type": "string", "description": arg_desc}},
+                "required": [arg],
+            },
+        },
+    }
+
+
+# The Model Router only ever sees CAPABILITIES (user intentions), never
+# implementations. The backend owns the capability -> implementation mapping (see
+# the dispatch in _RouterChatClient.invoke): e.g. run_python_execution ->
+# Responses+code interpreter, run_macae_mcp_server -> ca-mcp DIRECT (+identity),
+# run_knowledge_base -> Toolbox KBs, run_web_search -> native web_search. New
+# capabilities are one entry here + one dispatch branch — the router stays a
+# small semantic classifier and never learns Responses/MCP/Toolbox exist.
+_ROUTER_FUNCTIONS = [
+    _capability(
+        "run_python_execution",
+        "The request needs running Python code, computation, data analysis, or "
+        "producing a downloadable file (script, CSV, chart, plot, etc.).",
+        "task",
+        "The full, self-contained task to execute.",
+    ),
+    _capability(
+        "run_macae_mcp_server",
+        "The request needs the user's CONNECTED external MCP servers (MacaeMcpServer): "
+        "using/executing a connected server's tools, connecting or disconnecting a "
+        "server, listing connected servers, discovering a server's capabilities, or "
+        "the shared MCP memory/sessions (repositories, issues, monitoring, "
+        "dashboards, ARM, Grafana, etc.). NOT the user's knowledge bases (that is "
+        "run_knowledge_base) and NOT public web search (that is run_web_search). "
+        "Never answer from memory; this fetches real data via the tools.",
+        "task",
+        "The full, self-contained task for the connected MCP server(s).",
+    ),
+    _capability(
+        "run_knowledge_base",
+        "The request asks about the user's OWN documents, organization, domain "
+        "knowledge, or indexed sources — answerable from the user's knowledge bases "
+        "(Foundry IQ / Azure AI Search). NOT public web search and NOT a connected "
+        "external server. Retrieves authoritative, source-attributable content.",
+        "task",
+        "A well-formed query describing the information to retrieve from the KB.",
+    ),
+    _capability(
+        "run_foundry_mcp",
+        "The request is about managing/operating Azure AI Foundry ITSELF — Foundry "
+        "agents (list/get/create/update/invoke/delete), models (catalog, deploy, "
+        "benchmark, quotas, monitoring), evaluations and evaluators, datasets, "
+        "prompt optimization, project connections, or Foundry sessions. Uses the "
+        "native Foundry MCP Server. NOT the user's own connected external servers "
+        "(that is run_macae_mcp_server) and NOT knowledge bases.",
+        "task",
+        "The full, self-contained task for the Foundry MCP Server.",
+    ),
+    _capability(
+        "run_web_search",
+        "The request needs CURRENT PUBLIC information from the live internet — "
+        "news, recent events, latest releases/announcements, docs, prices, or "
+        "anything likely newer than your training data. Runs a real web search.",
+        "task",
+        "A well-formed web search query for the information needed.",
+    ),
+    # NOTE: there is NO "respond directly" capability. Answering the user is not a
+    # capability — it is the DEFAULT. When the router picks none of the above, the
+    # dispatch `else` branch routes the prompt through the same _execute_responses
+    # path (no tools), so every turn — tool or not — chains through one memory path.
+]
+
+
+class _RouterChatClient:
+    """Chat client for the direct-response path. **The entry point is the Model
+    Router**, NOT the Foundry Hosted Agent (the class name ``agent_name`` arg is
+    only a display label — no hosted agent is ever called; verified live by the
+    hit URLs).
+
+    Flow (``invoke``):
+    1. Petition -> **Model Router** (``model-router`` deployment,
+       ``{account}/openai/deployments/model-router/chat/completions``) with a
+       single ``function`` tool ``run_code_interpreter``. The router picks the
+       best/cheapest model AND signals — via that ``function_call`` — whether the
+       task needs code execution.
+    2. No ``function_call`` -> stream the router's own text answer straight
+       through (already the routed, appropriate model).
+    3. ``run_code_interpreter`` ``function_call`` -> ``_invoke_execution`` runs
+       o4-mini on the **direct Responses API** with a native code interpreter +
+       the Toolbox as an MCP tool, and surfaces a downloadable file.
+
+    Why the execution layer talks to the model DIRECTLY (not the Hosted Agent):
+    the hosted runtime re-serves its inner agent over
+    ``.../protocols/openai/responses`` but **silently drops the
+    ``code_interpreter_call`` items and the container reference** — verified
+    live: over that endpoint only ``reasoning`` + ``message`` items ever reach
+    the client (stream, non-stream, and ``store=True`` retrieve all agree),
+    ``container_id``/``file_id`` never appear, so a generated file surfaces only
+    as a dead ``sandbox:/mnt/data/...`` link and can never be downloaded.
+
+    Calling the model directly with the **Toolbox attached as an MCP tool** +
+    a native **code interpreter** reproduces exactly what the Hosted Agent did
+    (tool search over the same server-side Toolbox — verified: ``mcp_list_tools``
+    returns the Toolbox tools) AND exposes ``container_id`` on the
+    ``code_interpreter_call`` plus a ``container_file_citation`` annotation
+    (``file_id`` + ``container_id`` + ``filename``) on the assistant message —
+    which the ``/chat/download-file/{file_id}?container_id=...`` endpoint turns
+    into a real download.
+
+    This adapter keeps ``FoundryAgentTemplate.invoke()``'s contract — yields
+    updates exposing ``.contents`` — so the SSE streaming handler is reused
+    unchanged. It never publishes or mutates any agent.
+    """
+
+    def __init__(
+        self,
+        agent_name: str,
+        user_access_token: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
+        from common.config.app_config import config
+
+        self.agent_name = agent_name
+        self._last_response_id: Optional[str] = None
+        # End-user access token (EasyAuth/Bearer) for on-behalf-of calls. When
+        # present, the call is made as the *user*, not the app Managed Identity
+        # — required so Foundry propagates a real delegated user context to the
+        # Toolbox's user-scoped connectors.
+        self._user_access_token = user_access_token
+        # Authenticated user id (principal). Sent to ca-mcp DIRECTLY as the
+        # x-ms-client-principal-id header (see run_macae_mcp_server) so ca-mcp
+        # resolves the real user for its Cosmos connection lookups — deterministic,
+        # from the backend, outside the prompt (validated: sentinel round-trips on a
+        # DIRECT attach; the Foundry Toolbox proxy strips it).
+        self._user_id = user_id or ""
+        self._user_cred = None
+        # AZURE_AI_PROJECT_ENDPOINT is {account}/api/projects/{project}. The
+        # model's OpenAI-compatible Responses API lives at the ACCOUNT root
+        # ({account}/openai, api-version 2025-03-01-preview — the first version
+        # that enables the Responses API), while the Toolbox MCP lives under the
+        # project ({project}/toolboxes/{name}/mcp).
+        project = (config.AZURE_AI_PROJECT_ENDPOINT or "").rstrip("/")
+        account = project.split("/api/projects/")[0]
+        self._openai_base_url = f"{account}/openai"
+        self._api_version = _DIRECT_RESPONSES_API_VERSION
+        self._model = config.CHAT_ORCHESTRATOR_MODEL
+        self._toolbox_label = config.CHAT_TOOLBOX_NAME
+        self._toolbox_url = (
+            f"{project}/toolboxes/{config.CHAT_TOOLBOX_NAME}/mcp?api-version=v1"
+        )
+        # ca-mcp (MacaeMcpServer) DIRECT endpoint — attached without the Foundry
+        # Toolbox proxy so the x-ms-client-principal-id identity header reaches
+        # ca-mcp. Must be reachable by the Azure model service (public); see
+        # MACAE_MCP_PUBLIC_ENDPOINT (dev localhost is unreachable → point it at the
+        # deployed ca-mcp).
+        self._macae_mcp_url = config.MACAE_MCP_PUBLIC_ENDPOINT or ""
+        # Foundry MCP Server (preview) — native Foundry MCP, attached DIRECTLY as
+        # the run_foundry_mcp capability. Entra-OAuth protected: its token needs the
+        # FOUNDRY_MCP_SCOPE (Foundry.Mcp.Tools), minted separately from the
+        # ai.azure.com token in _bearer (see _foundry_mcp_bearer).
+        self._foundry_mcp_url = config.FOUNDRY_MCP_ENDPOINT or "https://mcp.ai.azure.com"
+        self._foundry_mcp_scope = (
+            config.FOUNDRY_MCP_SCOPE or "https://mcp.ai.azure.com/.default"
+        )
+        # Model Router front-door (chat/completions). It routes to the best model
+        # AND, via the run_code_interpreter function tool, signals when a task
+        # needs the Responses execution layer. It CANNOT carry code_interpreter/mcp
+        # and is not usable on Responses or as an agent model (all verified), so it
+        # stays a pure front-door decision maker.
+        self._router_model = config.CHAT_ROUTER_MODEL
+        self._router_base_url = (
+            f"{account}/openai/deployments/{config.CHAT_ROUTER_MODEL}"
+        )
+        self._router_api_version = config.CHAT_ROUTER_API_VERSION
+
+    async def _bearer(self) -> str:
+        from common.config.app_config import config
+
+        # Prefer the end user's identity (OBO) ONLY when OBO is provisioned.
+        # The hosted agent's Toolbox lists user-scoped connectors (WorkIQ
+        # Teams/Mail, outlook, arm, Foundry, AzureDevOps) that REJECT an
+        # application (Managed Identity) caller — "requires a delegated Microsoft
+        # Entra user context" — and a single failed source aborts the whole
+        # tools/list, so the agent emits nothing. Calling on-behalf-of the user
+        # makes Foundry propagate a real user context to the Toolbox.
+        #
+        # The ENABLE_OBO gate is deliberate: without it, build_user_credential
+        # returns a passthrough of the raw user token (wrong audience for the
+        # Foundry data plane) which would break the call. In local dev
+        # (ENABLE_OBO off) we fall through to the shared credential, which
+        # resolves to the developer's az-login user anyway — so dev keeps working.
+        if self._user_access_token and config.ENABLE_OBO:
+            if self._user_cred is None:
+                self._user_cred = config.build_user_credential(self._user_access_token)
+            token = await self._user_cred.get_token("https://ai.azure.com/.default")
+            return token.token
+
+        # No user token / OBO not enabled: borrow the process-shared credential
+        # (app identity in prod, az-login user in dev). Never closed here — owned
+        # by the app lifespan.
+        cred = config.get_shared_async_credential()
+        token = await cred.get_token("https://ai.azure.com/.default")
+        return token.token
+
+    async def _foundry_mcp_bearer(self) -> str:
+        """Token for the Foundry MCP Server (preview). Its OAuth metadata requires
+        the scope ``https://mcp.ai.azure.com/Foundry.Mcp.Tools`` — a DIFFERENT
+        audience than ai.azure.com — so it is minted separately from ``_bearer``.
+        On-behalf-of the user when OBO is provisioned (the server runs OBO with the
+        user's Entra identity and needs Contributor on the project), else the
+        process-shared credential (app MI in prod, az-login user in dev).
+        """
+        from common.config.app_config import config
+
+        if self._user_access_token and config.ENABLE_OBO:
+            if self._user_cred is None:
+                self._user_cred = config.build_user_credential(self._user_access_token)
+            token = await self._user_cred.get_token(self._foundry_mcp_scope)
+            return token.token
+        cred = config.get_shared_async_credential()
+        token = await cred.get_token(self._foundry_mcp_scope)
+        return token.token
+
+    async def invoke(self, prompt: str, history: Optional[list] = None, **_ignored):
+        """Entry point: the Model Router picks a CAPABILITY, the backend runs it.
+
+        The petition hits the deployed **Model Router** (chat/completions), which
+        routes to the best model AND — via the ``_ROUTER_FUNCTIONS`` capability
+        catalog — signals the user's INTENT as a ``function_call``. Memory comes
+        from ``history`` (rebuilt from Cosmos + Azure AI Search, NOT
+        previous_response_id) passed into the router's ``messages`` and the
+        execution ``input``. This method maps each capability to its implementation:
+
+        * ``run_python_execution`` -> ``_execute_responses`` with code interpreter
+          (o4-mini via Responses -> downloadable file).
+        * ``run_macae_mcp_server`` -> ``_execute_responses`` with ca-mcp attached
+          DIRECTLY + the identity header (connected external MCP servers, with the
+          real user resolved; forces a real tool call, no fabricating).
+        * ``run_knowledge_base`` -> ``_execute_responses`` with the Toolbox MCP
+          (the user's KBs / Foundry IQ knowledge_base_retrieve).
+        * ``run_web_search`` -> ``_execute_responses`` with the native web_search.
+        * no capability picked -> the router already answered directly, streamed
+          live from its OWN selected model (with ``history`` for memory). Answering
+          is not a capability, so nothing more runs.
+
+        Tool turns target o4-mini (a tool-capable deployment); no-tool turns are
+        answered by whichever model the router selected.
+        """
+        from openai import AsyncOpenAI
+
+        bearer = await self._bearer()
+        router = AsyncOpenAI(
+            api_key=bearer,
+            base_url=self._router_base_url,
+            default_query={"api-version": self._router_api_version},
+            timeout=120,
+        )
+        _fn_name = ""
+        _fn_args = ""
+        _router_answered = False
+        # history (Cosmos + AI Search) gives the router memory; chat/completions is
+        # stateless, so the conversation is supplied as prior messages.
+        _messages = list(history or []) + [{"role": "user", "content": prompt}]
+        try:
+            stream = await router.chat.completions.create(
+                model=self._router_model,
+                messages=cast(Any, _messages),
+                tools=cast(Any, _ROUTER_FUNCTIONS),
+                stream=True,
+            )
+            async for chunk in stream:
+                choice = chunk.choices[0] if getattr(chunk, "choices", None) else None
+                if choice is None:
+                    continue
+                delta = getattr(choice, "delta", None)
+                if delta is None:
+                    continue
+                for tc in getattr(delta, "tool_calls", None) or []:
+                    fn = getattr(tc, "function", None)
+                    if fn is None:
+                        continue
+                    if getattr(fn, "name", None):
+                        _fn_name = fn.name
+                    if getattr(fn, "arguments", None):
+                        _fn_args += fn.arguments
+                # Stream the router's OWN answer live for no-tool turns: it comes
+                # from the model the router selected AND remembers (history is in
+                # messages). Tool turns emit tool_calls with no content, so this
+                # only fires for direct replies. Guarded on _fn_name so a late
+                # tool_call never mixes with streamed text.
+                content = getattr(delta, "content", None)
+                if content and not _fn_name:
+                    _router_answered = True
+                    yield _HostedUpdate([_HostedTextContent(content)])
+        finally:
+            await router.close()
+
+        import json as _json
+
+        try:
+            _args = _json.loads(_fn_args or "{}")
+        except Exception:
+            _args = {}
+
+        # Capability -> implementation dispatch. The router chose a CAPABILITY
+        # (intention); the backend maps it to the execution that serves it. Add a
+        # capability = one entry in _ROUTER_FUNCTIONS + one branch here; the router
+        # never learns the implementation.
+        logger.info(
+            "Router decision: function=%s args=%s",
+            _fn_name or "<none>",
+            _args,
+        )
+        if _fn_name == "run_python_execution":
+            logger.info("Dispatching run_python_execution")
+            task = _args.get("task") or prompt
+            async for update in self._execute_responses(
+                task, history, use_code_interpreter=True
+            ):
+                yield update
+        elif _fn_name == "run_macae_mcp_server":
+            logger.info("Dispatching run_macae_mcp_server")
+            task = _args.get("task") or prompt
+            async for update in self._execute_responses(
+                task, history, use_macae=True
+            ):
+                yield update
+        elif _fn_name == "run_knowledge_base":
+            logger.info("Dispatching run_knowledge_base")
+            task = _args.get("task") or prompt
+            async for update in self._execute_responses(
+                task, history, use_toolbox=True
+            ):
+                yield update
+        elif _fn_name == "run_foundry_mcp":
+            logger.info("Dispatching run_foundry_mcp")
+            task = _args.get("task") or prompt
+            async for update in self._execute_responses(
+                task, history, use_foundry=True
+            ):
+                yield update
+        elif _fn_name == "run_web_search":
+            logger.info("Dispatching run_web_search")
+            task = _args.get("task") or prompt
+            async for update in self._execute_responses(
+                task, history, use_web_search=True
+            ):
+                yield update
+        elif _router_answered:
+            # No capability AND the router already streamed its own answer above
+            # (its selected model, with history for memory). Nothing more to run.
+            logger.info("Direct answer streamed by the router's selected model")
+        else:
+            # Router emitted neither a tool nor any text: fall back to o4-mini +
+            # Toolbox so the turn still gets memory/knowledge and an answer.
+            logger.info("Router produced nothing; falling back to o4-mini execution")
+            async for update in self._execute_responses(prompt, history):
+                yield update
+
+    async def _execute_responses(
+        self,
+        prompt: str,
+        history: Optional[list] = None,
+        *,
+        use_code_interpreter: bool = False,
+        use_toolbox: bool = False,
+        use_web_search: bool = False,
+        use_macae: bool = False,
+        use_foundry: bool = False,
+    ):
+        """Execution layer: o4-mini via the direct Responses API. Tools per
+        capability:
+        * ``use_macae`` (run_macae_mcp_server) -> ca-mcp (MacaeMcpServer) attached
+          DIRECTLY (its own endpoint, NOT the Foundry Toolbox) with the
+          x-ms-client-principal-id identity header. The Toolbox proxy strips that
+          header, so the direct attach is what makes ca-mcp resolve the real user.
+          The Toolbox is NOT attached here; its KBs are a separate capability.
+        * otherwise the Toolbox MCP is attached (memory + KBs + external tools); the
+          code interpreter is added for ``run_python_execution`` and the NATIVE
+          Responses ``web_search`` tool for ``run_web_search``.
+        Yields the same content shims, so the SSE handler and download-file flow are
+        untouched.
+        """
+        from openai import AsyncOpenAI
+
+        from common.config.app_config import config
+
+        # The Toolbox is attached on every turn EXCEPT the focused Foundry-MCP turn.
+        # ca-mcp is no longer attached directly (run_macae_mcp_server goes through
+        # the Toolbox), so there is no macae_direct anymore.
+        logger.info(
+            "Responses tools: code_interpreter=%s web_search=%s foundry_direct=%s "
+            "toolbox=%s",
+            use_code_interpreter,
+            use_web_search,
+            use_foundry,
+            not use_foundry,
+        )
+
+        # Official OpenAI SDK pointed at the model's direct Responses API
+        # (account /openai endpoint). base_url + default_query yield
+        # {account}/openai/responses?api-version=2025-03-01-preview.
+        bearer = await self._bearer()
+        client = AsyncOpenAI(
+            api_key=bearer,
+            base_url=self._openai_base_url,
+            default_query={"api-version": self._api_version},
+            timeout=180,
+        )
+        # Base tool set. For run_macae_mcp_server we attach ca-mcp (MacaeMcpServer)
+        # DIRECTLY — NOT via the Foundry Toolbox — because the Toolbox proxy strips
+        # the x-ms-client-principal-id header (proven live) and ca-mcp would fall
+        # back to a placeholder user, never matching how the user's connection was
+        # stored. A DIRECT attach carries the identity header to ca-mcp, which reads
+        # it (verified: sentinel round-trips), so its Cosmos connection lookups run
+        # as the real user — deterministic, from the backend, outside the prompt.
+        # Every OTHER execution turn attaches the Foundry Toolbox (memory + KBs +
+        # external tools). require_approval="never" runs tool calls without pausing.
+        if use_foundry:
+            # Foundry MCP Server (preview), native, attached DIRECTLY. Entra-OAuth
+            # protected → needs a token for the Foundry.Mcp.Tools scope (a DIFFERENT
+            # audience than ai.azure.com), minted by _foundry_mcp_bearer. Verified
+            # live: this attach exposes the full ~75-tool server with no 424.
+            foundry_bearer = await self._foundry_mcp_bearer()
+            tools: list = [
+                {
+                    "type": "mcp",
+                    "server_label": "FoundryMCPServer",
+                    "server_url": self._foundry_mcp_url,
+                    "require_approval": "never",
+                    "headers": {"Authorization": f"Bearer {foundry_bearer}"},
+                }
+            ]
+        elif use_macae:
+            # Toolbox ONLY (tool_search + call_tool) for the user's Cosmos-registered
+            # servers. ca-mcp is reached THROUGH the Toolbox proxy
+            # (MacaeMcpServer___call_external_tool), where Foundry resolves the
+            # per-server credential — verified: connects (status=active) and runs
+            # e.g. amgmcp_query_resource_log on azuremanagedgrafana with NO 401.
+            # Attaching ca-mcp DIRECTLY made the model prefer ca-mcp's own
+            # call_external_tool, which resolves the credential itself and 401s on
+            # managed_identity servers (Grafana). So NO direct ca-mcp here — the
+            # Foundry-managed path is the one that works. (Identity propagation for
+            # native Foundry servers lives in run_foundry_mcp, not here.)
+            tools = [
+                {
+                    "type": "mcp",
+                    "server_label": self._toolbox_label,
+                    "server_url": self._toolbox_url,
+                    "require_approval": "never",
+                    "headers": {
+                        "Authorization": f"Bearer {bearer}",
+                        "Foundry-Features": "Toolboxes=V1Preview",
+                    },
+                },
+            ]
+        else:
+            tools = [
+                {
+                    "type": "mcp",
+                    "server_label": self._toolbox_label,
+                    "server_url": self._toolbox_url,
+                    "require_approval": "never",
+                    "headers": {
+                        "Authorization": f"Bearer {bearer}",
+                        "Foundry-Features": "Toolboxes=V1Preview",
+                    },
+                }
+            ]
+        instructions = _HOSTED_ORCHESTRATOR_INSTRUCTIONS
+        if use_code_interpreter:
+            tools.append({"type": "code_interpreter", "container": {"type": "auto"}})
+        if use_web_search:
+            # The NATIVE Responses web_search tool DOES return results (verified
+            # live); the Toolbox's call_tool->web_search returns nothing. Attach it
+            # ALONGSIDE the Toolbox (Toolbox stays for memory/KB) and steer the
+            # model to the native tool so it never detours into the broken path.
+            tools.append({"type": "web_search"})
+        # Capability-specific steer so o4-mini actually uses the attached tool.
+        if use_foundry:
+            instructions = (
+                "You have the Foundry MCP Server tools to operate Azure AI Foundry: "
+                "agents (agent_get/agent_list/agent_update/agent_invoke/…), models, "
+                "evaluations, datasets, prompt optimization, project connections and "
+                "sessions. Foundry tools that need a project take projectEndpoint="
+                f"'{config.AZURE_AI_PROJECT_ENDPOINT}'. Call the appropriate tool; "
+                "you do NOT already know this data — never fabricate. Keep it brief."
+            )
+        elif use_macae:
+            instructions = (
+                "You work with the user's connected external MCP servers (GitHub, "
+                "Grafana/monitoring, ARM, etc.) through the Toolbox. To run a tool "
+                "on a REGISTERED server, use call_tool with the MacaeMcpServer "
+                "meta-tools in this order: MacaeMcpServer___connect_from_registry "
+                "{server_name} to connect, then MacaeMcpServer___call_external_tool "
+                "{server_name, target_tool, arguments} to execute the tool. "
+                "(MacaeMcpServer___list_connected_servers / discover_mcp_capabilities "
+                "help you find server/tool names.) Do this via the Toolbox — that is "
+                "the path that resolves credentials and avoids 401s. You do NOT "
+                "already know this data — call the tools; never fabricate. Keep the "
+                "answer brief."
+            )
+        elif use_web_search:
+            instructions = (
+                "Use the web_search tool to fetch CURRENT public information from "
+                "the live internet and answer with cited sources. Do NOT answer "
+                "from memory; you MUST use web_search. Keep the final answer brief."
+            )
+        elif use_toolbox and not use_code_interpreter:
+            instructions = (
+                "Use the available tools (knowledge_base_retrieve for the user's "
+                "documents/knowledge, or other connected tools) to fetch REAL data. "
+                "You do NOT already know this — you MUST call a tool; never "
+                "fabricate. Keep the final answer brief."
+            )
+        elif use_code_interpreter:
+            instructions = (
+                "Use the code interpreter to run Python, do the computation or "
+                "analysis, and produce downloadable files when asked. Keep the "
+                "final answer brief."
+            )
+        call_names: dict = {}  # call_id -> tool name, to label tool results
+        # Memory = the conversation itself, rebuilt from Cosmos + AI Search and
+        # passed as `input` message items (NOT previous_response_id). store=False:
+        # nothing is threaded server-side; the next turn recovers context from the
+        # real plumbing, not a fragile response id.
+        create_kwargs: dict = {
+            "model": self._model,
+            "input": list(history or []) + [{"role": "user", "content": prompt}],
+            "stream": True,
+            "tools": tools,
+            "instructions": instructions,
+            "store": False,
+        }
+        try:
+            stream = await client.responses.create(**create_kwargs)
+            async for evt in stream:
+                etype = getattr(evt, "type", None)
+                if etype == "response.output_text.delta":
+                    delta = getattr(evt, "delta", "") or ""
+                    if delta:
+                        yield _HostedUpdate([_HostedTextContent(delta)])
+                elif etype == "response.output_item.added":
+                    item = getattr(evt, "item", None)
+                    _itype_added = (
+                        getattr(item, "type", None) if item is not None else None
+                    )
+                    if _itype_added == "function_call":
+                        call_id = getattr(item, "call_id", None)
+                        if call_id:
+                            call_names[call_id] = getattr(item, "name", None)
+                        # Some hosted streams include arguments on added item; surface early.
+                        added_args = getattr(item, "arguments", None) or ""
+                        if added_args:
+                            yield _HostedUpdate(
+                                [
+                                    _HostedFunctionCall(
+                                        getattr(item, "name", None),
+                                        str(added_args),
+                                    )
+                                ]
+                            )
+                    elif _itype_added in (
+                        "code_interpreter_call",
+                        "code_interpreter_tool_call",
+                    ):
+                        # Native code interpreter CALL starts (status=in_progress).
+                        # On the direct model the code is empty here and streams
+                        # separately via response.code_interpreter_call_code.*,
+                        # so only surface the call if the code is already present
+                        # (avoids an empty "calling" activity pre-empting the
+                        # real code in the SSE handler's first-call dedup).
+                        _code = getattr(item, "code", "") or ""
+                        if _code:
+                            yield _HostedUpdate(
+                                [
+                                    _HostedCodeInterpreterToolCall(
+                                        input=_code, arguments=_code
+                                    )
+                                ]
+                            )
+                    elif _itype_added == "web_search_call":
+                        # Native web_search arranca (in_progress/searching). Lo
+                        # surface como mcp_server_tool_call el handler SSE pinta el
+                        # chip "web_search" reusando el render de MCP (sin tocar el
+                        # # frontend).
+                        _wq = ""
+                        _act = getattr(item, "action", None)
+                        if _act is not None:
+                            _wq = (
+                                getattr(_act, "query", None)
+                                or (_act.get("query") if isinstance(_act, dict) else "")
+                                or ""
+                            )
+                        yield _HostedUpdate(
+                            [
+                                _HostedMcpServerToolCall(
+                                    tool_name="web_search",
+                                    server_name="Web_search",
+                                    arguments=_wq,
+                                )
+                            ]
+                        )
+
+                elif etype == "response.function_call_arguments.done":
+                    # Tool "calling" — surfaced with the full arguments payload
+                    # so the UI shows what the hosted agent is executing.
+                    yield _HostedUpdate(
+                        [
+                            _HostedFunctionCall(
+                                getattr(evt, "name", None),
+                                getattr(evt, "arguments", "") or "",
+                            )
+                        ]
+                    )
+                elif etype == "response.code_interpreter_call_code.done":
+                    # The direct model streams the code interpreter's source here
+                    # (not on the call item). Surface it as the call activity so
+                    # the UI can display the executed code.
+                    _ci_code = getattr(evt, "code", "") or ""
+                    if _ci_code:
+                        yield _HostedUpdate(
+                            [
+                                _HostedCodeInterpreterToolCall(
+                                    input=_ci_code, arguments=_ci_code
+                                )
+                            ]
+                        )
+                elif etype == "response.output_item.done":
+                    item = getattr(evt, "item", None)
+                    itype = getattr(item, "type", None)
+                    call_id = (
+                        getattr(item, "call_id", None) if item is not None else None
+                    )
+                    if itype == "function_call" and call_id:
+                        call_names[call_id] = getattr(item, "name", None)
+                    elif itype in (
+                        "code_interpreter_call",
+                        "code_interpreter_tool_call",
+                        "code_interpreter_tool_result",
+                    ):
+                        # Native code interpreter RESULT — this DONE event carries the
+                        # completed run. item.type is "code_interpreter_call" on BOTH
+                        # added and done (there is NO "code_interpreter_result" type);
+                        # the DONE event = completion. Verified fields: code,
+                        # container_id, outputs (list), status.
+                        _code = getattr(item, "code", "") or ""
+                        _container_id = getattr(item, "container_id", None)
+                        _outputs = getattr(item, "outputs", None) or []
+                        stdout_text = ""
+                        annotations: list[dict] = []
+                        for _o in _outputs:
+                            _od = _o if isinstance(_o, dict) else _to_safe_dict(_o)
+                            if not isinstance(_od, dict):
+                                continue
+                            _otype = _od.get("type")
+                            if _otype in ("logs", "text", "console"):
+                                stdout_text += str(
+                                    _od.get("logs")
+                                    or _od.get("text")
+                                    or _od.get("content")
+                                    or ""
+                                )
+                            _fid = _od.get("file_id") or _od.get("id")
+                            if _fid and _otype in ("image", "file", "files"):
+                                annotations.append(
+                                    {
+                                        "file_id": _fid,
+                                        "additional_properties": {
+                                            "container_id": _container_id,
+                                            "filename": _od.get("filename")
+                                            or _od.get("name"),
+                                        },
+                                    }
+                                )
+                        yield _HostedUpdate(
+                            [
+                                _HostedCodeInterpreterToolResult(
+                                    output=stdout_text or _code,
+                                    stdout=stdout_text,
+                                    stderr="",
+                                    annotations=annotations,
+                                )
+                            ]
+                        )
+                        for ann in annotations:
+                            hf = _build_hosted_file_from_annotation(ann)
+                            if hf is not None:
+                                yield _HostedUpdate([hf])
+
+                        # Backward-compatible generic function_result emission.
+                        payload = _extract_function_result_payload(item)
+                        _status = (getattr(item, "status", None) or "").lower()
+                        exception_payload = (
+                            payload
+                            if _status in {"error", "failed", "failure"}
+                            else None
+                        )
+                        name = (
+                            call_names.get(call_id)
+                            or getattr(item, "name", None)
+                            or "code_interpreter"
+                        )
+                        yield _HostedUpdate(
+                            [
+                                _HostedFunctionResult(
+                                    name, result=payload, exception=exception_payload
+                                )
+                            ]
+                        )
+                    elif itype == "function_call_output":
+                        # Tool finished — surface both rich typed content (for existing
+                        # SSE branches) and generic function_result (backward compatibility).
+                        name = (
+                            call_names.get(call_id)
+                            or getattr(item, "name", None)
+                            or "tool"
+                        )
+                        payload = _extract_function_result_payload(item)
+                        exception_payload = None
+                        status = (
+                            (payload.get("status") or "").lower()
+                            if payload.get("status")
+                            else ""
+                        )
+                        output_text = _item_payload_str(
+                            item, "output", "result", "content", "text", "message"
+                        )
+                        stdout_text = _item_payload_str(item, "stdout")
+                        stderr_text = _item_payload_str(item, "stderr")
+                        annotations = _extract_annotations(item)
+
+                        # Heuristic fallback only for generic function_call_output.
+                        is_code_interpreter = False
+                        name_l = (name or "").lower()
+                        if "code_interpreter" in name_l:
+                            is_code_interpreter = True
+                        else:
+                            raw_s = _safe_json_dumps(payload.get("raw", {})).lower()
+                            out_s = output_text.lower()
+                            if (
+                                "code_interpreter" in raw_s
+                                or "container_file_citation" in raw_s
+                                or "cfile_" in raw_s
+                                or "code_interpreter" in out_s
+                            ):
+                                is_code_interpreter = True
+
+                        if is_code_interpreter:
+                            yield _HostedUpdate(
+                                [
+                                    _HostedCodeInterpreterToolResult(
+                                        output=output_text,
+                                        stdout=stdout_text,
+                                        stderr=stderr_text,
+                                        annotations=annotations,
+                                    )
+                                ]
+                            )
+                            for ann in annotations:
+                                hf = _build_hosted_file_from_annotation(ann)
+                                if hf is not None:
+                                    yield _HostedUpdate([hf])
+
+                        if status in {"error", "failed", "failure"}:
+                            exception_payload = payload
+                        yield _HostedUpdate(
+                            [
+                                _HostedFunctionResult(
+                                    name, result=payload, exception=exception_payload
+                                )
+                            ]
+                        )
+                    elif itype in ("mcp_call", "mcp_tool_call"):
+                        # A Toolbox / MCP tool call on the direct Responses stream
+                        # (item fields: name, server_label, arguments, output,
+                        # error, status). Surface it as mcp_server_tool_call +
+                        # _result so the SSE handler's tool_activity branches fire,
+                        # plus a generic function_result for backward compat. WITHOUT
+                        # this branch a Toolbox tool call is invisible (dropped).
+                        _tool_name = getattr(item, "name", None)
+                        _server = getattr(item, "server_label", None) or getattr(
+                            item, "server_name", None
+                        )
+                        _args = _item_payload_str(item, "arguments", "input")
+                        _err = getattr(item, "error", None)
+                        _out = _item_payload_str(item, "output", "result", "content")
+                        _status = (
+                            "error"
+                            if _err
+                            else (getattr(item, "status", None) or "completed")
+                        )
+                        yield _HostedUpdate(
+                            [
+                                _HostedMcpServerToolCall(
+                                    tool_name=_tool_name,
+                                    server_name=_server,
+                                    arguments=_args,
+                                )
+                            ]
+                        )
+                        yield _HostedUpdate(
+                            [
+                                _HostedMcpServerToolResult(
+                                    tool_name=_tool_name,
+                                    server_name=_server,
+                                    status=_status,
+                                    output=_out or (str(_err) if _err else ""),
+                                )
+                            ]
+                        )
+                        yield _HostedUpdate(
+                            [
+                                _HostedFunctionResult(
+                                    _tool_name or "mcp_tool",
+                                    result=_out,
+                                    exception=(str(_err) if _err else None),
+                                )
+                            ]
+                        )
+                    elif itype == "web_search_call":
+                        # Native web_search_termino - cierra el chip de
+                        _wstatus = getattr(item, "status", None) or "completed"
+                        yield _HostedUpdate(
+                            [
+                                _HostedMcpServerToolResult(
+                                    tool_name="web-search",
+                                    server_name="Web-Search",
+                                    status=_wstatus,
+                                    output="",
+                                )
+                            ]
+                        )
+                    elif itype == "message":
+                        # The direct model surfaces code-interpreter file
+                        # references as container_file_citation annotations on the
+                        # assistant message (file_id + container_id + filename at
+                        # top level — NOT in the code_interpreter_call outputs,
+                        # which are []). Convert each into the internal hosted_file
+                        # shape (container_id under additional_properties) so the
+                        # SSE handler emits a generated_file with a download_url.
+                        for _c in getattr(item, "content", None) or []:
+                            for _a in getattr(_c, "annotations", None) or []:
+                                _ad = _a if isinstance(_a, dict) else _to_safe_dict(_a)
+                                if not isinstance(_ad, dict):
+                                    continue
+                                _fid = _ad.get("file_id")
+                                if not _fid:
+                                    continue
+                                hf = _build_hosted_file_from_annotation(
+                                    {
+                                        "file_id": _fid,
+                                        "additional_properties": {
+                                            "container_id": _ad.get("container_id"),
+                                            "filename": _ad.get("filename")
+                                            or _ad.get("name"),
+                                        },
+                                    }
+                                )
+                                if hf is not None:
+                                    yield _HostedUpdate([hf])
+                elif etype in ("response.created", "response.completed"):
+                    resp = getattr(evt, "response", None)
+                    rid = getattr(resp, "id", None)
+                    if rid:
+                        self._last_response_id = rid
+        finally:
+            await client.close()
+
+    async def close(self) -> None:
+        # Close only the per-user OBO credential we created here. The shared app
+        # credential (used when no user token is present) is owned by the app
+        # lifespan and must not be closed.
+        if self._user_cred is not None:
+            try:
+                await self._user_cred.close()
+            except Exception:
+                pass
+            self._user_cred = None
 
 
 async def _create_direct_response_workflow(
@@ -1263,12 +2459,12 @@ async def _create_direct_response_workflow(
         # ProxyAgent-only build: the workflow graph is never run in this path.
         return None, agents, direct_team
 
-    workflow = await OrchestrationManager.init_direct_response_orchestration(
-        agents=agents,
-        team_config=direct_team,
-        user_id=user_id,
+    # Full build fallback (proxy_only=False or no ProxyAgent entry found).
+    # This path is not used by the SSE chat stream but kept for future callers.
+    raise NotImplementedError(
+        "Full direct-response workflow build is no longer supported. "
+        "Use proxy_only=True or route TASK intent through process_request."
     )
-    return workflow, agents, direct_team
 
 
 async def _close_direct_response_agents(agents: list[Any]) -> None:
@@ -1307,11 +2503,13 @@ async def chat_message_stream(
     - {type: "error", message}
     """
 
-    from v4.orchestration.intent_router import Intent, IntentRouter
+    from v4.orchestration.intent_router import Intent
 
     authenticated_user = get_authenticated_user_details(request_headers=request.headers)
     user_id = authenticated_user["user_principal_id"]
     tenant_id = authenticated_user.get("tenant_id", "")
+    # End-user token for on-behalf-of invocation of the hosted agent, so its
+    # Toolbox sees a real delegated user context (not the app Managed Identity).
     user_access_token = authenticated_user.get("access_token")
 
     if not chat_request.session_id:
@@ -1439,51 +2637,25 @@ async def chat_message_stream(
         )
     # ── End clarification guard ──────────────────────────────────
 
-    if active_plan:
-        from v4.orchestration.intent_router import IntentResult
+    # Intent router removed from chat: the deployed Hosted Agent orchestrator
+    # answers ALL chat and decides tool use / clarification itself (ReAct loop).
+    # Formal Plan mode is reached explicitly (future UI selector → process_request),
+    # not inferred here — this collapses the old router → intent-router → router
+    # double hop. The pending-clarification guard above still short-circuits when a
+    # plan is actively waiting for an answer.
+    from v4.orchestration.intent_router import IntentResult
 
-        intent_result = IntentResult(
-            intent=Intent.CONVERSATIONAL,
-            confidence=1.0,
-            reasoning="active plan follow-up",
-        )
-    else:
-        intent_result = await IntentRouter.classify_async(
-            chat_request.message, previous_intent=previous_intent
-        )
+    intent_result = IntentResult(
+        intent=Intent.CONVERSATIONAL,
+        confidence=1.0,
+        reasoning="hosted orchestrator answers all chat",
+    )
     logger.info(
-        "Chat stream intent: %s (confidence=%.2f, prev=%s) for message: %s",
-        intent_result.intent.value,
-        intent_result.confidence,
+        "Chat stream (hosted orchestrator, no intent routing; prev=%s): %s",
         previous_intent,
         chat_request.message[:80],
     )
-
-    if active_plan and intent_result.intent == Intent.TASK:
-        logger.info(
-            "plan_id=%s present — routing TASK as active plan follow-up",
-            chat_request.plan_id,
-        )
-        from v4.orchestration.intent_router import IntentResult
-
-        intent_result = IntentResult(
-            intent=Intent.CONVERSATIONAL,
-            confidence=intent_result.confidence,
-            reasoning="active plan follow-up, not a new task",
-        )
-
     plan_id: Optional[str] = None
-    if intent_result.intent == Intent.TASK:
-        try:
-            input_task = InputTask(
-                session_id=chat_request.session_id,
-                description=chat_request.message,
-            )
-            result = await process_request(background_tasks, input_task, request)
-            plan_id = result.get("plan_id")
-        except Exception as e:
-            logger.error("Error creating plan from streaming chat: %s", e)
-            plan_id = None
 
     # ── SSE async generator ──────────────────────────────────────
     async def event_stream():
@@ -1540,57 +2712,32 @@ async def chat_message_stream(
         try:
             await _cleanup.__aenter__()
             code_interpreter_call_emitted = False
-            from v4.magentic_agents.foundry_agent import FoundryAgentTemplate
+            # Route chat to the deployed Foundry Hosted Agent (default:
+            # my-agent-vzq3de). It carries its own instructions + Toolbox
+            # (server-side tools) and is reached through its dedicated agent
+            # endpoint — AzureAIClient / FoundryAgentTemplate cannot invoke it.
+            # _RouterChatClient mirrors the FoundryAgentTemplate.invoke()
+            # contract so the streaming body below is reused unchanged.
+            from common.config.app_config import config
 
-            # Create merged team with ALL agents from ALL teams
-            (
-                workflow,
-                direct_agents,
-                direct_team,
-            ) = await _create_direct_response_workflow(
-                user_id=user_id,
-                tenant_id=tenant_id,
-                team_config_input=active_plan_team,
+            orchestrator_name = (
+                getattr(config, "CHAT_ORCHESTRATOR_AGENT_NAME", "") or ""
+            ).strip()
+            if not orchestrator_name:
+                raise ValueError(
+                    "CHAT_ORCHESTRATOR_AGENT_NAME is not set; no chat agent configured."
+                )
+            agent = _RouterChatClient(
+                orchestrator_name,
                 user_access_token=user_access_token,
-                proxy_only=True,
+                user_id=user_id,
             )
-            direct_team_name = getattr(direct_team, "name", "Direct Response Team")
-            for _a in direct_agents:
-                if callable(getattr(_a, "close", None)):
-                    _cleanup.push_async_callback(_a.close)
-
-            # Select best agent from merged team using keyword scoring
-            foundry_agents = [
-                a for a in direct_agents if isinstance(a, FoundryAgentTemplate)
-            ]
-            if not foundry_agents:
-                raise ValueError("No FoundryAgent available in merged team")
-
-            agent = await _select_team_agent(
-                chat_request.message, direct_team, foundry_agents
-            )
-            selected_agent_name = _agent_runtime_name(agent) or "assistant"
-            logger.info(
-                "Selected '%s' from merged team (session=%s, %d agents available)",
-                selected_agent_name,
-                chat_request.session_id[:12],
-                len(foundry_agents),
-            )
-
-            direct_chat_prompt = (
-                _build_plan_chat_prompt(
-                    chat_request.message,
-                    direct_team,
-                    agent,
-                    active_plan,
-                )
-                if active_plan
-                else _build_direct_chat_prompt(
-                    chat_request.message,
-                    direct_team,
-                    agent,
-                )
-            )
+            _cleanup.push_async_callback(agent.close)
+            selected_agent_name = orchestrator_name
+            direct_team_name = "Hosted Orchestrator"
+            foundry_agents: list = []
+            # The Hosted Agent has its own system prompt — send the message raw.
+            direct_chat_prompt = chat_request.message
 
             # --- Ensure MCP OAuth before invoking the agent ---
             try:
@@ -1609,7 +2756,8 @@ async def chat_message_stream(
 
                     svc = await MCPConnectionsService.get_instance()
                     server = await svc.get_server_by_name(
-                        mcp_cfg.name, tenant_id=tenant_id
+                        mcp_cfg.name,
+                        tenant_id=tenant_id,
                     )
                     if server and server.auth_type == MCPAuthType.OAUTH2:
                         user_conn = await svc.get_user_connection(
@@ -1655,30 +2803,56 @@ async def chat_message_stream(
 
             _last_tool_activity_key: Optional[tuple] = None
 
-            # Recover Foundry conversation thread across re-auth / process restarts.
-            # The conversation_id is persisted in Cosmos after each turn so the
-            # next invoke can resume the same Foundry thread instead of starting fresh.
-            _foundry_conv_id: Optional[str] = None
+            # Rebuild conversation memory from the REAL plumbing (Cosmos + Azure AI
+            # Search), NOT previous_response_id (fragile: breaks on re-auth / session
+            # regen). Two layers, deduped, oldest→newest:
+            #   long memory  → hybrid keyword+vector+semantic retrieval across ALL of
+            #                  the user's history (search_chat_history), so a relevant
+            #                  fact from any past session/turn comes back regardless
+            #                  of any sliding window;
+            #   short memory → this session's turns in order (authoritative
+            #                  conversational continuity).
+            # add_message already writes+indexes every turn, so this read closes the
+            # loop. The current user message was just persisted, so it is skipped.
+            _history: list = []
             try:
-                _foundry_conv_id = await chat_svc.get_foundry_conversation_id(
-                    chat_request.session_id, user_id
+                _seen: set = set()
+                _cur = (chat_request.message or "").strip()
+                from common.services.search_index_service import (
+                    get_search_index_service,
                 )
-                if _foundry_conv_id:
-                    logger.info(
-                        "Resuming Foundry conversation thread: conv_id=%s session=%s",
-                        _foundry_conv_id,
-                        chat_request.session_id[:12],
-                    )
-            except Exception as _conv_err:
-                logger.warning("Could not load foundry_conversation_id: %s", _conv_err)
+
+                _search_svc = await get_search_index_service()
+                _hits = await _search_svc.search_chat_history(
+                    query=chat_request.message,
+                    user_id=user_id,
+                    top_k=15,
+                )
+                for _h in sorted(_hits, key=lambda x: x.get("timestamp", "")):
+                    _c = (_h.get("content") or "").strip()
+                    if _c and _c != _cur and _c not in _seen:
+                        _seen.add(_c)
+                        _history.append({"role": _h.get("role", "user"), "content": _c})
+                _session = await chat_svc.get_session(chat_request.session_id, user_id)
+                for _m in (_session or {}).get("messages", []):
+                    _c = (_m.get("content") or "").strip()
+                    if _c and _c != _cur and _c not in _seen:
+                        _seen.add(_c)
+                        _history.append({"role": _m.get("role", "user"), "content": _c})
+                logger.info(
+                    "Recovered %d context messages (Cosmos+Search) for session=%s",
+                    len(_history),
+                    chat_request.session_id[:12],
+                )
+            except Exception as _hist_err:
+                logger.warning("Could not rebuild chat history: %s", _hist_err)
 
             _invoke_kwargs: dict = {
                 "session_id": chat_request.session_id,
                 "user_id": user_id,
                 "file_ids": chat_request.file_ids,
+                "history": _history,
             }
-            if _foundry_conv_id:
-                _invoke_kwargs["previous_response_id"] = _foundry_conv_id
 
             async for update in agent.invoke(
                 direct_chat_prompt,
@@ -1731,10 +2905,14 @@ async def chat_message_stream(
                             )
 
                     elif ct == "function_result":
+                        _result_obj = getattr(content, "result", content)
+                        _result_preview = _safe_json_dumps(_to_safe_dict(_result_obj))[
+                            :1000
+                        ]
                         logger.info(
                             "Function result: name=%s result=%s",
                             getattr(content, "name", "?"),
-                            str(getattr(content, "result", content))[:4000],
+                            _result_preview[:4000],
                         )
                         _key = ("result", content.name or "unknown")
                         if _key != _last_tool_activity_key:
@@ -1745,6 +2923,7 @@ async def chat_message_stream(
                                     "activity": "result",
                                     "tool": content.name or "unknown",
                                     "success": content.exception is None,
+                                    "result_preview": _result_preview,
                                 }
                             )
 
@@ -2029,29 +3208,9 @@ async def chat_message_stream(
         except Exception as e:
             logger.warning("Could not persist streamed response: %s", e)
 
-        # Persist the Foundry conversation_id so the next turn resumes the same thread.
-        # Extract it from the agent's last response_id if available.
-        try:
-            _new_conv_id = getattr(agent, "_last_response_id", None) or getattr(
-                agent, "last_response_id", None
-            )
-            if not _new_conv_id and hasattr(agent, "_agent"):
-                _new_conv_id = getattr(
-                    agent._agent, "_last_response_id", None
-                ) or getattr(agent._agent, "last_response_id", None)
-            if _new_conv_id and _new_conv_id != _foundry_conv_id:
-                await chat_svc.set_foundry_conversation_id(
-                    chat_request.session_id, user_id, _new_conv_id
-                )
-                logger.info(
-                    "Persisted new Foundry conversation_id=%s for session=%s",
-                    _new_conv_id,
-                    chat_request.session_id[:12],
-                )
-        except Exception as _persist_conv_err:
-            logger.warning(
-                "Could not persist foundry_conversation_id: %s", _persist_conv_err
-            )
+        # No conversation_id to persist: memory rides on Cosmos + AI Search, which
+        # add_message already wrote+indexed above (user + assistant turns). The next
+        # turn recovers context from that real plumbing — no previous_response_id.
 
         track_event_if_configured(
             "Chat_MultiTeam_Streaming",
@@ -4074,13 +5233,20 @@ async def connect_user_to_mcp_server(server_name: str, request: Request):
         credentials = body.get("credentials")
 
         # Determine status and secret_ref
-        from v4.common.models.mcp_connection_models import MCPAuthType
+        from v4.common.models.mcp_connection_models import (
+            MCPAuthType,
+            MCPCredentialSource,
+        )
 
         status = MCPConnectionStatus.PENDING_AUTH
         secret_ref = None
         oauth_url: Optional[str] = None
 
         if server.auth_type == MCPAuthType.NONE:
+            status = MCPConnectionStatus.ACTIVE
+        elif server.credential_source == MCPCredentialSource.MANAGED_IDENTITY:
+            # Managed Identity tokens are minted by the platform at call time;
+            # no user credentials needed — mark active immediately.
             status = MCPConnectionStatus.ACTIVE
         elif credentials:
             try:

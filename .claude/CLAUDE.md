@@ -72,9 +72,18 @@ All v4 routes live in one large file: `v4/api/router.py`. There are **two distin
 - Foundry agent definitions are **reused by name** (`_FOUNDRY_REGISTERED_AGENT_NAMES` in `common/lifecycle.py`) to avoid version sprawl; set `MACAE_FORCE_AGENT_PUBLISH=1` to force a new published version.
 - Lifecycle base: `MCPEnabledBase` (`magentic_agents/common/lifecycle.py`) owns the per-run `AsyncExitStack`, the MCP tool, and (only) a per-user OBO credential it created.
 
-### MCP — two disconnected mechanisms (important)
-- **Agent runtime MCP** comes from `MCPConfig.from_env()` → the single `MCP_SERVER_ENDPOINT` server. That is the only MCP an agent built by the factory will call.
-- **The UI "Aplicaciones" connector registry** (`POST /mcp/connections/...`, `MCPConnectionsService`) persists per-user connections to the Cosmos `mcp_connections` container (secrets in Key Vault via `credential_resolver.py`). **The agent runtime does NOT consume this registry** — registering/connecting a server in the UI does not make any agent able to call it. Servers attached in the **Foundry portal** reach agents only because they're bound server-side to the published Foundry agent.
+### MCP — how agents reach external servers
+- **Agent runtime MCP** comes from `MCPConfig.from_env()` → the single `MCP_SERVER_ENDPOINT` server (**MacaeMcpServer**, the `ca-mcp` container). That is the only MCP endpoint an agent built by the factory calls directly.
+- **The connector registry IS reachable by agents — indirectly, through MacaeMcpServer's tools.** MacaeMcpServer exposes `connect_from_registry` / `connect_mcp_server` / `discover_mcp_capabilities` / `call_external_tool` (`src/mcp_server/services/inspector_service.py`). An agent calls these; they look up the server in the Cosmos `mcp_connections` catalog (`MCPConnectionsService`, populated by the UI "Aplicaciones" registry `POST /mcp/connections/...`) and connect to the external server on the agent's behalf. So registering a server in the UI **does** make it usable — via these tools, not as a directly-bound agent tool. (Servers bound in the **Foundry portal** are a separate path: they reach agents because they're attached server-side to the published Foundry agent.)
+
+### MCP credential model — `auth_type` vs `credential_source` (`MCPServerEntry`)
+The catalog separates two concepts (`src/backend/v4/common/models/mcp_connection_models.py`):
+- **`auth_type`** = what the target server sees on the wire — almost always `bearer_token` (standard MCP).
+- **`credential_source`** = HOW MacaeMcpServer obtains a valid token. One dispatcher — `credential_resolver.resolve_valid_token(credential_source, audience, secret_ref)` in `src/mcp_server/credential_resolver.py` (self-contained twin, NOT the backend one) — handles all three:
+  - `static_secret` — fixed token from Key Vault. Dev/fallback only; expires (~1h → 401).
+  - `oauth_refresh` — OAuth2 with a stored refresh_token; refreshes the access_token near expiry and **writes the rotation back** to Key Vault (Claude/Codex-style, for user-connected servers). The OAuth callback (`router.py` `/mcp/connections/oauth/callback`) persists the full blob (`token_endpoint`, `client_id`, `client_secret`, `expires_at`, `scopes`); write-back needs KV write (the ca-mcp MI has Key Vault Administrator).
+  - `managed_identity` — mints a **fresh AAD token per call** from the ca-mcp MI for `audience` (Azure Managed Grafana: `ce34e7e5-485f-4d76-964f-b3d2b16d1e4f/.default`); nothing stored. Operator path for Azure platform resources; the MI needs a role on the target (e.g. Grafana Viewer). A `managed_identity` source **WINS over any `access_token` the agent passes** — `access_token` is honored only for direct/manual (raw-URL) connections.
+- `credential_source` is **derived** from `auth_type` on register (`_derive_credential_source` validator: oauth2→oauth_refresh, api_key/bearer→static_secret), so the App UI needs no new fields — `managed_identity` is set explicitly by operator `PUT /mcp/connections/servers/{id}`. NOT exposed as a UI auth type (MI is not an MCP-client concept).
 
 ### Persistence & telemetry
 - Cosmos DB throughout: chat history (`common/services/chat_cosmos_service.py`), plans, MCP connections. `config.COSMOSDB_DATABASE` + per-purpose containers.
@@ -86,6 +95,8 @@ All v4 routes live in one large file: `v4/api/router.py`. There are **two distin
 - A transient AOAI `500` is `openai.APIError` (base) — it has **no `status_code`**, only `.code`/`.type` (e.g. `"server_error"`). Only `APIStatusError` subclasses carry `status_code`.
 - The frontend silently full-reloads to `/` in local dev when `reauthSilently()` (`src/frontend/src/api/config.tsx`) hits a missing EasyAuth (`/.auth/login/aad`) endpoint — guard EasyAuth redirects to non-localhost only.
 - Foundry agent definitions persist server-side; local instructions changes in `data/agent_teams/*.json` won't take effect until republished (`MACAE_FORCE_AGENT_PUBLISH=1`).
+- **`aiohttp` must be a `src/mcp_server` dependency.** `azure.*.aio` (the `ManagedIdentityCredential` token mint AND Key Vault reads in `credential_resolver`) uses `aiohttp` as its async transport; if it's absent azure-core raises `"aiohttp package is not installed"`, the token is never obtained, and the upstream request goes out with **no `Authorization` header → 401** (silent — the failure is only in the ca-mcp log, not the HTTP error).
+- **`update_mcp_server` must apply body via `existing.model_copy(update=...)`, not a `setattr` loop.** Pydantic v2 does not coerce on plain `setattr` (no `validate_assignment`), so a str like `"managed_identity"` set onto an enum field serializes back as `None` in `model_dump` — the update silently drops `credential_source`/`audience`. `model_copy(update=...)` runs it through model construction and keeps the enum. (It does NOT re-run validators, so it won't re-derive `credential_source` on an `auth_type`-only edit — fine for explicit PUTs.)
 
 ## Stale references to ignore (pre-Agent-Framework)
 

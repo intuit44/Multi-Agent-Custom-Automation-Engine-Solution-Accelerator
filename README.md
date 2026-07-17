@@ -183,6 +183,14 @@ You may want to consider additional security measures, such as:
 
 <br/>
 
+### Developer documentation
+
+| Topic | Description |
+|---|---|
+| [MCP Connectors — registry & credential flow](./docs/MCP_CONNECTORS.md) | How agents reach external MCP servers (Grafana, GitHub, …); `auth_type` vs `credential_source` (`static_secret` / `oauth_refresh` / `managed_identity`); registering servers, prerequisites, and troubleshooting 401s. |
+
+<br/>
+
 ### Cross references
 Check out similar solution accelerators
 
