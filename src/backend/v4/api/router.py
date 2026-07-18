@@ -1511,15 +1511,19 @@ _ROUTER_FUNCTIONS = [
     ),
     _capability(
         "run_macae_mcp_server",
-        "The request needs the user's CONNECTED external MCP servers (MacaeMcpServer): "
-        "using/executing a connected server's tools, connecting or disconnecting a "
-        "server, listing connected servers, discovering a server's capabilities, or "
-        "the shared MCP memory/sessions (repositories, issues, monitoring, "
-        "dashboards, ARM, Grafana, etc.). NOT the user's knowledge bases (that is "
-        "run_knowledge_base) and NOT public web search (that is run_web_search). "
+        "The request needs to USE the tools of an external connected server — "
+        "e.g. Infobip, GitHub (list branches, PRs, issues, files, commits), ARM (list "
+        "resources, subscriptions), Grafana (dashboards, metrics), Outlook/mail "
+        "(send/read email), or any other server available in the Toolbox. "
+        "The task MUST be worded as a direct tool action (e.g. 'list branches of "
+        "repo X using GitHub tools', 'send email via Outlook tools') so the "
+        "execution model calls the tool directly. "
+        "NOT the user's knowledge bases (that is run_knowledge_base) and NOT "
+        "public web search (that is run_web_search). "
         "Never answer from memory; this fetches real data via the tools.",
         "task",
-        "The full, self-contained task for the connected MCP server(s).",
+        "The full, self-contained task expressed as a DIRECT tool action "
+        "(e.g. 'Use GitHub___list_branches to list branches of owner=X repo=Y').",
     ),
     _capability(
         "run_knowledge_base",
@@ -1917,16 +1921,6 @@ class _RouterChatClient:
                 }
             ]
         elif use_macae:
-            # Toolbox ONLY (tool_search + call_tool) for the user's Cosmos-registered
-            # servers. ca-mcp is reached THROUGH the Toolbox proxy
-            # (MacaeMcpServer___call_external_tool), where Foundry resolves the
-            # per-server credential — verified: connects (status=active) and runs
-            # e.g. amgmcp_query_resource_log on azuremanagedgrafana with NO 401.
-            # Attaching ca-mcp DIRECTLY made the model prefer ca-mcp's own
-            # call_external_tool, which resolves the credential itself and 401s on
-            # managed_identity servers (Grafana). So NO direct ca-mcp here — the
-            # Foundry-managed path is the one that works. (Identity propagation for
-            # native Foundry servers lives in run_foundry_mcp, not here.)
             tools = [
                 {
                     "type": "mcp",

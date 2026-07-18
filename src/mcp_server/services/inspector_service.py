@@ -935,12 +935,22 @@ class RegistryBridge:
         self.base = f"{backend_url}/api/v4/mcp/connections"
         self._client = httpx.AsyncClient(timeout=10.0)
 
-    def _user_headers(self, user_id: str) -> Dict[str, str]:
-        """Build auth headers for requests on behalf of a user."""
-        return {
+    def _user_headers(
+        self, user_id: str, bearer_token: Optional[str] = None
+    ) -> Dict[str, str]:
+        """Build auth headers for requests on behalf of a user.
+
+        Forwards the caller's Bearer token so the backend's
+        get_authenticated_user_details can resolve a real identity
+        instead of falling back to sample_user.
+        """
+        headers: Dict[str, str] = {
             "x-ms-client-principal-id": user_id,
             "x-ms-client-principal-name": user_id,
         }
+        if bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
+        return headers
 
     async def lookup_server(self, server_name: str) -> Optional[Dict[str, Any]]:
         """Look up a server in the catalog by name."""
@@ -983,13 +993,13 @@ class RegistryBridge:
             return None
 
     async def initiate_connection(
-        self, user_id: str, server_name: str
+        self, user_id: str, server_name: str, bearer_token: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """Initiate / create a user connection to a cataloged server."""
         try:
             resp = await self._client.post(
                 f"{self.base}/user/{server_name}/connect",
-                headers=self._user_headers(user_id),
+                headers=self._user_headers(user_id, bearer_token),
             )
             resp.raise_for_status()
             return resp.json()
@@ -1244,8 +1254,9 @@ class InspectorService(MCPToolBase):
                             _cred_source = (
                                 _entry.get("credential_source") or "static_secret"
                             )
-                            _audience = _entry.get("audience") or (
-                                (_entry.get("oauth_scopes") or [None])[0]
+                            _audience = (
+                                _entry.get("audience")
+                                or ((_entry.get("oauth_scopes") or [None])[0])
                             )
                     except Exception as e:
                         logger.debug(
@@ -1814,20 +1825,19 @@ class InspectorService(MCPToolBase):
                 Connection result or auth instructions.
             """
             try:
-                # Resolve the AUTHENTICATED user from the x-ms-client-principal-id
-                # header. The agent passes an unreliable user_id (default
-                # "sample_user"), which never matches how the connection was
-                # registered — so initiate_connection returns pending_auth and the
-                # Key Vault secret (only resolved when status==active) is never
-                # reached. Prefer the header; keep the passed value as fallback.
+                _bearer_token: Optional[str] = None
                 try:
                     from fastmcp.server.dependencies import get_http_headers
 
-                    _principal = get_http_headers(
-                        include={"x-ms-client-principal-id"}
-                    ).get("x-ms-client-principal-id")
+                    _headers = get_http_headers(
+                        include={"x-ms-client-principal-id", "authorization"}
+                    )
+                    _principal = _headers.get("x-ms-client-principal-id")
                     if _principal:
                         user_id = _principal
+                    _auth = _headers.get("authorization", "")
+                    if _auth.lower().startswith("bearer "):
+                        _bearer_token = _auth[7:].strip() or None
                 except Exception:
                     pass
 
@@ -1848,8 +1858,12 @@ class InspectorService(MCPToolBase):
                 endpoint = server.get("endpoint", "")
                 auth_type = server.get("auth_type", "none")
 
-                # 2. Initiate / check user connection
-                conn_result = await registry.initiate_connection(user_id, server_name)
+                # 2. Initiate / check user connection — forward the caller's
+                # Bearer token so the backend resolves the real user identity
+                # instead of falling back to sample_user.
+                conn_result = await registry.initiate_connection(
+                    user_id, server_name, bearer_token=_bearer_token
+                )
                 if not conn_result:
                     return format_error_response(
                         error_message=(
@@ -1907,8 +1921,9 @@ class InspectorService(MCPToolBase):
                 extra_headers: Dict[str, str] = {}
                 if auth_type != "none" and status == "active" and credential_resolver:
                     _cred_source = server.get("credential_source") or "static_secret"
-                    _audience = server.get("audience") or (
-                        (server.get("oauth_scopes") or [None])[0]
+                    _audience = (
+                        server.get("audience")
+                        or ((server.get("oauth_scopes") or [None])[0])
                     )
                     _secret_ref = connection.get("secret_ref", "")
                     try:

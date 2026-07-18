@@ -1,0 +1,59 @@
+{
+  "servers": {
+    "playwright-mqq4gzo8": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
+    },
+    "GitHub": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp",
+      "headers": {
+        "Authorization": "${secret:GitHub.Authorization}"
+      }
+    },
+    "mcp-server-filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/workspaces/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator",
+        "/tmp"
+      ]
+    },
+    "mcp-server-memory": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    },
+    "mcp-server-git": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-git"]
+    },
+    "shell-commander": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-shell-server"],
+      "env": {
+        "ALLOW_COMMANDS": "grep,rg,find,pytest,npm,curl,git,docker,uvicorn,python,uv,pip,ls,cd,cat,head,tail,wc,ps,top,kill,pkill,lsof,netstat,ping,ssh,scp,rsync,tar,zip,unzip,gzip,bzip2,xz,sed,awk,cut,sort,uniq,diff,patch,make,cmake,gcc,python3,timeout,nohup"
+      }
+    },
+    "command-validator": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--no-project",
+        "--with",
+        "mcp[cli]",
+        "python",
+        "/workspaces/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator/mcp_command_validator.py"
+      ],
+      "env": {
+        "AUTO_FIX": "true"
+      }
+    }
+  }
+}

@@ -63,3 +63,38 @@ async def strategic_autonomy_timer(timer: func.TimerRequest) -> None:
         )
     except Exception as exc:
         logging.exception("Strategic autonomy timer failed: %s", exc)
+
+
+@app.route(
+    route="infobip_webhook",
+    methods=["POST"],
+    auth_level=func.AuthLevel.ANONYMOUS,  # Infobip postea sin key
+)
+def infobip_webhook(req: func.HttpRequest) -> func.HttpResponse:
+    """Receive Infobip delivery reports and inbound message callbacks.
+
+    Infobip URL: https://<function-app>.azurewebsites.net/api/infobip_webhook
+    Configure this URL in the Infobip portal as the webhook endpoint.
+    """
+    try:
+        payload = req.get_json()
+    except ValueError:
+        logging.warning("infobip_webhook: payload no es JSON válido")
+        return func.HttpResponse("bad request", status_code=400)
+
+    logging.info("Infobip callback: %s", payload)
+
+    # Detecta si es delivery report o mensaje entrante
+    results = payload.get("results") if isinstance(payload, dict) else None
+    if results:
+        for result in results:
+            if result.get("status"):                      # delivery report (DLR)
+                logging.info("Infobip DLR: messageId=%s status=%s",
+                             result.get("messageId"), result["status"].get("name"))
+            elif result.get("message") or result.get("from"):   # mensaje entrante (MO)
+                logging.info("Infobip inbound: from=%s message=%s",
+                             result.get("from"), result.get("message"))
+    else:
+        logging.info("Infobip inbound message received")
+
+    return func.HttpResponse("ok", status_code=200)
