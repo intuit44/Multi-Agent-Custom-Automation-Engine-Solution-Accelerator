@@ -4,6 +4,10 @@ import {
   Body1Strong,
   Caption1,
   Divider,
+  DrawerBody,
+  DrawerHeader,
+  DrawerHeaderTitle,
+  OverlayDrawer,
   Toast,
   ToastBody,
   ToastTitle,
@@ -14,6 +18,8 @@ import {
 import {
   Chat20Regular,
   ChatAdd20Regular,
+  Dismiss24Regular,
+  Navigation20Regular,
   Settings24Regular,
 } from '@fluentui/react-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -52,6 +58,21 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
   const [recentChats, setRecentChats] = useState<ChatSessionSummary[]>([]);
   const loadingRecentChatsRef = useRef(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // collapsed: desktop→rail de 48px | móvil→overlay cerrado
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const handler = (e: MediaQueryListEvent) => {
+      setIsMobile(e.matches);
+      if (e.matches) setCollapsed(true);
+      else setCollapsed(false);
+    };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   // Use parent's selected team if provided, otherwise use local state
   const [localSelectedTeam, setLocalSelectedTeam] = useState<TeamConfig | null>(
@@ -131,37 +152,36 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
     [onTeamSelect, dispatchToast]
   );
 
-  return (
-    <div className="panel-left-container">
-      <PanelLeft panelWidth={280} panelResize={true}>
-        <PanelLeftToolbar
-          linkTo={onNavigationWithAlert ? undefined : '/'}
-          onTitleClick={onNavigationWithAlert ? handleLogoClick : undefined}
-          panelTitle="Contoso"
-          panelIcon={<ContosoLogo />}
-        >
-          <Tooltip content="New task" relationship={'label'} />
-        </PanelLeftToolbar>
+  const FULL = 280;
+  const RAIL = 48;
+  const isRail = !isMobile && collapsed;
+  const currentWidth = isMobile ? FULL : collapsed ? RAIL : FULL;
 
-        {/* Team Selector right under the toolbar */}
-
+  const panelBody = (
+    <>
+      {/* Team selector — oculto en rail */}
+      {!isRail && (
         <div className="team-selector-container">
-          {isHomePage && (
+          {isHomePage ? (
             <TeamSelector
               onTeamSelect={handleTeamSelect}
               onTeamUpload={onTeamUpload}
               selectedTeam={selectedTeam}
               isHomePage={isHomePage}
             />
+          ) : (
+            <TeamSelected selectedTeam={selectedTeam} />
           )}
-
-          {!isHomePage && <TeamSelected selectedTeam={selectedTeam} />}
         </div>
+      )}
+
+      {/* Nueva tarea */}
+      <Tooltip content="New task" relationship="label" positioning="after">
         <div
           className="tab tab-new-task"
           onClick={onNewTaskButton}
-          tabIndex={0} // ✅ allows tab focus
-          role="button" // ✅ announces as button
+          tabIndex={0}
+          role="button"
           aria-label="New task"
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -169,76 +189,183 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
               onNewTaskButton();
             }
           }}
+          style={
+            isRail ? { justifyContent: 'center', padding: '8px 0' } : undefined
+          }
         >
           <div className="tab tab-new-task-icon">
             <ChatAdd20Regular />
           </div>
-          <Body1Strong>New task</Body1Strong>
+          {!isRail && <Body1Strong>New task</Body1Strong>}
         </div>
+      </Tooltip>
 
-        {/* ── Recent Chats ─────────────────────────────────── */}
-        {recentChats.length > 0 && (
-          <div className="echat-recent-section">
-            <Divider style={{ margin: '8px 0' }} />
-            <div className="echat-recent-header">
-              <Chat20Regular />
-              <Caption1 style={{ fontWeight: 600 }}>Recent Chats</Caption1>
-            </div>
-            <div className="echat-recent-list">
-              {recentChats.slice(0, 10).map((chat) => (
-                <div
-                  key={chat.id}
-                  className="echat-recent-item"
-                  onClick={() => navigate(`/session/${chat.id}`)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      navigate(`/session/${chat.id}`);
-                    }
-                  }}
-                >
-                  <Caption1 className="echat-recent-item-name">
-                    {chat.session_name || 'Untitled Chat'}
-                  </Caption1>
-                  <Caption1 className="echat-recent-item-meta">
-                    {chat.message_count || 0}
-                  </Caption1>
-                </div>
-              ))}
-            </div>
+      {/* Recent Chats — ocultos en rail */}
+      {!isRail && recentChats.length > 0 && (
+        <div className="echat-recent-section">
+          <Divider style={{ margin: '8px 0' }} />
+          <div className="echat-recent-header">
+            <Chat20Regular />
+            <Caption1 style={{ fontWeight: 600 }}>Recent Chats</Caption1>
           </div>
+          <div className="echat-recent-list">
+            {recentChats.slice(0, 10).map((chat) => (
+              <div
+                key={chat.id}
+                className="echat-recent-item"
+                onClick={() => navigate(`/session/${chat.id}`)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    navigate(`/session/${chat.id}`);
+                  }
+                }}
+              >
+                <Caption1 className="echat-recent-item-name">
+                  {chat.session_name || 'Untitled Chat'}
+                </Caption1>
+                <Caption1 className="echat-recent-item-meta">
+                  {chat.message_count || 0}
+                </Caption1>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Footer */}
+      <PanelFooter>
+        <div
+          className="panel-footer-content"
+          style={
+            isRail
+              ? { flexDirection: 'column', alignItems: 'center', gap: 8 }
+              : undefined
+          }
+        >
+          <LoginButton showName={false} />
+          {!isRail && userInfo && (
+            <Caption1 title={userInfo.user_email}>
+              {userInfo.user_first_last_name || userInfo.user_email}
+            </Caption1>
+          )}
+          <Tooltip
+            content="Configuración"
+            relationship="label"
+            positioning="after"
+          >
+            <Button
+              appearance="subtle"
+              icon={<Settings24Regular />}
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Configuración"
+              style={{ minWidth: 32 }}
+            />
+          </Tooltip>
+        </div>
+      </PanelFooter>
+
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
+    </>
+  );
+
+  // ── MÓVIL: OverlayDrawer ──────────────────────────────────────────────────
+  if (isMobile) {
+    return (
+      <>
+        {collapsed && (
+          <Button
+            appearance="subtle"
+            icon={<Navigation20Regular />}
+            aria-label="Abrir panel"
+            onClick={() => setCollapsed(false)}
+            style={{
+              position: 'fixed',
+              top: 8,
+              left: 8,
+              zIndex: 200,
+              background: 'var(--colorNeutralBackground1)',
+              boxShadow: 'var(--shadow4)',
+              borderRadius: '4px',
+            }}
+          />
         )}
-
-        <PanelFooter>
-          <div className="panel-footer-content">
-            {/* User Card */}
-            <LoginButton showName={false} />
-            {userInfo && (
-              <Caption1 title={userInfo.user_email}>
-                {userInfo.user_first_last_name || userInfo.user_email}
-              </Caption1>
-            )}
-
-            {/* Settings Button */}
-            <Tooltip content="Configuración" relationship="label">
-              <Button
-                appearance="subtle"
-                icon={<Settings24Regular />}
-                onClick={() => setSettingsOpen(true)}
-                aria-label="Configuración"
-                style={{ minWidth: 32 }}
+        <OverlayDrawer
+          open={!collapsed}
+          onOpenChange={(_e, { open }) => setCollapsed(!open)}
+          position="start"
+          size="small"
+          style={{ width: `${FULL}px` }}
+        >
+          <DrawerHeader>
+            <DrawerHeaderTitle
+              action={
+                <Button
+                  appearance="subtle"
+                  aria-label="Cerrar panel"
+                  icon={<Dismiss24Regular />}
+                  onClick={() => setCollapsed(true)}
+                />
+              }
+            >
+              Contoso
+            </DrawerHeaderTitle>
+          </DrawerHeader>
+          <DrawerBody style={{ padding: 0, overflow: 'hidden' }}>
+            <PanelLeft panelWidth={FULL} panelResize={false}>
+              <PanelLeftToolbar
+                linkTo={onNavigationWithAlert ? undefined : '/'}
+                onTitleClick={
+                  onNavigationWithAlert ? handleLogoClick : undefined
+                }
+                panelTitle="Contoso"
+                panelIcon={<ContosoLogo />}
               />
-            </Tooltip>
-          </div>
-        </PanelFooter>
+              {panelBody}
+            </PanelLeft>
+          </DrawerBody>
+        </OverlayDrawer>
+      </>
+    );
+  }
 
-        {/* Settings Modal */}
-        <SettingsModal
-          open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-        />
+  // ── DESKTOP: rail colapsado o panel expandido ────────────────────────────
+  return (
+    <div
+      className="panel-left-container"
+      style={{
+        width: `${currentWidth}px`,
+        flexShrink: 0,
+        transition: 'width 0.2s ease',
+        overflow: 'hidden',
+      }}
+    >
+      <PanelLeft panelWidth={currentWidth} panelResize={false}>
+        <PanelLeftToolbar
+          linkTo={collapsed || onNavigationWithAlert ? undefined : '/'}
+          onTitleClick={onNavigationWithAlert ? handleLogoClick : undefined}
+          panelTitle={collapsed ? undefined : 'Contoso'}
+          panelIcon={<ContosoLogo />}
+        >
+          <Tooltip
+            content={collapsed ? 'Expandir panel' : 'Colapsar panel'}
+            relationship="label"
+          >
+            <Button
+              appearance="subtle"
+              icon={<Navigation20Regular />}
+              aria-label={collapsed ? 'Expandir panel' : 'Colapsar panel'}
+              onClick={() => setCollapsed((v) => !v)}
+              style={{ minWidth: 32 }}
+            />
+          </Tooltip>
+        </PanelLeftToolbar>
+        {panelBody}
       </PanelLeft>
     </div>
   );
