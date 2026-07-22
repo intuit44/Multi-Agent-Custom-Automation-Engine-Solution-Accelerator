@@ -284,6 +284,10 @@ class InputTask(BaseModel):
 
     session_id: str
     description: str
+    # Optional grounding preamble (recovered session context). Seeded at the
+    # Plan boundary so the Magentic manager plans WITH prior context instead of
+    # from a bare task string. Empty when there is no prior context.
+    context: str = ""
 
 
 class UserLanguage(BaseModel):

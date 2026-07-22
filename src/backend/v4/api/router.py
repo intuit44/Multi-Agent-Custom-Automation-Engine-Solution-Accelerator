@@ -349,14 +349,53 @@ async def process_request(
               description: Error message
     """
     user_id, tenant_id, user_access_token = _extract_auth_with_token(request)
+
+    if not input_task.session_id:
+        input_task.session_id = str(uuid.uuid4())
+
+    # Attach session_id to current span for Application Insights
+    span = trace.get_current_span()
+    if span:
+        span.set_attribute("session_id", input_task.session_id)
+
+    plan_id = await _create_plan_and_start(
+        background_tasks=background_tasks,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        user_access_token=user_access_token,
+        description=input_task.description,
+        session_id=input_task.session_id,
+    )
+    return {
+        "status": "Request started successfully",
+        "session_id": input_task.session_id,
+        "plan_id": plan_id,
+    }
+
+
+async def _create_plan_and_start(
+    *,
+    background_tasks: BackgroundTasks,
+    user_id: str,
+    tenant_id: str,
+    user_access_token: Optional[str],
+    description: str,
+    session_id: str,
+    history: Optional[list] = None,
+) -> str:
+    """Create a Plan and kick off the Magentic orchestration as a BackgroundTask.
+
+    Shared core of ``POST /process_request`` and the chat ``run_plan`` escalation
+    (the Model Router routing a turn to the formal multi-agent Plan). Returns the
+    new ``plan_id``; the orchestration runs after return and streams to PlanPage
+    over WebSocket. Raises HTTPException (404 no team / 400 RAI / 500 create).
+    """
     try:
         memory_store = await DatabaseFactory.get_database(
             user_id=user_id, tenant_id=tenant_id
         )
         user_current_team = await memory_store.get_current_team(user_id=user_id)
-        team_id: str | None = None
-        if user_current_team:
-            team_id = user_current_team.team_id
+        team_id: str | None = user_current_team.team_id if user_current_team else None
         if not team_id:
             raise HTTPException(
                 status_code=404,
@@ -376,13 +415,13 @@ async def process_request(
             detail=f"Error retrieving team configuration: {e}",
         ) from e
 
-    if not await rai_success(input_task.description, team, memory_store):
+    if not await rai_success(description, team, memory_store):
         track_event_if_configured(
             "Error_RAI_Check_Failed",
             {
                 "status": "Plan not created - RAI check failed",
-                "description": input_task.description,
-                "session_id": input_task.session_id,
+                "description": description,
+                "session_id": session_id,
             },
         )
         raise HTTPException(
@@ -390,13 +429,20 @@ async def process_request(
             detail="Request contains content that doesn't meet our safety guidelines, try again.",
         )
 
-    if not input_task.session_id:
-        input_task.session_id = str(uuid.uuid4())
-
-    # Attach session_id to current span for Application Insights
-    span = trace.get_current_span()
-    if span:
-        span.set_attribute("session_id", input_task.session_id)
+    # Seed the Plan with the SAME session context the router uses (single source
+    # of truth), so the Magentic manager plans WITH prior context instead of a
+    # bare task string. The SSE run_plan escalation passes the already-recovered
+    # history; process_request (no prior recovery) recovers it here via the same
+    # helper — one loader, not two parallel ones.
+    if history is None:
+        _ctx_svc = await get_chat_cosmos_service()
+        history = await _recover_session_context(
+            _ctx_svc, session_id, user_id, description
+        )
+    context_block = _format_context_block(history)
+    input_task = InputTask(
+        session_id=session_id, description=description, context=context_block
+    )
 
     try:
         plan_id = str(uuid.uuid4())
@@ -405,9 +451,9 @@ async def process_request(
             id=plan_id,
             plan_id=plan_id,
             user_id=user_id,
-            session_id=input_task.session_id,
+            session_id=session_id,
             team_id=team_id,
-            initial_goal=input_task.description,
+            initial_goal=description,
             overall_status=PlanStatus.in_progress,
         )
         await memory_store.add_plan(plan)
@@ -415,7 +461,7 @@ async def process_request(
         try:
             _chat_svc = await get_chat_cosmos_service()
             await _chat_svc.add_message(
-                session_id=input_task.session_id,
+                session_id=session_id,
                 user_id=user_id,
                 content="",
                 role="assistant",
@@ -445,10 +491,10 @@ async def process_request(
             {
                 "status": "success",
                 "plan_id": plan.plan_id,
-                "session_id": input_task.session_id,
+                "session_id": session_id,
                 "user_id": user_id,
                 "team_id": team_id,
-                "description": input_task.description,
+                "description": description,
             },
         )
     except Exception as e:
@@ -457,8 +503,8 @@ async def process_request(
             "Error_Plan_Creation_Failed",
             {
                 "status": "error",
-                "description": input_task.description,
-                "session_id": input_task.session_id,
+                "description": description,
+                "session_id": session_id,
                 "user_id": user_id,
                 "error": str(e),
             },
@@ -470,29 +516,24 @@ async def process_request(
         async def run_orchestration_task():
             try:
                 await OrchestrationManager().run_orchestration(
-                    user_id, input_task.session_id, input_task
+                    user_id, session_id, input_task, plan_id=plan_id
                 )
             finally:
-                orchestration_config.clear_run_active(input_task.session_id)
+                orchestration_config.clear_run_active(session_id)
 
         # Mark the session's run in flight BEFORE returning, so a near-immediate
         # resume_plan from PlanPage (orphan recovery on a freshly-created plan)
         # is skipped instead of starting a duplicate orchestration.
-        orchestration_config.mark_run_active(input_task.session_id)
+        orchestration_config.mark_run_active(session_id)
         background_tasks.add_task(run_orchestration_task)
-
-        return {
-            "status": "Request started successfully",
-            "session_id": input_task.session_id,
-            "plan_id": plan_id,
-        }
+        return plan_id
 
     except Exception as e:
         track_event_if_configured(
             "Error_Request_Start_Failed",
             {
-                "session_id": input_task.session_id,
-                "description": input_task.description,
+                "session_id": session_id,
+                "description": description,
                 "error": str(e),
             },
         )
@@ -526,6 +567,69 @@ async def _get_previous_intent(
     except Exception:
         pass
     return None
+
+
+async def _recover_session_context(
+    chat_svc: Any,
+    session_id: str,
+    user_id: str,
+    current_message: str,
+) -> list:
+    """Rebuild conversation memory from the SINGLE source of truth (Cosmos + AI
+    Search) — the SAME recovery the direct-chat path uses, so Plan and chat share
+    one context, not two parallel loaders. Two layers, deduped, oldest→newest:
+      long memory  → hybrid keyword+vector+semantic retrieval across ALL of the
+                     user's history (search_chat_history);
+      short memory → this session's turns in order (conversational continuity).
+    The current user message is skipped (already persisted by the caller).
+    """
+    history: list = []
+    try:
+        seen: set = set()
+        cur = (current_message or "").strip()
+        from common.services.search_index_service import get_search_index_service
+
+        search_svc = await get_search_index_service()
+        hits = await search_svc.search_chat_history(
+            query=current_message,
+            user_id=user_id,
+            top_k=15,
+        )
+        for h in sorted(hits, key=lambda x: x.get("timestamp", "")):
+            c = (h.get("content") or "").strip()
+            if c and c != cur and c not in seen:
+                seen.add(c)
+                history.append({"role": h.get("role", "user"), "content": c})
+        session = await chat_svc.get_session(session_id, user_id)
+        for m in (session or {}).get("messages", []):
+            c = (m.get("content") or "").strip()
+            if c and c != cur and c not in seen:
+                seen.add(c)
+                history.append({"role": m.get("role", "user"), "content": c})
+    except Exception as _hist_err:
+        logger.warning("Could not rebuild chat history: %s", _hist_err)
+    return history
+
+
+def _format_context_block(history: list) -> str:
+    """Render recovered history as a grounding preamble for the Plan task.
+
+    The Magentic manager plans from a single task string, so the session context
+    must ride along inside it. Empty history → empty string (no grounding added).
+    """
+    if not history:
+        return ""
+    lines = [
+        f"[{m.get('role', 'user')}] {m.get('content', '')}".strip()
+        for m in history
+        if (m.get("content") or "").strip()
+    ]
+    if not lines:
+        return ""
+    return (
+        "Prior conversation context (grounding — use it to plan; do not repeat "
+        "verbatim):\n" + "\n".join(lines)
+    )
 
 
 # ── Chat Mode Endpoint (P0 — conversational without plan) ────────────
@@ -1337,6 +1441,17 @@ class _HostedTextContent:
         self.text = text
 
 
+class _HostedPlanSignal:
+    """Content shim signalling the Model Router escalated this turn to the formal
+    multi-agent Plan (``run_plan`` capability). The SSE handler turns it into plan
+    creation + a ``plan_created`` event; it is never streamed as text."""
+
+    type = "plan_signal"
+
+    def __init__(self, task: str) -> None:
+        self.task = task
+
+
 class _HostedFunctionCall:
     """Content shim mimicking an agent_framework function_call (.name/.arguments)."""
 
@@ -1553,6 +1668,22 @@ _ROUTER_FUNCTIONS = [
         "task",
         "A well-formed web search query for the information needed.",
     ),
+    _capability(
+        "run_plan",
+        "The request needs the formal multi-agent PLAN: a Magentic orchestration "
+        "where SEVERAL SPECIALIZED agents collaborate on one composite objective "
+        "under a manager, with human approval/clarification steps and progress "
+        "tracked on a dedicated Plan page (not an inline chat answer). Pick this "
+        "when the work spans clearly SEPARATE domains of responsibility that must "
+        "be coordinated across distinct agents to be done correctly, OR when the "
+        "user explicitly asks to create/prepare/run a plan or to orchestrate a "
+        "multi-step effort. A single agent with tools (the other capabilities) "
+        "finishes ordinary tasks end-to-end — do NOT pick this for anything one "
+        "agent can complete alone.",
+        "task",
+        "The full, self-contained objective for the multi-agent plan, as the user "
+        "expressed it.",
+    ),
     # NOTE: there is NO "respond directly" capability. Answering the user is not a
     # capability — it is the DEFAULT. When the router picks none of the above, the
     # dispatch `else` branch routes the prompt through the same _execute_responses
@@ -1647,7 +1778,9 @@ class _RouterChatClient:
         # the run_foundry_mcp capability. Entra-OAuth protected: its token needs the
         # FOUNDRY_MCP_SCOPE (Foundry.Mcp.Tools), minted separately from the
         # ai.azure.com token in _bearer (see _foundry_mcp_bearer).
-        self._foundry_mcp_url = config.FOUNDRY_MCP_ENDPOINT or "https://mcp.ai.azure.com"
+        self._foundry_mcp_url = (
+            config.FOUNDRY_MCP_ENDPOINT or "https://mcp.ai.azure.com"
+        )
         self._foundry_mcp_scope = (
             config.FOUNDRY_MCP_SCOPE or "https://mcp.ai.azure.com/.default"
         )
@@ -1810,9 +1943,7 @@ class _RouterChatClient:
         elif _fn_name == "run_macae_mcp_server":
             logger.info("Dispatching run_macae_mcp_server")
             task = _args.get("task") or prompt
-            async for update in self._execute_responses(
-                task, history, use_macae=True
-            ):
+            async for update in self._execute_responses(task, history, use_macae=True):
                 yield update
         elif _fn_name == "run_knowledge_base":
             logger.info("Dispatching run_knowledge_base")
@@ -1835,6 +1966,13 @@ class _RouterChatClient:
                 task, history, use_web_search=True
             ):
                 yield update
+        elif _fn_name == "run_plan":
+            logger.info("Dispatching run_plan (escalate to Magentic orchestration)")
+            task = _args.get("task") or prompt
+            # Signal only: the Plan runs via process_request's orchestration path
+            # (BackgroundTask + WebSocket + PlanPage), NOT inline on this SSE turn.
+            # The SSE handler turns this signal into plan creation + plan_created.
+            yield _HostedUpdate([_HostedPlanSignal(task)])
         elif _router_answered:
             # No capability AND the router already streamed its own answer above
             # (its selected model, with history for memory). Nothing more to run.
@@ -1966,18 +2104,40 @@ class _RouterChatClient:
                 "you do NOT already know this data — never fabricate. Keep it brief."
             )
         elif use_macae:
+            # IDENTITY PROPAGATION: self._user_id must travel as an explicit
+            # tool parameter, not as an HTTP header. The original design sent it
+            # as x-ms-client-principal-id on a DIRECT ca-mcp attach; after the
+            # switch to Toolbox routing the Foundry Toolbox proxy strips that
+            # header, so user_id always arrived as "" → sessions stored under
+            # "sample_user" → credential resolution in the wrong namespace →
+            # 401 / 0 tools on every external server call.
+            # Injecting user_id here into the instructions is the single fix
+            # that covers both sample_user and EasyAuth flows: all MacaeMcpServer
+            # tool calls will carry the real principal, session keys will be
+            # (real_user_id, server_name), and credential_resolver will look up
+            # the correct Key Vault secret for that user's connection.
+            _uid = self._user_id or "sample_user"
             instructions = (
+                f"IDENTITY: your user_id is '{_uid}'. Pass user_id='{_uid}' to "
+                f"EVERY MacaeMcpServer tool call (connect_from_registry, "
+                f"discover_mcp_capabilities, call_external_tool, "
+                f"list_connected_servers, read_external_resource, "
+                f"disconnect_mcp_server). This is mandatory — without it "
+                f"credential resolution runs in the wrong namespace and all "
+                f"authenticated servers return 401 or 0 tools.\n\n"
                 "You work with the user's connected external MCP servers (GitHub, "
                 "Grafana/monitoring, ARM, etc.) through the Toolbox. To run a tool "
-                "on a REGISTERED server, use call_tool with the MacaeMcpServer "
-                "meta-tools in this order: MacaeMcpServer___connect_from_registry "
-                "{server_name} to connect, then MacaeMcpServer___call_external_tool "
-                "{server_name, target_tool, arguments} to execute the tool. "
-                "(MacaeMcpServer___list_connected_servers / discover_mcp_capabilities "
-                "help you find server/tool names.) Do this via the Toolbox — that is "
-                "the path that resolves credentials and avoids 401s. You do NOT "
-                "already know this data — call the tools; never fabricate. Keep the "
-                "answer brief."
+                "on a REGISTERED server use the MacaeMcpServer meta-tools in this "
+                "order: (1) MacaeMcpServer___connect_from_registry {server_name, "
+                f"user_id='{_uid}'}} to connect/refresh credentials, then "
+                f"(2) MacaeMcpServer___call_external_tool {{server_name, "
+                "target_tool, arguments, "
+                f"user_id='{_uid}'}} to execute. "
+                f"Use MacaeMcpServer___list_connected_servers(user_id='{_uid}') "
+                f"and MacaeMcpServer___discover_mcp_capabilities(server_name, "
+                f"user_id='{_uid}') to find server/tool names. "
+                "You do NOT already know this data — call the tools; never "
+                "fabricate. Keep the answer brief."
             )
         elif use_web_search:
             instructions = (
@@ -2808,38 +2968,14 @@ async def chat_message_stream(
             #                  conversational continuity).
             # add_message already writes+indexes every turn, so this read closes the
             # loop. The current user message was just persisted, so it is skipped.
-            _history: list = []
-            try:
-                _seen: set = set()
-                _cur = (chat_request.message or "").strip()
-                from common.services.search_index_service import (
-                    get_search_index_service,
-                )
-
-                _search_svc = await get_search_index_service()
-                _hits = await _search_svc.search_chat_history(
-                    query=chat_request.message,
-                    user_id=user_id,
-                    top_k=15,
-                )
-                for _h in sorted(_hits, key=lambda x: x.get("timestamp", "")):
-                    _c = (_h.get("content") or "").strip()
-                    if _c and _c != _cur and _c not in _seen:
-                        _seen.add(_c)
-                        _history.append({"role": _h.get("role", "user"), "content": _c})
-                _session = await chat_svc.get_session(chat_request.session_id, user_id)
-                for _m in (_session or {}).get("messages", []):
-                    _c = (_m.get("content") or "").strip()
-                    if _c and _c != _cur and _c not in _seen:
-                        _seen.add(_c)
-                        _history.append({"role": _m.get("role", "user"), "content": _c})
-                logger.info(
-                    "Recovered %d context messages (Cosmos+Search) for session=%s",
-                    len(_history),
-                    chat_request.session_id[:12],
-                )
-            except Exception as _hist_err:
-                logger.warning("Could not rebuild chat history: %s", _hist_err)
+            _history = await _recover_session_context(
+                chat_svc, chat_request.session_id, user_id, chat_request.message
+            )
+            logger.info(
+                "Recovered %d context messages (Cosmos+Search) for session=%s",
+                len(_history),
+                chat_request.session_id[:12],
+            )
 
             _invoke_kwargs: dict = {
                 "session_id": chat_request.session_id,
@@ -2879,6 +3015,68 @@ async def chat_message_stream(
                         if token:
                             full_text += token
                             yield _sse_event({"type": "token", "content": token})
+
+                    elif ct == "plan_signal":
+                        # Model Router escalated this turn to the formal multi-agent
+                        # Plan. Create it + kick off the orchestration (BackgroundTask
+                        # + WebSocket + PlanPage), tell the frontend to navigate, and
+                        # end the SSE stream. The `finally` above still runs cleanup;
+                        # the conversational persist/done below is intentionally
+                        # skipped (the task anchor is written by the plan creation).
+                        logger.info(
+                            "Model Router escalated to Plan for session=%s",
+                            chat_request.session_id,
+                        )
+                        try:
+                            _plan_id = await _create_plan_and_start(
+                                background_tasks=background_tasks,
+                                user_id=user_id,
+                                tenant_id=tenant_id,
+                                user_access_token=user_access_token,
+                                description=getattr(content, "task", None)
+                                or chat_request.message,
+                                session_id=chat_request.session_id,
+                                # Same context the router already recovered this
+                                # turn — cross the boundary instead of dropping it.
+                                history=_history,
+                            )
+                            yield _sse_event(
+                                {
+                                    "type": "plan_created",
+                                    "plan_id": _plan_id,
+                                    "session_id": chat_request.session_id,
+                                }
+                            )
+                            yield _sse_event(
+                                {
+                                    "type": "done",
+                                    "intent": "task",
+                                    "agent": "planner",
+                                    "confidence": 1.0,
+                                    "session_id": chat_request.session_id,
+                                    "plan_id": _plan_id,
+                                }
+                            )
+                        except Exception as _plan_err:
+                            logger.exception(
+                                "run_plan escalation failed: %s", _plan_err
+                            )
+                            yield _sse_event(
+                                {
+                                    "type": "token",
+                                    "content": "Sorry, I couldn't create a plan. Please try again.",
+                                }
+                            )
+                            yield _sse_event(
+                                {
+                                    "type": "done",
+                                    "intent": "task",
+                                    "agent": "planner",
+                                    "confidence": 1.0,
+                                    "session_id": chat_request.session_id,
+                                }
+                            )
+                        return
 
                     elif ct == "function_call":
                         logger.info(
@@ -3616,7 +3814,7 @@ async def resume_plan(
     async def run_orchestration_task():
         try:
             await OrchestrationManager().run_orchestration(
-                user_id, plan.session_id, input_task
+                user_id, plan.session_id, input_task, plan_id=plan.plan_id
             )
         finally:
             orchestration_config.clear_run_active(plan.session_id)

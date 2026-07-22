@@ -458,6 +458,14 @@ const PlanPage: React.FC = () => {
           console.warn('⚠️ Final result message missing data:', finalMessage);
           return;
         }
+        // parseFinalResultMessage returns a FLAT shape { content, status, ... } —
+        // there is NO `.data` wrapper here. Reading finalMessage.data.status made
+        // the completion gate below always undefined → the spinner never cleared,
+        // the plan never flipped to COMPLETED in the UI, and the URL never reset.
+        // Read defensively (flat first, nested as fallback) so it works either way.
+        const finalContent =
+          finalMessage?.content ?? finalMessage?.data?.content ?? '';
+        const finalStatus = finalMessage?.status ?? finalMessage?.data?.status;
         // Deduplicate: if AGENT_MESSAGEs already populated the UI, skip adding FINAL_RESULT
         // to avoid showing the same content twice (once per agent, once as Group Chat Manager).
         setAgentMessages((prev) => {
@@ -486,12 +494,12 @@ const PlanPage: React.FC = () => {
             timestamp: Date.now(),
             steps: [],
             next_steps: [],
-            content: finalMessage.data?.content || '',
+            content: finalContent,
             raw_data: finalMessage,
           } as AgentMessageData;
           return [...prev, agentMessageData];
         });
-        if (finalMessage?.data?.status === PlanStatus.COMPLETED) {
+        if (finalStatus === PlanStatus.COMPLETED) {
           setShowBufferingText(true);
           setShowProcessingPlanSpinner(false);
           setSelectedTeam(planData?.team || null);
@@ -519,7 +527,7 @@ const PlanPage: React.FC = () => {
             timestamp: Date.now(),
             steps: [],
             next_steps: [],
-            content: finalMessage.data?.content || '',
+            content: finalContent,
             raw_data: finalMessage,
           } as AgentMessageData;
           processAgentMessage(dummyMsg, planData, true, capturedBuffer);

@@ -355,9 +355,55 @@ class OrchestrationManager:
     # ---------------------------
     # Execution
     # ---------------------------
-    async def run_orchestration(self, user_id, session_id: str, input_task) -> None:
+    async def _persist_agent_message(
+        self,
+        *,
+        plan_id: Optional[str],
+        user_id: str,
+        agent_name: str,
+        content: str,
+        is_final: bool,
+    ) -> None:
+        """Persist an agent message to the plan store from the backend.
+
+        Reuses the SAME proven path the ``/agent_message`` endpoint used
+        (``PlanService.handle_agent_messages``) — just triggered in-process
+        instead of by the frontend echo. On ``is_final`` it also flips the plan
+        to completed. Never raises: persistence must not abort the run.
+        """
+        if not plan_id:
+            return
+        try:
+            from v4.common.services.plan_service import PlanService
+            from v4.models.messages import AgentMessageResponse, AgentMessageType
+
+            resp = AgentMessageResponse(
+                plan_id=plan_id,
+                agent=agent_name,
+                content=content,
+                agent_type=AgentMessageType.AI_AGENT,
+                is_final=is_final,
+                streaming_message=content if is_final else None,
+            )
+            await PlanService.handle_agent_messages(resp, user_id)
+        except Exception as _pe:
+            self.logger.warning(
+                "Backend persist of agent message (plan=%s, final=%s) failed: %s",
+                plan_id,
+                is_final,
+                _pe,
+            )
+
+    async def run_orchestration(
+        self, user_id, session_id: str, input_task, plan_id: Optional[str] = None
+    ) -> None:
         """
         Execute the Magentic workflow for the provided user and task description.
+
+        ``plan_id`` makes the BACKEND the single source of truth for plan state:
+        agent messages are persisted to the plan store and the plan is marked
+        completed here, in-process — no longer dependent on the frontend echoing
+        to ``/agent_message`` (which was fragile and duplicated the final).
         """
         job_id = str(uuid.uuid4())
         orchestration_config.set_approval_pending(job_id)
@@ -430,8 +476,19 @@ class OrchestrationManager:
                 )
         # --- END NEW BLOCK ---
 
-        # Build task from input
+        # Build task from input. Prior conversation context (recovered from the
+        # single source of truth at the Plan boundary) rides inside the task string
+        # so the Magentic manager plans WITH context instead of from a bare goal.
+        # Cross-run bleed was already cleared above; this is the CURRENT session's
+        # grounding, seeded deliberately.
         task_text = getattr(input_task, "description", str(input_task))
+        _context = getattr(input_task, "context", "") or ""
+        if _context:
+            task_text = f"{_context}\n\n---\n\nCurrent objective:\n{task_text}"
+            self.logger.info(
+                "Seeded orchestration task with %d chars of session context",
+                len(_context),
+            )
         self.logger.debug("Task: %s", task_text)
 
         # ── Stamp session_id on ProxyAgent instances so they can write to chat_cosmos ──
@@ -539,6 +596,18 @@ class OrchestrationManager:
                                         "Sent AGENT_MESSAGE for '%s' (%d chars)",
                                         agent_name,
                                         len(cleaned),
+                                    )
+                                    # Persist this intermediate agent message to the
+                                    # plan store from the BACKEND (single source of
+                                    # truth) instead of relying on the frontend echo.
+                                    # is_final=False → background detail; the chat
+                                    # thread only ever gets the ONE final (writeback).
+                                    await self._persist_agent_message(
+                                        plan_id=plan_id,
+                                        user_id=user_id,
+                                        agent_name=agent_name,
+                                        content=cleaned,
+                                        is_final=False,
                                     )
 
                     # Handle executor completed - just log, don't send to UI
@@ -662,6 +731,20 @@ class OrchestrationManager:
                 message_type=WebsocketMessageType.FINAL_RESULT_MESSAGE,
             )
             self.logger.info("Final result sent via WebSocket to user '%s'", user_id)
+
+            # ── Persist final + mark plan completed (BACKEND-owned) ───────────
+            # is_final=True routes through PlanService.handle_agent_messages, which
+            # persists the final agent message to the plan store AND flips the plan
+            # to overall_status=completed — the state that USED to happen only when
+            # the frontend echoed the final. Now it is guaranteed, headless.
+            if final_text:
+                await self._persist_agent_message(
+                    plan_id=plan_id,
+                    user_id=user_id,
+                    agent_name="Group_Chat_Manager",
+                    content=final_text,
+                    is_final=True,
+                )
 
             # ── Write Plan result back to chat session ────────────────────────
             # This closes the visibility gap: after Plan execution the chat

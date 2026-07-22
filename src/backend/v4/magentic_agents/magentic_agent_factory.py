@@ -71,7 +71,7 @@ class MagenticAgentFactory:
         # Get model from agent config, team model, or environment
         deployment_name = getattr(agent_obj, "deployment_name", None)
 
-        if not deployment_name and agent_obj.name.lower() == "proxyagent":
+        if agent_obj.name.lower() == "proxyagent":
             self.logger.info("Creating ProxyAgent")
             return ProxyAgent(user_id=user_id)
 

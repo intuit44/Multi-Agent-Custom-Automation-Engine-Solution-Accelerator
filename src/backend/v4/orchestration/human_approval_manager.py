@@ -268,40 +268,81 @@ You must ALWAYS offer additional help at the end of your response. Never end the
         # Delegate to base for normal progress ledger creation
         ledger = await super().create_progress_ledger(magentic_context)
 
+        # Compute uncalled business agents once — used in both guards below.
+        uncalled = self._get_uncalled_agents(magentic_context)
+
+        # --- ProxyAgent loop guard ---
+        # When the LLM chooses ProxyAgent as next_speaker but there are still
+        # business agents that haven't responded, redirect to the first uncalled
+        # agent instead.  Without this, ProxyAgent enters an infinite
+        # clarification-timeout-reinvoke cycle that consumes all max_rounds
+        # while the actual business agents are never called.
+        if ledger.next_speaker.answer == "ProxyAgent" and uncalled:
+            next_agent = uncalled[0]
+            logger.info(
+                "ProxyAgent chosen as next_speaker but %d business agent(s) uncalled: %s. "
+                "Redirecting to '%s' to prevent loop.",
+                len(uncalled),
+                uncalled,
+                next_agent,
+            )
+            task_text = getattr(
+                magentic_context.task, "text", str(magentic_context.task)
+            )
+            ledger.next_speaker.answer = next_agent
+            ledger.next_speaker.reason = (
+                f"{next_agent} has not yet been consulted; redirected from ProxyAgent"
+            )
+            ledger.is_request_satisfied.answer = False
+            ledger.is_request_satisfied.reason = (
+                f"Not all agents have responded yet. Waiting for: {', '.join(uncalled)}"
+            )
+            ledger.is_progress_being_made.answer = True
+            ledger.is_progress_being_made.reason = "Continuing to consult remaining agents"
+            ledger.instruction_or_question.answer = (
+                f"Using your available tools and data sources, provide your response "
+                f"for the following task: {task_text}"
+            )
+            ledger.instruction_or_question.reason = (
+                f"Routing to {next_agent} who has not yet contributed"
+            )
+            return ledger
+
         # --- Premature satisfaction guard ---
         # If the LLM says the request is satisfied, verify that all planned
         # (non-proxy, non-manager) agents have actually responded before allowing
         # the workflow to terminate.  This addresses the bug where the orchestrator
         # marks satisfied=True after a single comprehensive agent response.
-        if ledger.is_request_satisfied.answer:
-            uncalled = self._get_uncalled_agents(magentic_context)
-            if uncalled:
-                next_agent = uncalled[0]
-                logger.info(
-                    "Progress ledger marked satisfied but %d agent(s) have not responded yet: %s. "
-                    "Overriding to continue with '%s'.",
-                    len(uncalled),
-                    uncalled,
-                    next_agent,
-                )
-                ledger.is_request_satisfied.answer = False
-                ledger.is_request_satisfied.reason = f"Not all agents have responded yet. Waiting for: {', '.join(uncalled)}"
-                ledger.is_progress_being_made.answer = True
-                ledger.is_progress_being_made.reason = (
-                    "Continuing to consult remaining agents"
-                )
-                ledger.next_speaker.answer = next_agent
-                ledger.next_speaker.reason = f"{next_agent} has not yet been consulted"
-                # Always override instruction with task-relevant prompt so that
-                # data agents (Azure AI Search, RAG) execute meaningful queries
-                # instead of receiving a stale finalization instruction.
-                task_text = getattr(
-                    magentic_context.task, "text", str(magentic_context.task)
-                )
-                ledger.instruction_or_question.answer = f"Using your available tools and data sources, provide your response for the following task: {task_text}"
-                ledger.instruction_or_question.reason = (
-                    f"Routing to {next_agent} who has not yet contributed"
-                )
+        if ledger.is_request_satisfied.answer and uncalled:
+            next_agent = uncalled[0]
+            logger.info(
+                "Progress ledger marked satisfied but %d agent(s) have not responded yet: %s. "
+                "Overriding to continue with '%s'.",
+                len(uncalled),
+                uncalled,
+                next_agent,
+            )
+            task_text = getattr(
+                magentic_context.task, "text", str(magentic_context.task)
+            )
+            ledger.is_request_satisfied.answer = False
+            ledger.is_request_satisfied.reason = f"Not all agents have responded yet. Waiting for: {', '.join(uncalled)}"
+            ledger.is_progress_being_made.answer = True
+            ledger.is_progress_being_made.reason = (
+                "Continuing to consult remaining agents"
+            )
+            ledger.next_speaker.answer = next_agent
+            ledger.next_speaker.reason = f"{next_agent} has not yet been consulted"
+            # Always override instruction with task-relevant prompt so that
+            # data agents (Azure AI Search, RAG) execute meaningful queries
+            # instead of receiving a stale finalization instruction.
+            ledger.instruction_or_question.answer = (
+                f"Using your available tools and data sources, provide your response "
+                f"for the following task: {task_text}"
+            )
+            ledger.instruction_or_question.reason = (
+                f"Routing to {next_agent} who has not yet contributed"
+            )
 
         return ledger
 

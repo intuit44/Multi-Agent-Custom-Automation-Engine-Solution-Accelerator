@@ -2,7 +2,7 @@ import uuid
 from enum import Enum
 from typing import List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PlanStatus(str, Enum):
@@ -24,6 +24,8 @@ class MStep(BaseModel):
 
 class MPlan(BaseModel):
     """model of a plan"""
+
+    model_config = ConfigDict(use_enum_values=True)
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str = ""

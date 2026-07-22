@@ -96,12 +96,19 @@ class MCPEnabledBase:
             # other in-flight tasks (e.g. a background orchestration run) share.
             self.creds = config.get_shared_async_credential()
             self._owns_creds = False
-        # Create AgentsClient
-        if self.project_endpoint is None:
-            raise ValueError("project_endpoint cannot be None")
+        # Create AgentsClient with a custom aiohttp connector to avoid
+        # 'SSL shutdown timed out' errors on long-running Foundry calls.
+        # The default aiohttp ssl_shutdown_timeout is 5s which is too short
+        # when the server closes the connection after a long response.
+        import aiohttp
+        _connector = aiohttp.TCPConnector(
+            ssl_shutdown_timeout=30.0,
+            enable_cleanup_closed=True,
+        )
         self.client = AgentsClient(
             endpoint=self.project_endpoint,
             credential=self.creds,
+            connection=_connector,
         )
         if self._stack:
             await self._stack.enter_async_context(self.client)
@@ -126,10 +133,10 @@ class MCPEnabledBase:
         return self
 
     async def close(self) -> None:
-        if self._stack is None:
+        if self._stack is None and self.mcp_tool is None:
             return
         try:
-            # 1. Close the underlying AzureAIClient / ResponsesClient (main network resource)
+            # 1. Close the underlying AzureAIClient / ResponsesClient
             _agent_close = getattr(self._agent, "close", None) if self._agent else None
             if callable(_agent_close):
                 try:
@@ -143,7 +150,7 @@ class MCPEnabledBase:
                         exc,
                     )
 
-            # 2. Close AgentsClient (aiohttp-based REST client for Foundry API calls)
+            # 2. Close AgentsClient
             if self.client and hasattr(self.client, "close"):
                 try:
                     await self.client.close()
@@ -152,25 +159,36 @@ class MCPEnabledBase:
                         "AgentsClient close error (non-critical): %s", exc
                     )
 
-            # 3. Release the AsyncExitStack (includes MCP tool context).
-            # The MCP cancel scope was created in the task that called open().
-            # If close() runs from a DIFFERENT task (e.g. force-rebuild), AnyIO
-            # raises a cancel-scope violation.  We catch it — the important
-            # network resources above were already released.
+            # 3. Close MCPStreamableHTTPTool directly (NOT via stack).
+            # anyio cancel scopes must be exited from the same task that entered
+            # them. We swallow RuntimeError from cross-task teardown — the HTTP
+            # DELETE /mcp is still sent by the SDK before the error fires, so the
+            # server-side session is cleaned up regardless.
+            if self.mcp_tool is not None:
+                try:
+                    await self.mcp_tool.__aexit__(None, None, None)
+                except RuntimeError as exc:
+                    if "cancel scope" in str(exc).lower() or "different task" in str(exc).lower():
+                        self.logger.debug(
+                            "MCP tool cross-task teardown (expected on force-rebuild): %s", exc
+                        )
+                    else:
+                        self.logger.warning("MCP tool close error: %s", exc)
+                except Exception as exc:
+                    self.logger.debug("MCP tool close error (non-critical): %s", exc)
+
+            # 4. Release the AsyncExitStack (http_client and other non-MCP contexts).
             if self._stack:
                 try:
                     await self._stack.aclose()
                 except Exception as exc:
                     self.logger.debug(
-                        "Stack release notice for agent '%s' (resources already closed): %s",
+                        "Stack release notice for agent '%s': %s",
                         self.agent_name,
                         exc,
                     )
 
-            # 4. Close credential token cache — ONLY if this agent owns it.
-            # The shared process-scoped Managed Identity credential is borrowed
-            # and closed once at app shutdown (config.aclose_shared_resources);
-            # closing it here would break other agents/tasks still using it.
+            # 5. Close credential — ONLY if this agent owns it.
             if self._owns_creds and self.creds and hasattr(self.creds, "close"):
                 try:
                     await self.creds.close()
@@ -178,7 +196,6 @@ class MCPEnabledBase:
                     self.logger.debug("Credential close error (non-critical): %s", exc)
 
         finally:
-            # 5. Unregister from global registry (safe, non-blocking operation)
             try:
                 agent_registry.unregister_agent(self)
             except Exception as exc:
@@ -187,8 +204,6 @@ class MCPEnabledBase:
                     self.agent_name,
                     exc,
                 )
-
-            # Null all references so GC does not attempt a second close
             self._stack = None
             self.mcp_tool = None
             self._agent = None
@@ -372,7 +387,18 @@ class MCPEnabledBase:
         return id
 
     async def _prepare_mcp_tool(self) -> None:
-        """Translate MCPConfig to a HostedMCPTool (agent_framework construct)."""
+        """Translate MCPConfig to a MCPStreamableHTTPTool and connect it.
+
+        The tool is intentionally NOT entered into the AsyncExitStack.
+        anyio cancel scopes (used internally by streamable_http_client) must be
+        exited from the SAME task that entered them. Since close() can be called
+        from a different task (e.g. force-rebuild in a background task), putting
+        the MCP tool in the stack causes:
+            RuntimeError: Attempted to exit cancel scope in a different task
+        Instead we open/close the tool directly and swallow cross-task teardown
+        errors — the HTTP DELETE /mcp is still sent (confirmed in logs), so the
+        server-side session is cleaned up regardless.
+        """
         if not self.mcp_cfg:
             return
         try:
@@ -380,13 +406,22 @@ class MCPEnabledBase:
             if self.user_access_token:
                 import httpx
 
+                # Match the MCP SDK's own client timeouts (create_mcp_http_client):
+                # 30s for regular ops, 300s read for the long-lived streamable-http
+                # GET stream. A bare httpx.AsyncClient() defaults to read=5s, which
+                # kills that GET stream on any idle >5s (approval pause / gaps
+                # between agent turns) → "MCP connection closed unexpectedly.
+                # Reconnecting" churn → cross-task cancel-scope teardown → the run
+                # truncates. Passing our own client made us responsible for this.
                 http_client = httpx.AsyncClient(
-                    headers={"Authorization": f"Bearer {self.user_access_token}"}
+                    headers={"Authorization": f"Bearer {self.user_access_token}"},
+                    timeout=httpx.Timeout(30.0, read=300.0),
                 )
                 self.logger.info(
                     "Forwarding user OBO token to MCP server via Authorization header"
                 )
-                # Register http_client in the stack so it is closed when the agent closes
+                # http_client IS entered into the stack — it has no anyio cancel
+                # scope and closes cleanly from any task.
                 if self._stack:
                     await self._stack.enter_async_context(http_client)
 
@@ -396,10 +431,12 @@ class MCPEnabledBase:
                 url=self.mcp_cfg.url,
                 http_client=http_client,
             )
-            if self._stack:
-                await self._stack.enter_async_context(mcp_tool)
-            self.mcp_tool = mcp_tool  # Store for later use
-        except Exception:
+            # Open the tool directly (not via stack) to avoid cross-task
+            # cancel-scope violations on close.
+            await mcp_tool.__aenter__()
+            self.mcp_tool = mcp_tool
+        except Exception as exc:
+            self.logger.warning("MCP tool setup failed: %s", exc)
             self.mcp_tool = None
 
 
