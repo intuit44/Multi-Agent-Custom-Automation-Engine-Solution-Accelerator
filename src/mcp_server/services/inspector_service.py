@@ -1361,7 +1361,16 @@ class InspectorService(MCPToolBase):
                         )
 
                 if bearer:
-                    session.extra_headers["Authorization"] = f"Bearer {bearer}"
+                    # Standard servers take "Bearer <token>". Some (Infobip:
+                    # "App <key>") use a custom scheme — if the resolved secret
+                    # already carries one, forward it verbatim instead of
+                    # double-wrapping ("Bearer App <key>" → 401).
+                    _known_schemes = ("bearer ", "app ", "basic ", "token ")
+                    session.extra_headers["Authorization"] = (
+                        bearer
+                        if bearer.lower().startswith(_known_schemes)
+                        else f"Bearer {bearer}"
+                    )
 
                 server_info = await session.initialize()
 
@@ -1933,7 +1942,16 @@ class InspectorService(MCPToolBase):
                             secret_ref=_secret_ref,
                         )
                         if bearer_token:
-                            extra_headers["Authorization"] = f"Bearer {bearer_token}"
+                            # Same scheme rule as connect_mcp_server: a secret
+                            # that already carries its scheme ("App <key>" for
+                            # Infobip) is forwarded verbatim — double-wrapping
+                            # ("Bearer App <key>") gets a 401.
+                            _known_schemes = ("bearer ", "app ", "basic ", "token ")
+                            extra_headers["Authorization"] = (
+                                bearer_token
+                                if bearer_token.lower().startswith(_known_schemes)
+                                else f"Bearer {bearer_token}"
+                            )
                             logger.info(
                                 f"[connect_from_registry] Resolved token for "
                                 f"'{server_name}' (source={_cred_source})"

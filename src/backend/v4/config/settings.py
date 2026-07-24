@@ -59,7 +59,7 @@ class AzureConfig:
         """
         return ChatOptions(
             max_tokens=4000,
-            temperature=0.1,
+            temperature=0.3,
         )
 
 
@@ -103,7 +103,7 @@ class OrchestrationConfig:
         self.clarification_contexts: Dict[
             str, Dict[str, str]
         ] = {}  # request_id -> session/user context for routing answers
-        self.max_rounds: int = 6  # Maximum replanning rounds
+        self.max_rounds: int = 2  # Maximum replanning rounds
 
         # Event-driven notification system for approvals and clarifications
         self._approval_events: Dict[str, asyncio.Event] = {}

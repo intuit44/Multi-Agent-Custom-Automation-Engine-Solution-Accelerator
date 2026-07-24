@@ -2012,16 +2012,19 @@ class _RouterChatClient:
 
         from common.config.app_config import config
 
-        # The Toolbox is attached on every turn EXCEPT the focused Foundry-MCP turn.
-        # ca-mcp is no longer attached directly (run_macae_mcp_server goes through
-        # the Toolbox), so there is no macae_direct anymore.
+        # Attach map: foundry-MCP turns attach Foundry's MCP; macae turns attach
+        # ca-mcp DIRECTLY via its public endpoint (Toolbox only as fallback when
+        # no public endpoint is configured); every other turn attaches the Toolbox.
+        _macae_direct = bool(use_macae and self._macae_mcp_url)
         logger.info(
             "Responses tools: code_interpreter=%s web_search=%s foundry_direct=%s "
-            "toolbox=%s",
+            "macae_direct=%s (url=%s) toolbox=%s",
             use_code_interpreter,
             use_web_search,
             use_foundry,
-            not use_foundry,
+            _macae_direct,
+            (self._macae_mcp_url or "<none>") if use_macae else "-",
+            not use_foundry and not _macae_direct,
         )
 
         # Official OpenAI SDK pointed at the model's direct Responses API
@@ -2059,18 +2062,38 @@ class _RouterChatClient:
                 }
             ]
         elif use_macae:
-            tools = [
-                {
-                    "type": "mcp",
-                    "server_label": self._toolbox_label,
-                    "server_url": self._toolbox_url,
-                    "require_approval": "never",
-                    "headers": {
-                        "Authorization": f"Bearer {bearer}",
-                        "Foundry-Features": "Toolboxes=V1Preview",
+            # DIRECT attach of ca-mcp via its PUBLIC ingress
+            # (MACAE_MCP_PUBLIC_ENDPOINT) — the design this config exists for:
+            # the x-ms-client-principal-id header reaches ca-mcp intact (no
+            # Toolbox proxy stripping it) and this capability no longer depends
+            # on Toolbox aggregation, where ONE broken member (e.g. Infobip)
+            # fails tools/list and 424s every turn. Toolbox is the fallback
+            # only when no public endpoint is configured.
+            if self._macae_mcp_url:
+                tools = [
+                    {
+                        "type": "mcp",
+                        "server_label": "MacaeMcpServer",
+                        "server_url": self._macae_mcp_url,
+                        "require_approval": "never",
+                        "headers": {
+                            "x-ms-client-principal-id": self._user_id or "",
+                        },
                     },
-                },
-            ]
+                ]
+            else:
+                tools = [
+                    {
+                        "type": "mcp",
+                        "server_label": self._toolbox_label,
+                        "server_url": self._toolbox_url,
+                        "require_approval": "never",
+                        "headers": {
+                            "Authorization": f"Bearer {bearer}",
+                            "Foundry-Features": "Toolboxes=V1Preview",
+                        },
+                    },
+                ]
         else:
             tools = [
                 {

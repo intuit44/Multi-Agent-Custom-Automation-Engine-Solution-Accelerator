@@ -106,7 +106,7 @@ class MCPEnabledBase:
             enable_cleanup_closed=True,
         )
         self.client = AgentsClient(
-            endpoint=self.project_endpoint,
+            endpoint=self.project_endpoint or "",
             credential=self.creds,
             connection=_connector,
         )
