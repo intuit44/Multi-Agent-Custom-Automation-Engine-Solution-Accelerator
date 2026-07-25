@@ -24,11 +24,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      # flake8 is a static analyzer — the app's dependencies are not needed
+      # to lint (deps are exercised against the exact uv.lock in test.yml).
+      - name: Install linter
         run: |
           python -m pip install --upgrade pip
-          pip install -r src/backend/requirements.txt
-          pip install flake8  # Ensure flake8 is installed explicitly
+          pip install flake8
 
       - name: Run flake8 and pylint
         run: |

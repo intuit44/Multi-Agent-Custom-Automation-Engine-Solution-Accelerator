@@ -26,17 +26,17 @@ Ensure you have access to an [Azure subscription](https://azure.microsoft.com/fr
 3. Click on your target subscription
 4. In the left menu, click **Access control (IAM)**
 5. Scroll down to see the table with your assigned roles - you should see:
-   - **Contributor** 
+   - **Contributor**
    - **User Access Administrator**
    - **Role Based Access Control Administrator** (or similar RBAC role)
 
 **For App Registration permissions:**
 1. Go to **Microsoft Entra ID** → **Manage** → **App registrations**
-2. Try clicking **New registration** 
+2. Try clicking **New registration**
 3. If you can access this page, you have the required permissions
 4. Cancel without creating an app registration
 
-📖 **Detailed Setup:** Follow [Azure Account Set Up](./AzureAccountSetUp.md) for complete configuration.
+📖 **Detailed Setup:** Follow [Azure Account Set Up](./DeploymentGuide.md#prerequisites) for complete configuration.
 
 ### 1.2 Check Service Availability & Quota
 
@@ -134,7 +134,7 @@ Select one of the following options to deploy the Multi Agent Custom Automation 
 5. When prompted in the VS Code Web terminal, choose one of the available options shown below:
 
    ![VS Code Initial Prompt](./images/vscodeweb_intialize.png)
-   
+
 6. **Authenticate with Azure** (VS Code Web requires device code authentication):
    ```shell
    az login --use-device-code
@@ -149,7 +149,7 @@ Select one of the following options to deploy the Multi Agent Custom Automation 
 <summary><b>Option D: Local Environment</b></summary>
 
 **Required Tools:**
-- [PowerShell 7.0+](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell) 
+- [PowerShell 7.0+](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell)
 - [Azure Developer CLI (azd) 1.18.0+](https://aka.ms/install-azd)
 - [Python 3.9+](https://www.python.org/downloads/)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
@@ -497,7 +497,7 @@ Now that your deployment is complete and tested, explore these resources to enha
 - [Sample Questions](./SampleQuestions.md) - Explore sample questions and workflows
 - [MCP Server Documentation](./mcp_server.md) - Learn about Model Context Protocol server integration
 - [Customizing Parameters](./CustomizingAzdParameters.md) - Advanced configuration options
-- [Azure Account Setup](./AzureAccountSetUp.md) - Detailed Azure subscription configuration
+- [Azure Account Setup](./DeploymentGuide.md#prerequisites) - Detailed Azure subscription configuration
 
 ## Need Help?
 
