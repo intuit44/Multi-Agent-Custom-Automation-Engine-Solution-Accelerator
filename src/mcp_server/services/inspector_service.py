@@ -1557,6 +1557,9 @@ class InspectorService(MCPToolBase):
                 for part in content_parts:
                     if part.get("type") == "text":
                         text_content += part.get("text", "")
+                    elif part.get("type") == "resource":
+                        res = part.get("resource") or {}
+                        text_content += res.get("text", "") or res.get("blob", "")
 
                 return format_success_response(
                     action="TOOL SUCCESS - External Tool Executed",

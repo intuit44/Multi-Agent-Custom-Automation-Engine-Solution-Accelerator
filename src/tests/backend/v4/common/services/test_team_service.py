@@ -51,14 +51,19 @@ mock_search_indexes = MagicMock()
 mock_azure_core_exceptions = MagicMock()
 
 # Create mock exceptions
+
+
 class MockClientAuthenticationError(Exception):
     pass
+
 
 class MockHttpResponseError(Exception):
     pass
 
+
 class MockResourceNotFoundError(Exception):
     pass
+
 
 mock_azure_core_exceptions.ClientAuthenticationError = MockClientAuthenticationError
 mock_azure_core_exceptions.HttpResponseError = MockHttpResponseError
@@ -98,6 +103,8 @@ mock_database_base = MagicMock()
 sys.modules['common.database.database_base'] = mock_database_base
 
 # Create mock data models
+
+
 class MockTeamAgent:
     def __init__(self, input_key, type, name, icon, **kwargs):
         self.input_key = input_key
@@ -114,6 +121,7 @@ class MockTeamAgent:
         self.index_name = kwargs.get('index_name', '')
         self.coding_tools = kwargs.get('coding_tools', False)
 
+
 class MockStartingTask:
     def __init__(self, id, name, prompt, created, creator, logo):
         self.id = id
@@ -122,6 +130,7 @@ class MockStartingTask:
         self.created = created
         self.creator = creator
         self.logo = logo
+
 
 class MockTeamConfiguration:
     def __init__(self, **kwargs):
@@ -140,14 +149,17 @@ class MockTeamConfiguration:
         self.starting_tasks = kwargs.get('starting_tasks', [])
         self.user_id = kwargs.get('user_id', '')
 
+
 class MockUserCurrentTeam:
     def __init__(self, user_id, team_id):
         self.user_id = user_id
         self.team_id = team_id
 
+
 class MockDatabaseBase:
     def __init__(self):
         pass
+
 
 # Set up mock models
 mock_messages_af = MagicMock()
@@ -174,19 +186,21 @@ with patch.dict('sys.modules', {
     'common.models.messages_af': mock_messages_af,
     'v4.common.services.foundry_service': mock_foundry_service,
 }):
-    team_service_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', 'backend', 'v4', 'common', 'services', 'team_service.py')
+    team_service_path = os.path.join(os.path.dirname(
+        __file__), '..', '..', '..', '..', '..', 'backend', 'v4', 'common', 'services', 'team_service.py')
     team_service_path = os.path.abspath(team_service_path)
-    spec = importlib.util.spec_from_file_location("backend.v4.common.services.team_service", team_service_path)
+    spec = importlib.util.spec_from_file_location(
+        "backend.v4.common.services.team_service", team_service_path)
     team_service_module = importlib.util.module_from_spec(spec)
-    
+
     # Set the proper module name for coverage tracking (matching --cov=backend pattern)
     team_service_module.__name__ = "backend.v4.common.services.team_service"
     team_service_module.__file__ = team_service_path
-    
+
     # Add to sys.modules BEFORE execution for coverage tracking (both variations)
     sys.modules['backend.v4.common.services.team_service'] = team_service_module
     sys.modules['src.backend.v4.common.services.team_service'] = team_service_module
-    
+
     spec.loader.exec_module(team_service_module)
 
 TeamService = team_service_module.TeamService
@@ -198,7 +212,7 @@ class TestTeamServiceInitialization:
     def test_init_without_memory_context(self):
         """Test TeamService initialization without memory context."""
         service = TeamService()
-        
+
         assert service.memory_context is None
         assert service.logger is not None
         assert service.search_endpoint == mock_config.AZURE_SEARCH_ENDPOINT
@@ -208,7 +222,7 @@ class TestTeamServiceInitialization:
         """Test TeamService initialization with memory context."""
         mock_memory = MagicMock()
         service = TeamService(memory_context=mock_memory)
-        
+
         assert service.memory_context == mock_memory
         assert service.logger is not None
         assert service.search_endpoint == mock_config.AZURE_SEARCH_ENDPOINT
@@ -216,7 +230,7 @@ class TestTeamServiceInitialization:
     def test_init_config_attributes(self):
         """Test that configuration attributes are properly set."""
         TeamService()
-        
+
         # Verify config calls were made
         assert mock_config.get_azure_credentials.called
 
@@ -249,15 +263,17 @@ class TestTeamConfigurationValidation:
             ]
         }
         user_id = "test-user-123"
-        
+
         service = TeamService()
-        
+
         # Mock uuid generation for predictable testing - need extra UUIDs for internal creation
         with patch('uuid.uuid4') as mock_uuid:
-            mock_uuid.side_effect = ['team-id-123', 'session-id-456', 'extra-1', 'extra-2', 'extra-3', 'extra-4']
-            
-            result = asyncio.run(service.validate_and_parse_team_config(json_data, user_id))
-        
+            mock_uuid.side_effect = ['team-id-123', 'session-id-456',
+                                     'extra-1', 'extra-2', 'extra-3', 'extra-4']
+
+            result = asyncio.run(
+                service.validate_and_parse_team_config(json_data, user_id))
+
         assert result.name == "Test Team"
         assert result.status == "active"
         assert result.user_id == user_id
@@ -271,9 +287,9 @@ class TestTeamConfigurationValidation:
             "name": "Test Team"
             # Missing status, agents, starting_tasks
         }
-        
+
         service = TeamService()
-        
+
         with pytest.raises(ValueError, match="Missing required field"):
             asyncio.run(service.validate_and_parse_team_config(json_data, "user"))
 
@@ -285,9 +301,9 @@ class TestTeamConfigurationValidation:
             "agents": [],
             "starting_tasks": [{"id": "1", "name": "Task", "prompt": "Test", "created": "2024-01-01", "creator": "user", "logo": "logo"}]
         }
-        
+
         service = TeamService()
-        
+
         with pytest.raises(ValueError, match="Agents array cannot be empty"):
             asyncio.run(service.validate_and_parse_team_config(json_data, "user"))
 
@@ -299,9 +315,9 @@ class TestTeamConfigurationValidation:
             "agents": "not-an-array",
             "starting_tasks": [{"id": "1", "name": "Task", "prompt": "Test", "created": "2024-01-01", "creator": "user", "logo": "logo"}]
         }
-        
+
         service = TeamService()
-        
+
         with pytest.raises(ValueError, match="Missing or invalid 'agents' field"):
             asyncio.run(service.validate_and_parse_team_config(json_data, "user"))
 
@@ -313,9 +329,9 @@ class TestTeamConfigurationValidation:
             "agents": [{"input_key": "agent1", "type": "ai", "name": "Agent", "icon": "icon"}],
             "starting_tasks": []
         }
-        
+
         service = TeamService()
-        
+
         with pytest.raises(ValueError, match="Starting tasks array cannot be empty"):
             asyncio.run(service.validate_and_parse_team_config(json_data, "user"))
 
@@ -352,10 +368,10 @@ class TestTeamConfigurationValidation:
             ]
         }
         user_id = "test-user-123"
-        
+
         service = TeamService()
         result = asyncio.run(service.validate_and_parse_team_config(json_data, user_id))
-        
+
         assert result.deployment_name == "test-deployment"
         assert result.description == "Test description"
         assert result.logo == "test-logo"
@@ -372,7 +388,7 @@ class TestTeamConfigurationValidation:
             "name": "Test Agent"
             # Missing icon
         }
-        
+
         with pytest.raises(ValueError, match="Agent missing required field"):
             service._validate_and_parse_agent(agent_data)
 
@@ -388,9 +404,9 @@ class TestTeamConfigurationValidation:
             "system_message": "Test message",
             "use_rag": True
         }
-        
+
         result = service._validate_and_parse_agent(agent_data)
-        
+
         assert result.input_key == "agent1"
         assert result.type == "ai"
         assert result.name == "Test Agent"
@@ -407,7 +423,7 @@ class TestTeamConfigurationValidation:
             "prompt": "Test prompt"
             # Missing created, creator, logo
         }
-        
+
         with pytest.raises(ValueError, match="Starting task missing required field"):
             service._validate_and_parse_task(task_data)
 
@@ -422,9 +438,9 @@ class TestTeamConfigurationValidation:
             "creator": "test-user",
             "logo": "test-logo"
         }
-        
+
         result = service._validate_and_parse_task(task_data)
-        
+
         assert result.id == "task1"
         assert result.name == "Test Task"
         assert result.prompt == "Test prompt"
@@ -440,17 +456,20 @@ class TestTeamCrudOperations:
     async def test_save_team_configuration_success(self):
         """Test successful team configuration save."""
         mock_memory = MagicMock()
+        # save_team_configuration now checks for an existing team (upsert);
+        # None means "not found" -> add_team path
+        mock_memory.get_team = AsyncMock(return_value=None)
         mock_memory.add_team = AsyncMock()
         service = TeamService(memory_context=mock_memory)
-        
+
         team_config = MockTeamConfiguration(
             id="team-123",
             name="Test Team",
             user_id="user-123"
         )
-        
+
         result = await service.save_team_configuration(team_config)
-        
+
         assert result == "team-123"
         mock_memory.add_team.assert_called_once_with(team_config)
 
@@ -460,9 +479,9 @@ class TestTeamCrudOperations:
         mock_memory = MagicMock()
         mock_memory.add_team = AsyncMock(side_effect=Exception("Database error"))
         service = TeamService(memory_context=mock_memory)
-        
+
         team_config = MockTeamConfiguration(id="team-123")
-        
+
         with pytest.raises(ValueError, match="Failed to save team configuration"):
             await service.save_team_configuration(team_config)
 
@@ -477,9 +496,9 @@ class TestTeamCrudOperations:
         mock_memory = MagicMock()
         mock_memory.get_team = AsyncMock(return_value=mock_team_config)
         service = TeamService(memory_context=mock_memory)
-        
+
         result = await service.get_team_configuration("team-123", "user-123")
-        
+
         assert result == mock_team_config
         mock_memory.get_team.assert_called_once_with("team-123")
 
@@ -489,9 +508,9 @@ class TestTeamCrudOperations:
         mock_memory = MagicMock()
         mock_memory.get_team = AsyncMock(return_value=None)
         service = TeamService(memory_context=mock_memory)
-        
+
         result = await service.get_team_configuration("nonexistent", "user-123")
-        
+
         assert result is None
 
     @pytest.mark.asyncio
@@ -500,9 +519,9 @@ class TestTeamCrudOperations:
         mock_memory = MagicMock()
         mock_memory.get_team = AsyncMock(side_effect=ValueError("Database error"))
         service = TeamService(memory_context=mock_memory)
-        
+
         result = await service.get_team_configuration("team-123", "user-123")
-        
+
         assert result is None
 
     @pytest.mark.asyncio
@@ -515,9 +534,9 @@ class TestTeamCrudOperations:
         mock_memory = MagicMock()
         mock_memory.get_all_teams = AsyncMock(return_value=mock_teams)
         service = TeamService(memory_context=mock_memory)
-        
+
         result = await service.get_all_team_configurations()
-        
+
         assert len(result) == 2
         assert result[0].name == "Team 1"
         assert result[1].name == "Team 2"
@@ -528,9 +547,9 @@ class TestTeamCrudOperations:
         mock_memory = MagicMock()
         mock_memory.get_all_teams = AsyncMock(side_effect=ValueError("Database error"))
         service = TeamService(memory_context=mock_memory)
-        
+
         result = await service.get_all_team_configurations()
-        
+
         assert result == []
 
     @pytest.mark.asyncio
@@ -539,9 +558,9 @@ class TestTeamCrudOperations:
         mock_memory = MagicMock()
         mock_memory.delete_team = AsyncMock(return_value=True)
         service = TeamService(memory_context=mock_memory)
-        
+
         result = await service.delete_team_configuration("team-123", "user-123")
-        
+
         assert result is True
         mock_memory.delete_team.assert_called_once_with("team-123")
 
@@ -551,9 +570,9 @@ class TestTeamCrudOperations:
         mock_memory = MagicMock()
         mock_memory.delete_team = AsyncMock(return_value=False)
         service = TeamService(memory_context=mock_memory)
-        
+
         result = await service.delete_team_configuration("team-123", "user-123")
-        
+
         assert result is False
 
     @pytest.mark.asyncio
@@ -562,9 +581,9 @@ class TestTeamCrudOperations:
         mock_memory = MagicMock()
         mock_memory.delete_team = AsyncMock(side_effect=ValueError("Database error"))
         service = TeamService(memory_context=mock_memory)
-        
+
         result = await service.delete_team_configuration("team-123", "user-123")
-        
+
         assert result is False
 
 
@@ -578,9 +597,9 @@ class TestTeamSelectionManagement:
         mock_memory.delete_current_team = AsyncMock()
         mock_memory.set_current_team = AsyncMock()
         service = TeamService(memory_context=mock_memory)
-        
+
         result = await service.handle_team_selection("user-123", "team-456")
-        
+
         assert result is not None
         assert result.user_id == "user-123"
         assert result.team_id == "team-456"
@@ -591,11 +610,12 @@ class TestTeamSelectionManagement:
     async def test_handle_team_selection_exception(self):
         """Test team selection with exception."""
         mock_memory = MagicMock()
-        mock_memory.delete_current_team = AsyncMock(side_effect=Exception("Database error"))
+        mock_memory.delete_current_team = AsyncMock(
+            side_effect=Exception("Database error"))
         service = TeamService(memory_context=mock_memory)
-        
+
         result = await service.handle_team_selection("user-123", "team-456")
-        
+
         assert result is None
 
     @pytest.mark.asyncio
@@ -604,9 +624,9 @@ class TestTeamSelectionManagement:
         mock_memory = MagicMock()
         mock_memory.delete_current_team = AsyncMock()
         service = TeamService(memory_context=mock_memory)
-        
+
         result = await service.delete_user_current_team("user-123")
-        
+
         assert result is True
         mock_memory.delete_current_team.assert_called_once_with("user-123")
 
@@ -614,11 +634,12 @@ class TestTeamSelectionManagement:
     async def test_delete_user_current_team_exception(self):
         """Test current team deletion with exception."""
         mock_memory = MagicMock()
-        mock_memory.delete_current_team = AsyncMock(side_effect=Exception("Database error"))
+        mock_memory.delete_current_team = AsyncMock(
+            side_effect=Exception("Database error"))
         service = TeamService(memory_context=mock_memory)
-        
+
         result = await service.delete_user_current_team("user-123")
-        
+
         assert result is False
 
 
@@ -637,9 +658,9 @@ class TestModelValidation:
                 "deployment_name": "claude-deployment"
             }
         }
-        
+
         models = service.extract_models_from_agent(agent)
-        
+
         assert "gpt-4" in models
         assert "gpt-35-turbo" in models
         assert "claude-3" in models
@@ -652,18 +673,18 @@ class TestModelValidation:
             "name": "ProxyAgent",
             "deployment_name": "gpt-4"
         }
-        
+
         models = service.extract_models_from_agent(agent)
-        
+
         assert len(models) == 0
 
     def test_extract_models_from_text(self):
         """Test model extraction from text patterns."""
         service = TeamService()
         text = "Use gpt-4o for reasoning and gpt-35-turbo for quick responses. Also try claude-3-sonnet."
-        
+
         models = service.extract_models_from_text(text)
-        
+
         assert "gpt-4o" in models
         assert "gpt-35-turbo" in models
         assert "claude-3-sonnet" in models
@@ -681,9 +702,9 @@ class TestModelValidation:
                 "openai_deployment": "custom-deployment"
             }
         }
-        
+
         models = service.extract_team_level_models(team_config)
-        
+
         assert "gpt-4" in models
         assert "gpt-35-turbo" in models
         assert "turbo-deployment" in models
@@ -693,24 +714,24 @@ class TestModelValidation:
     async def test_validate_team_models_success(self):
         """Test successful team model validation."""
         service = TeamService()
-        
+
         # Mock FoundryService
         mock_foundry = MagicMock()
         mock_foundry.list_model_deployments = AsyncMock(return_value=[
             {"name": "gpt-4", "status": "Succeeded"},
             {"name": "gpt-35-turbo", "status": "Succeeded"}
         ])
-        
+
         team_config = {
             "agents": [{
                 "name": "TestAgent",
                 "deployment_name": "gpt-4"
             }]
         }
-        
+
         with patch.object(team_service_module, 'FoundryService', return_value=mock_foundry):
             is_valid, missing = await service.validate_team_models(team_config)
-        
+
         assert is_valid is True
         assert len(missing) == 0
 
@@ -718,23 +739,23 @@ class TestModelValidation:
     async def test_validate_team_models_missing_deployments(self):
         """Test team model validation with missing deployments."""
         service = TeamService()
-        
+
         # Mock FoundryService with limited deployments
         mock_foundry = MagicMock()
         mock_foundry.list_model_deployments = AsyncMock(return_value=[
             {"name": "gpt-4", "status": "Succeeded"}
         ])
-        
+
         team_config = {
             "agents": [{
                 "name": "TestAgent",
                 "deployment_name": "missing-model"
             }]
         }
-        
+
         with patch.object(team_service_module, 'FoundryService', return_value=mock_foundry):
             is_valid, missing = await service.validate_team_models(team_config)
-        
+
         assert is_valid is False
         assert "missing-model" in missing
 
@@ -742,12 +763,12 @@ class TestModelValidation:
     async def test_validate_team_models_exception(self):
         """Test team model validation with exception."""
         service = TeamService()
-        
+
         team_config = {"agents": []}
-        
+
         with patch.object(team_service_module, 'FoundryService', side_effect=Exception("Service error")):
             is_valid, missing = await service.validate_team_models(team_config)
-        
+
         assert is_valid is True  # Defaults to True on exception
         assert missing == []
 
@@ -755,17 +776,17 @@ class TestModelValidation:
     async def test_get_deployment_status_summary_success(self):
         """Test successful deployment status summary."""
         service = TeamService()
-        
+
         mock_foundry = MagicMock()
         mock_foundry.list_model_deployments = AsyncMock(return_value=[
             {"name": "gpt-4", "status": "Succeeded"},
             {"name": "gpt-35", "status": "Failed"},
             {"name": "claude-3", "status": "Pending"}
         ])
-        
+
         with patch.object(team_service_module, 'FoundryService', return_value=mock_foundry):
             summary = await service.get_deployment_status_summary()
-        
+
         assert summary["total_deployments"] == 3
         assert "gpt-4" in summary["successful_deployments"]
         assert "gpt-35" in summary["failed_deployments"]
@@ -775,10 +796,10 @@ class TestModelValidation:
     async def test_get_deployment_status_summary_exception(self):
         """Test deployment status summary with exception."""
         service = TeamService()
-        
+
         with patch.object(team_service_module, 'FoundryService', side_effect=Exception("Service error")):
             summary = await service.get_deployment_status_summary()
-        
+
         assert "error" in summary
         assert "Service error" in summary["error"]
 
@@ -797,9 +818,9 @@ class TestSearchIndexValidation:
                 {"type": "rag", "index_name": "  index3  "}
             ]
         }
-        
+
         index_names = service.extract_index_names(team_config)
-        
+
         assert "index1" in index_names
         assert "index2" in index_names
         assert "index3" in index_names
@@ -808,7 +829,7 @@ class TestSearchIndexValidation:
     def test_has_rag_or_search_agents(self):
         """Test detection of RAG agents in team config."""
         service = TeamService()
-        
+
         # Config with RAG agents
         team_config_with_rag = {
             "agents": [
@@ -816,14 +837,14 @@ class TestSearchIndexValidation:
                 {"type": "ai", "name": "regular_agent"}
             ]
         }
-        
+
         # Config without RAG agents
         team_config_no_rag = {
             "agents": [
                 {"type": "ai", "name": "regular_agent"}
             ]
         }
-        
+
         assert service.has_rag_or_search_agents(team_config_with_rag) is True
         assert service.has_rag_or_search_agents(team_config_no_rag) is False
 
@@ -834,9 +855,9 @@ class TestSearchIndexValidation:
         team_config = {
             "agents": [{"type": "ai", "name": "regular_agent"}]
         }
-        
+
         is_valid, errors = await service.validate_team_search_indexes(team_config)
-        
+
         assert is_valid is True
         assert errors == []
 
@@ -845,13 +866,13 @@ class TestSearchIndexValidation:
         """Test search index validation without search endpoint."""
         service = TeamService()
         service.search_endpoint = None
-        
+
         team_config = {
             "agents": [{"type": "rag", "index_name": "test_index"}]
         }
-        
+
         is_valid, errors = await service.validate_team_search_indexes(team_config)
-        
+
         assert is_valid is False
         assert len(errors) > 0
         assert "no Azure Search endpoint" in errors[0]
@@ -860,16 +881,16 @@ class TestSearchIndexValidation:
     async def test_validate_team_search_indexes_success(self):
         """Test successful search index validation."""
         service = TeamService()
-        
+
         # Mock successful index validation
         service.validate_single_index = AsyncMock(return_value=(True, ""))
-        
+
         team_config = {
             "agents": [{"type": "rag", "index_name": "test_index"}]
         }
-        
+
         is_valid, errors = await service.validate_team_search_indexes(team_config)
-        
+
         assert is_valid is True
         assert errors == []
 
@@ -877,16 +898,17 @@ class TestSearchIndexValidation:
     async def test_validate_team_search_indexes_failure(self):
         """Test search index validation with failures."""
         service = TeamService()
-        
+
         # Mock failed index validation
-        service.validate_single_index = AsyncMock(return_value=(False, "Index not found"))
-        
+        service.validate_single_index = AsyncMock(
+            return_value=(False, "Index not found"))
+
         team_config = {
             "agents": [{"type": "rag", "index_name": "missing_index"}]
         }
-        
+
         is_valid, errors = await service.validate_team_search_indexes(team_config)
-        
+
         assert is_valid is False
         assert "Index not found" in errors
 
@@ -894,15 +916,15 @@ class TestSearchIndexValidation:
     async def test_validate_single_index_success(self):
         """Test successful single index validation."""
         service = TeamService()
-        
+
         # Mock successful SearchIndexClient
         mock_index_client = MagicMock()
         mock_index = MagicMock()
         mock_index_client.get_index.return_value = mock_index
-        
+
         with patch.object(team_service_module, 'SearchIndexClient', return_value=mock_index_client):
             is_valid, error = await service.validate_single_index("test_index")
-        
+
         assert is_valid is True
         assert error == ""
 
@@ -910,18 +932,19 @@ class TestSearchIndexValidation:
     async def test_validate_single_index_not_found(self):
         """Test single index validation when index not found."""
         service = TeamService()
-        
+
         # Use the module's ResourceNotFoundError which is mocked
         ResourceNotFoundError = team_service_module.ResourceNotFoundError
-        
+
         # Mock SearchIndexClient that raises ResourceNotFoundError
         mock_index_client = MagicMock()
-        mock_index_client.get_index.side_effect = ResourceNotFoundError("Index not found")
-        
+        mock_index_client.get_index.side_effect = ResourceNotFoundError(
+            "Index not found")
+
         # Patch SearchIndexClient in the team_service module
         with patch.object(team_service_module, 'SearchIndexClient', return_value=mock_index_client):
             is_valid, error = await service.validate_single_index("missing_index")
-        
+
         assert is_valid is False
         assert "does not exist" in error
 
@@ -929,17 +952,18 @@ class TestSearchIndexValidation:
     async def test_validate_single_index_auth_error(self):
         """Test single index validation with authentication error."""
         service = TeamService()
-        
+
         # Use the module's ClientAuthenticationError which is mocked
         ClientAuthenticationError = team_service_module.ClientAuthenticationError
-        
+
         # Mock SearchIndexClient that raises ClientAuthenticationError
         mock_index_client = MagicMock()
-        mock_index_client.get_index.side_effect = ClientAuthenticationError("Auth failed")
-        
+        mock_index_client.get_index.side_effect = ClientAuthenticationError(
+            "Auth failed")
+
         with patch.object(team_service_module, 'SearchIndexClient', return_value=mock_index_client):
             is_valid, error = await service.validate_single_index("test_index")
-        
+
         assert is_valid is False
         assert "Authentication failed" in error
 
@@ -947,17 +971,17 @@ class TestSearchIndexValidation:
     async def test_validate_single_index_http_error(self):
         """Test single index validation with HTTP error."""
         service = TeamService()
-        
+
         # Use the module's HttpResponseError which is mocked
         HttpResponseError = team_service_module.HttpResponseError
-        
+
         # Mock SearchIndexClient that raises HttpResponseError
         mock_index_client = MagicMock()
         mock_index_client.get_index.side_effect = HttpResponseError("HTTP error")
-        
+
         with patch.object(team_service_module, 'SearchIndexClient', return_value=mock_index_client):
             is_valid, error = await service.validate_single_index("test_index")
-        
+
         assert is_valid is False
         assert "Error accessing" in error
 
@@ -965,14 +989,14 @@ class TestSearchIndexValidation:
     async def test_validate_single_index_unexpected_exception(self):
         """Test single index validation with unexpected exception."""
         service = TeamService()
-        
+
         # Mock SearchIndexClient that raises generic Exception
         mock_index_client = MagicMock()
         mock_index_client.get_index.side_effect = RuntimeError("Unexpected error")
-        
+
         with patch.object(team_service_module, 'SearchIndexClient', return_value=mock_index_client):
             is_valid, error = await service.validate_single_index("test_index")
-        
+
         assert is_valid is False
         assert "Unexpected error validating" in error
 
@@ -980,14 +1004,14 @@ class TestSearchIndexValidation:
     async def test_validate_single_index_index_not_configured(self):
         """Test single index validation when index exists but not properly configured."""
         service = TeamService()
-        
+
         # Mock SearchIndexClient that returns None
         mock_index_client = MagicMock()
         mock_index_client.get_index.return_value = None
-        
+
         with patch.object(team_service_module, 'SearchIndexClient', return_value=mock_index_client):
             is_valid, error = await service.validate_single_index("partial_index")
-        
+
         assert is_valid is False
         assert "not be properly configured" in error
 
@@ -995,20 +1019,20 @@ class TestSearchIndexValidation:
     async def test_get_search_index_summary_success(self):
         """Test successful search index summary."""
         service = TeamService()
-        
+
         # Create mock indexes
         mock_index1 = MagicMock()
         mock_index1.name = "index1"
         mock_index2 = MagicMock()
         mock_index2.name = "index2"
-        
+
         # Mock SearchIndexClient
         mock_index_client = MagicMock()
         mock_index_client.list_indexes.return_value = [mock_index1, mock_index2]
-        
+
         with patch.object(team_service_module, 'SearchIndexClient', return_value=mock_index_client):
             summary = await service.get_search_index_summary()
-        
+
         assert summary["total_indexes"] == 2
         assert "index1" in summary["available_indexes"]
         assert "index2" in summary["available_indexes"]
@@ -1018,9 +1042,9 @@ class TestSearchIndexValidation:
         """Test search index summary without endpoint."""
         service = TeamService()
         service.search_endpoint = None
-        
+
         summary = await service.get_search_index_summary()
-        
+
         assert "error" in summary
         assert "No Azure Search endpoint" in summary["error"]
 
@@ -1028,14 +1052,14 @@ class TestSearchIndexValidation:
     async def test_get_search_index_summary_exception(self):
         """Test search index summary with exception."""
         service = TeamService()
-        
+
         # Mock SearchIndexClient that raises an exception
         mock_index_client = MagicMock()
         mock_index_client.list_indexes.side_effect = RuntimeError("Service error")
-        
+
         with patch.object(team_service_module, 'SearchIndexClient', return_value=mock_index_client):
             summary = await service.get_search_index_summary()
-        
+
         assert "error" in summary
         assert "Service error" in summary["error"]
 
@@ -1047,9 +1071,12 @@ class TestIntegrationScenarios:
     async def test_full_team_creation_workflow(self):
         """Test complete team creation workflow."""
         mock_memory = MagicMock()
+        # save_team_configuration now checks for an existing team (upsert);
+        # None means "not found" -> add_team path
+        mock_memory.get_team = AsyncMock(return_value=None)
         mock_memory.add_team = AsyncMock()
         service = TeamService(memory_context=mock_memory)
-        
+
         json_data = {
             "name": "Integration Test Team",
             "status": "active",
@@ -1077,15 +1104,15 @@ class TestIntegrationScenarios:
             ]
         }
         user_id = "integration-user"
-        
+
         # Validate and parse
         team_config = await service.validate_and_parse_team_config(json_data, user_id)
         assert team_config.name == "Integration Test Team"
-        
+
         # Save configuration
         config_id = await service.save_team_configuration(team_config)
         assert config_id == team_config.id
-        
+
         # Verify save was called
         mock_memory.add_team.assert_called_once()
 
@@ -1100,15 +1127,15 @@ class TestIntegrationScenarios:
             name="Selected Team"
         ))
         service = TeamService(memory_context=mock_memory)
-        
+
         user_id = "workflow-user"
         team_id = "team-456"
-        
+
         # Handle team selection
         current_team = await service.handle_team_selection(user_id, team_id)
         assert current_team.user_id == user_id
         assert current_team.team_id == team_id
-        
+
         # Verify team configuration can be retrieved
         team_config = await service.get_team_configuration(team_id, user_id)
         assert team_config.name == "Selected Team"
@@ -1117,15 +1144,17 @@ class TestIntegrationScenarios:
     async def test_error_handling_resilience(self):
         """Test error handling across different scenarios."""
         service = TeamService()
-        
+
         # Test with various invalid configurations
         invalid_configs = [
             {},  # Empty config
             {"name": "Test"},  # Missing required fields
-            {"name": "Test", "status": "active", "agents": [], "starting_tasks": []},  # Empty arrays
-            {"name": "Test", "status": "active", "agents": "invalid", "starting_tasks": []}  # Invalid types
+            {"name": "Test", "status": "active", "agents": [],
+                "starting_tasks": []},  # Empty arrays
+            {"name": "Test", "status": "active", "agents": "invalid",
+                "starting_tasks": []}  # Invalid types
         ]
-        
+
         for config in invalid_configs:
             with pytest.raises(ValueError):
                 await service.validate_and_parse_team_config(config, "user")
@@ -1137,7 +1166,7 @@ class TestIntegrationScenarios:
         mock_memory.add_team = AsyncMock()
         mock_memory.get_all_teams = AsyncMock(return_value=[])
         service = TeamService(memory_context=mock_memory)
-        
+
         # Create multiple team configs concurrently
         tasks = []
         for i in range(3):
@@ -1149,9 +1178,9 @@ class TestIntegrationScenarios:
             }
             task = service.validate_and_parse_team_config(json_data, f"user-{i}")
             tasks.append(task)
-        
+
         results = await asyncio.gather(*tasks)
-        
+
         # All should succeed
         assert len(results) == 3
         for i, result in enumerate(results):

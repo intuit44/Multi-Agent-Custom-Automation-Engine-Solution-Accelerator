@@ -52,7 +52,7 @@ class TestAzureConfig(unittest.TestCase):
 
         self.assertEqual(settings, mock_settings)
         mock_chat_options.assert_called_once_with(
-            max_output_tokens=4000, temperature=0.1
+            max_tokens=4000, temperature=0.3
         )
 
     @patch("backend.v4.config.settings.config")
@@ -217,10 +217,11 @@ class TestOrchestrationConfig(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(config.approvals, dict)
         self.assertIsInstance(config.sockets, dict)
         self.assertIsInstance(config.clarifications, dict)
-        self.assertEqual(config.max_rounds, 20)
+        self.assertEqual(config.max_rounds, 5)
         self.assertIsInstance(config._approval_events, dict)
         self.assertIsInstance(config._clarification_events, dict)
-        self.assertEqual(config.default_timeout, 300.0)
+        self.assertEqual(config.default_timeout, 200.0)
+        self.assertIsInstance(config.active_runs, set)
 
     def test_get_current_orchestration(self):
         """Test getting current orchestration."""

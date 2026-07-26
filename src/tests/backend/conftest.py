@@ -54,6 +54,7 @@ def _setup_agent_framework_mock():
             'Agent', 'AgentResponse', 'AgentResponseUpdate', 'AgentRunUpdateEvent',
             'AgentSession', 'AgentThread', 'BaseAgent', 'ChatAgent', 'ChatMessage',
             'ChatOptions', 'Content', 'ExecutorCompletedEvent',
+            'FunctionInvocationContext', 'FunctionMiddleware',
             'GroupChatRequestSentEvent', 'GroupChatResponseReceivedEvent',
             'HostedCodeInterpreterTool', 'HostedMCPTool',
             'InMemoryCheckpointStorage', 'MCPStreamableHTTPTool',
@@ -172,6 +173,19 @@ def _patch_azure_ai_projects_models():
 _setup_environment_variables()
 _setup_agent_framework_mock()
 _setup_azure_monitor_mock()
+
+# Pre-import the middleware chain (self_heal -> tool_errors -> event_utils)
+# while the CLEAN stub above is in sys.modules. Several test modules stomp
+# sys.modules['agent_framework'] with their own partial Mocks at import time;
+# if this chain first loads under one of those (suite order), subclassing
+# FunctionMiddleware hits a Mock instance and the import dies (surfacing as
+# "module ... has no attribute 'foundry_agent'"). Importing it here caches the
+# real modules so later stomps can't re-execute them.
+try:
+    import v4.magentic_agents.common.self_heal_middleware  # noqa: F401
+except Exception:
+    # Never fail collection over an optional warm-up import.
+    pass
 _patch_azure_ai_projects_models()
 
 

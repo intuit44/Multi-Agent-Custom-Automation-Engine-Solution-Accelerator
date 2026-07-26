@@ -347,7 +347,10 @@ sys.modules["v4.common.services.team_service"] = Mock(TeamService=MockTeamServic
 
 sys.modules["v4.callbacks"] = Mock()
 sys.modules["v4.callbacks.response_handlers"] = Mock(
-    agent_response_callback=Mock(), streaming_agent_response_callback=AsyncMock()
+    agent_response_callback=Mock(),
+    streaming_agent_response_callback=AsyncMock(),
+    # Source flushes buffered agent streams through clean_citations()
+    clean_citations=Mock(side_effect=lambda text: text),
 )
 
 # Mock v4.config.settings
@@ -357,6 +360,8 @@ mock_connection_config.send_status_update_async = AsyncMock()
 mock_orchestration_config = Mock()
 mock_orchestration_config.max_rounds = 10
 mock_orchestration_config.orchestrations = {}
+# Source stores/pops agent wrappers per user (cleanup on rebuild) — must be a real dict
+mock_orchestration_config.agent_wrappers = {}
 mock_orchestration_config.get_current_orchestration = Mock(return_value=None)
 mock_orchestration_config.set_approval_pending = Mock()
 
@@ -372,10 +377,14 @@ class MockWebsocketMessageType:
     """Mock WebsocketMessageType."""
 
     FINAL_RESULT_MESSAGE = "final_result_message"
+    AGENT_MESSAGE = "agent_message"
 
 
 sys.modules["v4.models"] = Mock()
-sys.modules["v4.models.messages"] = Mock(WebsocketMessageType=MockWebsocketMessageType)
+sys.modules["v4.models.messages"] = Mock(
+    WebsocketMessageType=MockWebsocketMessageType,
+    AgentMessage=Mock,
+)
 
 
 # Mock v4.orchestration.human_approval_manager
@@ -401,7 +410,9 @@ class MockMagenticAgentFactory:
     def __init__(self, team_service=None):
         self.team_service = team_service
 
-    async def get_agents(self, user_id, team_config_input, memory_store):
+    async def get_agents(
+        self, user_id, team_config_input, memory_store, user_access_token=None
+    ):
         # Create mock agents
         agent1 = Mock()
         agent1.agent_name = "TestAgent1"
@@ -415,10 +426,17 @@ class MockMagenticAgentFactory:
         return [agent1, agent2]
 
 
+class MockProxyAgent:
+    """Mock ProxyAgent class for isinstance checks in run_orchestration."""
+
+    pass
+
+
 sys.modules["v4.magentic_agents"] = Mock()
 sys.modules["v4.magentic_agents.magentic_agent_factory"] = Mock(
     MagenticAgentFactory=MockMagenticAgentFactory
 )
+sys.modules["v4.magentic_agents.proxy_agent"] = Mock(ProxyAgent=MockProxyAgent)
 
 # Now import the module under test
 from backend.v4.orchestration.orchestration_manager import OrchestrationManager  # noqa: E402
@@ -442,6 +460,7 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
         # Reset mocks — reset_mock() does NOT clear side_effect,
         # so we must do it explicitly to avoid cross-test pollution.
         orchestration_config.orchestrations.clear()
+        orchestration_config.agent_wrappers.clear()
         orchestration_config.get_current_orchestration.return_value = None
         orchestration_config.set_approval_pending.reset_mock()
         connection_config.send_status_update_async.reset_mock()
@@ -604,10 +623,11 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
     async def test_get_current_or_new_orchestration_team_switched(self):
         """Test creating new orchestration when team is switched."""
-        # Set up existing orchestration with participants that need closing
+        # Set up existing orchestration; prior agent wrappers (tracked in
+        # orchestration_config.agent_wrappers) are what gets closed on rebuild.
         mock_existing_workflow = Mock()
         mock_agent = MockAgent(agent_name="TestAgent")
-        mock_existing_workflow._participants = {"agent1": mock_agent}
+        orchestration_config.agent_wrappers[self.test_user_id] = [mock_agent]
 
         orchestration_config.get_current_orchestration.return_value = (
             mock_existing_workflow
@@ -633,6 +653,10 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
                 orchestration_config.orchestrations[self.test_user_id],
                 mock_new_workflow,
             )
+            # New wrappers replace the closed ones
+            new_wrappers = orchestration_config.agent_wrappers[self.test_user_id]
+            self.assertNotIn(mock_agent, new_wrappers)
+            self.assertEqual(len(new_wrappers), 2)
 
     async def test_get_current_or_new_orchestration_agent_creation_failure(self):
         """Test handling agent creation failure."""
@@ -687,6 +711,15 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
         mock_orchestrator_event.type = "magentic_orchestrator"
         mock_orchestrator_event.data = MockChatMessage("Plan message")
 
+        # Request event opens the active-response window; streamed chunks
+        # outside a RequestSent→ResponseReceived window are discarded by source.
+        mock_request_data = MockGroupChatRequestSentEvent()
+        mock_request_data.participant_name = "agent_1"
+        mock_request_data.round_index = 1
+        mock_request_event = Mock()
+        mock_request_event.type = "group_chat"
+        mock_request_event.data = mock_request_data
+
         # Output event with AgentResponseUpdate data triggers streaming callback
         mock_agent_update_data = MockAgentRunUpdateEvent()
         mock_agent_update_data.text = "Agent streaming update"
@@ -711,6 +744,7 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         mock_events = [
             mock_orchestrator_event,
+            mock_request_event,
             mock_output_event,
             mock_response_event,
             mock_final_output,
@@ -723,9 +757,10 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         orchestration_config.get_current_orchestration.return_value = mock_workflow
 
-        # Mock input task
+        # Mock input task (context must be a real str — source seeds it into task_text)
         input_task = Mock()
         input_task.description = "Test task description"
+        input_task.context = ""
 
         # Execute orchestration
         await self.orchestration_manager.run_orchestration(
@@ -746,6 +781,7 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         with self.assertRaises(ValueError) as context:
             await self.orchestration_manager.run_orchestration(
@@ -768,6 +804,7 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         with self.assertRaises(Exception):
             await self.orchestration_manager.run_orchestration(
@@ -802,6 +839,7 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         await self.orchestration_manager.run_orchestration(
             user_id=self.test_user_id,
@@ -830,6 +868,7 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         await self.orchestration_manager.run_orchestration(
             user_id=self.test_user_id,
@@ -856,6 +895,7 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         # Should not raise exception - clearing failures are handled gracefully
         await self.orchestration_manager.run_orchestration(
@@ -882,6 +922,7 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         # Should not raise exception - event processing errors are handled
         await self.orchestration_manager.run_orchestration(
@@ -901,6 +942,7 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         # Run should fail due to no workflow, but we can test the setup
         with self.assertRaises(ValueError):
@@ -950,6 +992,7 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         # The method should handle WebSocket errors gracefully by catching them
         # and trying to send error status, which will also fail, but shouldn't raise
@@ -1003,11 +1046,13 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
         mock_executor_completed.type = "executor_completed"
         mock_executor_completed.executor_id = "agent_1"
 
-        # Create all possible event types
+        # Create all possible event types.
+        # Request must precede the output chunk: source only forwards streamed
+        # chunks for agents inside a RequestSent→ResponseReceived window.
         events = [
             mock_orchestrator_event,
-            mock_output_event,
             mock_request_event,
+            mock_output_event,
             mock_response_event,
             mock_executor_completed,
             Mock(),  # Unknown event type - should be safely ignored
@@ -1020,6 +1065,7 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test all events"
+        input_task.context = ""
 
         # Should process all events without errors
         await self.orchestration_manager.run_orchestration(
@@ -1165,6 +1211,7 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
         # Reset mocks — reset_mock() does NOT clear side_effect,
         # so we must do it explicitly to avoid cross-test pollution.
         orchestration_config.orchestrations.clear()
+        orchestration_config.agent_wrappers.clear()
         orchestration_config.get_current_orchestration.return_value = None
         connection_config.send_status_update_async.reset_mock()
         connection_config.send_status_update_async.side_effect = None
@@ -1195,6 +1242,7 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test list output"
+        input_task.context = ""
 
         # Should process without raising an exception
         await self.orchestration_manager.run_orchestration(
@@ -1225,6 +1273,7 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test mixed list output"
+        input_task.context = ""
 
         # Should handle mixed list without error
         await self.orchestration_manager.run_orchestration(
@@ -1251,6 +1300,7 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test object output"
+        input_task.context = ""
 
         await self.orchestration_manager.run_orchestration(
             user_id=self.test_user_id,
@@ -1274,6 +1324,7 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test unknown type output"
+        input_task.context = ""
 
         await self.orchestration_manager.run_orchestration(
             user_id=self.test_user_id,
@@ -1296,6 +1347,7 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test empty list output"
+        input_task.context = ""
 
         await self.orchestration_manager.run_orchestration(
             user_id=self.test_user_id,
@@ -1330,6 +1382,7 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Requires approval"
+        input_task.context = ""
 
         # Should NOT raise
         await self.orchestration_manager.run_orchestration(
@@ -1366,6 +1419,7 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Requires approval"
+        input_task.context = ""
 
         # Should still NOT raise despite send failure
         await self.orchestration_manager.run_orchestration(

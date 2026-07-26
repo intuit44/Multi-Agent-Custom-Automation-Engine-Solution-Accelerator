@@ -103,14 +103,14 @@ class OrchestrationConfig:
         self.clarification_contexts: Dict[
             str, Dict[str, str]
         ] = {}  # request_id -> session/user context for routing answers
-        self.max_rounds: int = 2  # Maximum replanning rounds
+        self.max_rounds: int = 5  # Maximum replanning rounds
 
         # Event-driven notification system for approvals and clarifications
         self._approval_events: Dict[str, asyncio.Event] = {}
         self._clarification_events: Dict[str, asyncio.Event] = {}
 
         # Default timeout (seconds) for waiting operations
-        self.default_timeout: float = 100.0
+        self.default_timeout: float = 200.0
 
         # Sessions with an orchestration run currently in flight (created /
         # awaiting approval / executing). Makes resume_plan idempotent: a plan
@@ -181,7 +181,12 @@ class OrchestrationConfig:
             self._approval_events[plan_id] = asyncio.Event()
 
         try:
-            await self._approval_events[plan_id].wait()
+            # wait_for enforces the resolved timeout — a bare event.wait()
+            # blocks the orchestration BackgroundTask forever when no approval
+            # ever arrives (docstring and callers expect TimeoutError).
+            await asyncio.wait_for(
+                self._approval_events[plan_id].wait(), timeout=timeout
+            )
             logger.info(f"Approval received: {plan_id}")
             # After event.wait(), the value is guaranteed to be set (not None)
             result = self.approvals[plan_id]
@@ -189,6 +194,11 @@ class OrchestrationConfig:
                 f"Approval result for {plan_id} should not be None after event"
             )
             return result
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Approval wait for %s timed out after %ss", plan_id, timeout
+            )
+            raise
         except asyncio.CancelledError:
             logger.debug("Approval request %s was cancelled", plan_id)
             raise

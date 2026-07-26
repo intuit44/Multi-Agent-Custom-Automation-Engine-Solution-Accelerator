@@ -90,10 +90,23 @@ class MockAgentMessageType:
     AI_AGENT = "AI_Agent"
 
 
+class MockStatusValue(str):
+    """String that also exposes .value like an Enum member.
+
+    plan_service now writes PlanStatus.completed.value into plan.m_plan
+    (m_plan/agent_message persistence reused from orchestration_manager),
+    so mocked statuses must behave like enum members AND compare as strings.
+    """
+
+    @property
+    def value(self):
+        return str(self)
+
+
 class MockPlanStatus:
-    approved = "approved"
-    completed = "completed"
-    rejected = "rejected"
+    approved = MockStatusValue("approved")
+    completed = MockStatusValue("completed")
+    rejected = MockStatusValue("rejected")
 
 
 # Create mock AgentMessageData class
@@ -510,6 +523,8 @@ class TestPlanService:
         # Setup mock database and plan
         mock_db = MagicMock()
         mock_plan = MagicMock()
+        # m_plan is persisted as a dict; final message also flips its status
+        mock_plan.m_plan = {"overall_status": "in_progress"}
         mock_db.add_agent_message = AsyncMock()
         mock_db.get_plan = AsyncMock(return_value=mock_plan)
         mock_db.update_plan = AsyncMock()
@@ -522,6 +537,7 @@ class TestPlanService:
         assert result is True
         assert mock_plan.streaming_message == "Stream completed"
         assert mock_plan.overall_status == MockPlanStatus.completed
+        assert mock_plan.m_plan["overall_status"] == "completed"
         mock_db.update_plan.assert_called_once()
 
     @pytest.mark.asyncio

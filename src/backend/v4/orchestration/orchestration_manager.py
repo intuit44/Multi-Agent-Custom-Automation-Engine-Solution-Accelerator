@@ -222,7 +222,8 @@ class OrchestrationManager:
             participants=participant_list,
             manager=manager,
             checkpoint_storage=storage,
-            intermediate_outputs=True,  # Required: yield agent streaming output events, not just orchestrator output
+            # Required: yield agent streaming output events, not just orchestrator output
+            intermediate_outputs=True,
         )
 
         # Build workflow

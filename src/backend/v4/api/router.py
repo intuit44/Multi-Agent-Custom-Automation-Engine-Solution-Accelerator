@@ -1635,6 +1635,9 @@ _ROUTER_FUNCTIONS = [
         "execution model calls the tool directly. "
         "NOT the user's knowledge bases (that is run_knowledge_base) and NOT "
         "public web search (that is run_web_search). "
+        "Reading or summarizing the CONTENT of a file from GitHub or any "
+        "external repo/system is ALWAYS this capability, never "
+        "run_knowledge_base. "
         "Never answer from memory; this fetches real data via the tools.",
         "task",
         "The full, self-contained task expressed as a DIRECT tool action "
@@ -1644,8 +1647,10 @@ _ROUTER_FUNCTIONS = [
         "run_knowledge_base",
         "The request asks about the user's OWN documents, organization, domain "
         "knowledge, or indexed sources — answerable from the user's knowledge bases "
-        "(Foundry IQ / Azure AI Search). NOT public web search and NOT a connected "
-        "external server. Retrieves authoritative, source-attributable content.",
+        "(Foundry IQ / Azure AI Search). NOT public web search, NOT a connected "
+        "external server, and NOT reading files/code from GitHub or external "
+        "repos (that is run_macae_mcp_server). Retrieves authoritative, "
+        "source-attributable content.",
         "task",
         "A well-formed query describing the information to retrieve from the KB.",
     ),
@@ -2142,10 +2147,8 @@ class _RouterChatClient:
             _uid = self._user_id or "sample_user"
             instructions = (
                 f"IDENTITY: your user_id is '{_uid}'. Pass user_id='{_uid}' to "
-                f"EVERY MacaeMcpServer tool call (connect_from_registry, "
-                f"discover_mcp_capabilities, call_external_tool, "
-                f"list_connected_servers, read_external_resource, "
-                f"disconnect_mcp_server). This is mandatory — without it "
+                f"EVERY MacaeMcpServer tool call, no exceptions. "
+                "This is mandatory — without it "
                 f"credential resolution runs in the wrong namespace and all "
                 f"authenticated servers return 401 or 0 tools.\n\n"
                 "You work with the user's connected external MCP servers (GitHub, "
@@ -2156,8 +2159,26 @@ class _RouterChatClient:
                 f"(2) MacaeMcpServer___call_external_tool {{server_name, "
                 "target_tool, arguments, "
                 f"user_id='{_uid}'}} to execute. "
+                "GATEWAY 'tool-box': the registered server named 'tool-box' is "
+                "the shared Foundry Toolbox facade exposing GitHub (file "
+                "contents, code search, branches, PRs), Microsoft Learn and "
+                "the knowledge bases. To READ FILE CONTENT or search code on "
+                "GitHub, ALWAYS use it with this NESTED form: (1) "
+                f"connect_from_registry {{server_name='tool-box', "
+                f"user_id='{_uid}'}}; (2) call_external_tool "
+                "{server_name='tool-box', target_tool='call_tool', "
+                "arguments={'name': '<member tool, e.g. "
+                "GitHub___get_file_contents>', 'arguments': {<its args>}}, "
+                f"user_id='{_uid}'}}. To discover member tool names call it "
+                "with target_tool='tool_search' and arguments={'query': "
+                "'<what you need>'}. Results include the FULL file/text "
+                "content — quote it faithfully; never claim content is "
+                "missing without checking the result. On 'tool-box' do NOT "
+                "use read_external_resource or discover_mcp_capabilities "
+                "(member tools are hidden from listing; use tool_search). "
                 f"Use MacaeMcpServer___list_connected_servers(user_id='{_uid}') "
-                f"and MacaeMcpServer___discover_mcp_capabilities(server_name, "
+                f"and, for servers OTHER than 'tool-box', "
+                f"MacaeMcpServer___discover_mcp_capabilities(server_name, "
                 f"user_id='{_uid}') to find server/tool names. "
                 "You do NOT already know this data — call the tools; never "
                 "fabricate. Keep the answer brief."

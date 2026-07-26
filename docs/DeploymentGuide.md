@@ -72,7 +72,7 @@ Ensure you have access to an [Azure subscription](https://azure.microsoft.com/fr
 
 > **Note:** When you run `azd up`, the deployment will automatically show you regions with available quota, so this pre-check is optional but helpful for planning purposes. You can customize these settings later in [Step 3.3: Advanced Configuration](#33-advanced-configuration-optional).
 
-📖 **Adjust Quota:** Follow [Azure AI Model Quota Settings](./AzureGPTQuotaSettings.md) if needed.
+📖 **Adjust Quota:** Follow [Azure AI Model Quota Settings](https://github.com/microsoft/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator/blob/main/docs/AzureGPTQuotaSettings.md) if needed.
 
 ## Step 2: Choose Your Deployment Environment
 
@@ -245,7 +245,7 @@ You can customize various deployment settings before running `azd up`, including
 
 By default, the **GPT model capacity** in deployment is set to **150k tokens**.
 
-To adjust quota settings, follow these [steps](./AzureGPTQuotaSettings.md).
+To adjust quota settings, follow these [steps](https://github.com/microsoft/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator/blob/main/docs/AzureGPTQuotaSettings.md).
 
 **⚠️ Warning:** Insufficient quota can cause deployment errors. Please ensure you have the recommended capacity or request additional capacity before deploying this solution.
 
@@ -354,7 +354,7 @@ After successful deployment:
 
 ### 5.2 Configure Authentication (Optional)
 
-1. Follow [App Authentication Configuration](./azure_app_service_auth_setup.md)
+1. Follow [App Authentication Configuration](https://github.com/microsoft/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator/blob/main/docs/azure_app_service_auth_setup.md)
 2. Wait up to 10 minutes for authentication changes to take effect
 
 ### 5.3 Verify Deployment
@@ -390,7 +390,7 @@ azd down
 
 ### Manual Cleanup (if needed)
 If deployment fails or you need to clean up manually:
-- Follow [Delete Resource Group Guide](./DeleteResourceGroup.md)
+- Follow [Delete Resource Group Guide](https://github.com/microsoft/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator/blob/main/docs/DeleteResourceGroup.md)
 
 ## Managing Multiple Environments
 
