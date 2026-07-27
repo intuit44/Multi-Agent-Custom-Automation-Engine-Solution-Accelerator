@@ -195,7 +195,9 @@ class ExternalMCPSession:
                         method,
                         _redact(dict(response.request.headers)),
                         _truncate(payload, 2000),
-                        _redact(dict(response.headers)),
+                        _redact(
+                            dict(response.headers)
+                        ),  # redacted to avoid leaking sensitive response headers
                         body.decode("utf-8", errors="replace")[:4000],
                     )
                     response.raise_for_status()

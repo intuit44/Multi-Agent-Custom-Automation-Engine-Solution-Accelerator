@@ -34,7 +34,7 @@ class StaticTokenCredential:
         try:
             payload = access_token.split(".")[1]
             payload += "=" * (-len(payload) % 4)
-            decoded = _json.loads(_b64.b64decode(payload))
+            decoded = _json.loads(_b64.urlsafe_b64decode(payload))
             self._expires_on = decoded.get("exp", int(_dt.now().timestamp()) + 3600)
         except Exception:
             self._expires_on = int(_dt.now().timestamp()) + 3600
