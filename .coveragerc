@@ -1,33 +1,47 @@
 [run]
 source = .
 omit =
+    # Not this deployable / not product code — no value in collecting
     src/mcp_server/*
-    src/backend/tests/*
     src/tests/mcp_server/*
     src/tests/agents/*
     src/**/__init__.py
     tests/e2e-test/*
     */venv/*
     */env/*
+    */.venv/*
     */.pytest_cache/*
     */node_modules/*
-    src/backend/v4/api/router.py
-    src/backend/v4/common/services/mcp_connections_service.py
-    src/backend/v4/common/services/mcp_discovery_service.py
-    src/backend/v4/common/services/mcp_inspector_bridge.py
-    src/backend/v4/common/services/mcp_resource_service.py
-    src/backend/v4/common/models/mcp_connection_models.py
-    src/backend/v4/orchestration/intent_router.py
-    src/backend/common/services/chat_cosmos_service.py
-
-[paths]
-source =
-    src/backend
-    */site-packages
+    # Stale in-backend test tree (CI runs src/tests/backend, not this)
+    tests/*
+    # Separate deployable (Function App) — not part of the FastAPI app under test
+    azure_functions/*
 
 [report]
+# The integration-heavy monolith family is excluded from the GATE NUMBER but
+# still MEASURED at [run] time: line data stays in .coverage, so the behavior
+# map (which routes/branches the suite actually exercises) is available on
+# demand:
+#   coverage report --include='v4/api/router.py' -m
+# Debt is paid by extraction: pure logic moved out of router.py into small
+# tested modules enters the gate number automatically.
+omit =
+    v4/api/router.py
+    v4/api/oauth_helpers.py
+    v4/common/services/mcp_connections_service.py
+    v4/common/services/mcp_discovery_service.py
+    v4/common/services/mcp_inspector_bridge.py
+    v4/common/services/mcp_resource_service.py
+    v4/common/models/mcp_connection_models.py
+    v4/orchestration/intent_router.py
+    common/services/chat_cosmos_service.py
 exclude_lines =
     pragma: no cover
     def __repr__
     raise AssertionError
     raise NotImplementedError
+
+[paths]
+source =
+    src/backend
+    */site-packages

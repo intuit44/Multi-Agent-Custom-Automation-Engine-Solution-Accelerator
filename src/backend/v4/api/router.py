@@ -1882,8 +1882,9 @@ class _RouterChatClient:
             default_query={"api-version": self._router_api_version},
             timeout=120,
         )
-        _fn_name = ""
-        _fn_args = ""
+        from v4.api.router_decision import RouterDecisionAccumulator
+
+        _acc = RouterDecisionAccumulator()
         _router_answered = False
         # history (Cosmos + AI Search) gives the router memory; chat/completions is
         # stateless, so the conversation is supplied as prior messages.
@@ -1903,31 +1904,31 @@ class _RouterChatClient:
                 if delta is None:
                     continue
                 for tc in getattr(delta, "tool_calls", None) or []:
-                    fn = getattr(tc, "function", None)
-                    if fn is None:
-                        continue
-                    if getattr(fn, "name", None):
-                        _fn_name = fn.name
-                    if getattr(fn, "arguments", None):
-                        _fn_args += fn.arguments
+                    _acc.add_delta(tc)
                 # Stream the router's OWN answer live for no-tool turns: it comes
                 # from the model the router selected AND remembers (history is in
                 # messages). Tool turns emit tool_calls with no content, so this
-                # only fires for direct replies. Guarded on _fn_name so a late
+                # only fires for direct replies. Guarded on has_function so a late
                 # tool_call never mixes with streamed text.
                 content = getattr(delta, "content", None)
-                if content and not _fn_name:
+                if content and not _acc.has_function:
                     _router_answered = True
                     yield _HostedUpdate([_HostedTextContent(content)])
         finally:
             await router.close()
 
-        import json as _json
-
-        try:
-            _args = _json.loads(_fn_args or "{}")
-        except Exception:
-            _args = {}
+        _decision = _acc.finalize()
+        _fn_name = _decision.fn_name
+        _args = _decision.args
+        if _decision.parse_error is not None:
+            # This used to be a bare `except: _args = {}` and the dispatch then
+            # ran on the RAW user prompt with no trace — invisible misrouting.
+            logger.warning(
+                "Router args UNPARSEABLE for %s — dispatch will fall back to the "
+                "raw user prompt. raw=%r",
+                _fn_name,
+                _decision.parse_error[:300],
+            )
 
         # Capability -> implementation dispatch. The router chose a CAPABILITY
         # (intention); the backend maps it to the execution that serves it. Add a
@@ -1938,6 +1939,15 @@ class _RouterChatClient:
             _fn_name or "<none>",
             _args,
         )
+        if _fn_name and "task" not in _args:
+            # Valid-JSON-but-empty args: every dispatch branch below does
+            # `_args.get("task") or prompt`, so this turn will run on the RAW
+            # user prompt. Say it loudly instead of letting it look routed.
+            logger.warning(
+                "Router picked %s but returned NO task arg — dispatching the "
+                "RAW user prompt.",
+                _fn_name,
+            )
         if _fn_name == "run_python_execution":
             logger.info("Dispatching run_python_execution")
             task = _args.get("task") or prompt
@@ -2215,6 +2225,13 @@ class _RouterChatClient:
             "instructions": instructions,
             "store": False,
         }
+        # Audit line: what the execution model ACTUALLY receives as the final
+        # user message (the router's task, or the raw prompt on fallback).
+        # Pairs with the "Router decision:" line to make misrouting visible.
+        logger.info(
+            "Responses input FINAL: %s",
+            str(create_kwargs["input"][-1].get("content", ""))[:400],
+        )
         try:
             stream = await client.responses.create(**create_kwargs)
             async for evt in stream:
@@ -3000,6 +3017,13 @@ async def chat_message_stream(
             # --- end pre-check ---
 
             _last_tool_activity_key: Optional[tuple] = None
+            # Turn ledger: the "floating membranes" (tool calls + args + result
+            # heads) that used to evaporate with store=False. Appended to the
+            # PERSISTED assistant content at close, so the deeds of this turn
+            # (owner/repo/ref, SHAs) enter the same Cosmos + Search memory the
+            # next turn's router recovers — no new store, no new recovery path.
+            _turn_ledger: list = []
+            _ledger_pending_args: str = ""
 
             # Rebuild conversation memory from the REAL plumbing (Cosmos + Azure AI
             # Search), NOT previous_response_id (fragile: breaks on re-auth / session
@@ -3167,6 +3191,7 @@ async def chat_message_stream(
                         tool_name = getattr(content, "tool_name", None) or "unknown"
                         server_name = getattr(content, "server_name", None) or "unknown"
                         last_mcp_tool_call = (tool_name, server_name)
+                        _ledger_pending_args = str(content.arguments or "")[:300]
                         _key = ("calling", tool_name, server_name)
                         if _key != _last_tool_activity_key:
                             _last_tool_activity_key = _key
@@ -3189,6 +3214,12 @@ async def chat_message_stream(
                         tool_name = tool_name or "unknown"
                         server_name = server_name or "unknown"
                         last_mcp_tool_call = None
+                        if len(_turn_ledger) < 8:
+                            _turn_ledger.append(
+                                f"{server_name}.{tool_name}({_ledger_pending_args})"
+                                f" -> {str(content_preview)[:180]}"
+                            )
+                        _ledger_pending_args = ""
                         _key = ("result", tool_name, server_name)
                         if _key != _last_tool_activity_key:
                             _last_tool_activity_key = _key
@@ -3434,10 +3465,19 @@ async def chat_message_stream(
                     }
                     for gf in collected_generated_files
                 ]
+            # The ledger rides INSIDE the persisted content (not the streamed
+            # text): content is the one field both memory layers read (session
+            # doc AND Search index), so the next turn's router recovers the
+            # deeds — tool names, owner/repo/ref args, SHAs — not just words.
+            _persist_content = full_text
+            if _turn_ledger:
+                _persist_content = (
+                    full_text + "\n\n[turn-log]\n" + "\n".join(_turn_ledger)
+                )
             await chat_svc.add_message(
                 session_id=chat_request.session_id,
                 user_id=user_id,
-                content=full_text,
+                content=_persist_content,
                 role="assistant",
                 metadata=_persist_meta,
             )
