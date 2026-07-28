@@ -1,5 +1,6 @@
 import ChatInput from "@/coral/modules/ChatInput";
 import { PlanChatProps } from "@/models";
+import { resolveApiUrl } from "@/api/config";
 import { Button, Menu, MenuTrigger, MenuPopover, MenuList, MenuItem, Divider } from "@fluentui/react-components";
 import { Send } from "@/coral/imports/bundleicons";
 import {
@@ -188,7 +189,7 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
                         {generatedFiles.map(f => (
                             <a
                                 key={f.file_id}
-                                href={f.download_url}
+                                href={resolveApiUrl(f.download_url)}
                                 download={f.filename}
                                 style={{
                                     display: 'flex',

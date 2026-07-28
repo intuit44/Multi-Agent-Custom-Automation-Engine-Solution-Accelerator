@@ -178,6 +178,19 @@ export function getApiUrl() {
 
   return API_URL;
 }
+// Resolve backend-relative '/api/...' paths (generated_file download_url,
+// markdown image src persisted by the backend) against the configured API
+// base. Local dev keeps them relative (vite proxies /api); in the cloud the
+// SPA and the backend are different hosts, so a relative path falls through
+// to the SPA's index.html fallback and breaks <img>/<a> (verified live:
+// frontend returned text/html 200 for /api/v4/chat/download-file/...).
+export function resolveApiUrl(path?: string): string {
+  if (!path || !path.startsWith('/api/')) return path || '';
+  const base = getApiUrl();
+  if (!base || base === '/api') return path;
+  return `${base}${path.slice('/api'.length)}`;
+}
+
 export function getUserInfoGlobal() {
   if (!USER_INFO) {
     // Check if window.userInfo exists
