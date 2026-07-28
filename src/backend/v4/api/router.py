@@ -1625,6 +1625,16 @@ _ROUTER_FUNCTIONS = [
         "The full, self-contained task to execute.",
     ),
     _capability(
+        "run_image_generation",
+        "The request asks to GENERATE or EDIT an IMAGE — a picture, product "
+        "shot, campaign visual, illustration, logo, or photo-realistic scene. "
+        "NOT questions ABOUT images and NOT data charts/plots (that is "
+        "run_python_execution).",
+        "task",
+        "A complete, self-contained image prompt: subject, style, "
+        "composition, lighting, aspect/mood.",
+    ),
+    _capability(
         "run_macae_mcp_server",
         "The request needs to USE the tools of an external connected server — "
         "e.g. Infobip, GitHub (list branches, PRs, issues, files, commits), ARM (list "
@@ -1769,6 +1779,14 @@ class _RouterChatClient:
         self._openai_base_url = f"{account}/openai"
         self._api_version = _DIRECT_RESPONSES_API_VERSION
         self._model = config.CHAT_ORCHESTRATOR_MODEL
+        # Image generation (gpt-image family). Deployment must exist in the
+        # Foundry account; override via env when the name differs.
+        self._image_deployment = config._get_optional(
+            "IMAGE_GENERATION_DEPLOYMENT", "gpt-image-2"
+        )
+        self._image_api_version = config._get_optional(
+            "IMAGE_GENERATION_API_VERSION", "2025-04-01-preview"
+        )
         self._toolbox_label = config.CHAT_TOOLBOX_NAME
         self._toolbox_url = (
             f"{project}/toolboxes/{config.CHAT_TOOLBOX_NAME}/mcp?api-version=v1"
@@ -1955,6 +1973,11 @@ class _RouterChatClient:
                 task, history, use_code_interpreter=True
             ):
                 yield update
+        elif _fn_name == "run_image_generation":
+            logger.info("Dispatching run_image_generation")
+            task = _args.get("task") or prompt
+            async for update in self._execute_image_generation(task):
+                yield update
         elif _fn_name == "run_macae_mcp_server":
             logger.info("Dispatching run_macae_mcp_server")
             task = _args.get("task") or prompt
@@ -1998,6 +2021,104 @@ class _RouterChatClient:
             logger.info("Router produced nothing; falling back to o4-mini execution")
             async for update in self._execute_responses(prompt, history):
                 yield update
+
+    async def _execute_image_generation(self, prompt: str):
+        """Generate an image with the configured gpt-image deployment and
+        surface it through the EXISTING generated_file channel: the bytes are
+        uploaded to Foundry files, so /chat/download-file and the frontend
+        renderers (chat AND plan surfaces) work unchanged.
+        """
+        import base64
+
+        import httpx
+
+        bearer = await self._bearer()
+        # Route verified live with an empty-body probe (2026-07-28): the
+        # ACCOUNT-level deployment path answers (400 "Missing 'prompt'") on
+        # api-version 2025-04-01-preview; "2026-04-21" is the MODEL version
+        # from the catalog card, not an API version (404s). The project-scoped
+        # path is a different auth plane (401, audience ai.azure.com).
+        url = (
+            f"{self._openai_base_url}/deployments/{self._image_deployment}"
+            f"/images/generations?api-version={self._image_api_version}"
+        )
+        logger.info(
+            "Image generation: model=%s prompt=%s",
+            self._image_deployment,
+            prompt[:200],
+        )
+        try:
+            async with httpx.AsyncClient(timeout=300.0) as http:
+                resp = await http.post(
+                    url,
+                    headers={"Authorization": f"Bearer {bearer}"},
+                    json={
+                        "prompt": prompt,
+                        "n": 1,
+                        "size": "1024x1024",
+                    },
+                )
+        except Exception as ex:
+            logger.error("Image generation request failed: %s", ex)
+            yield _HostedUpdate([_HostedTextContent(f"Image generation failed: {ex}")])
+            return
+        if resp.status_code != 200:
+            # Surface the FULL error — an empty/summarized failure here is how
+            # models end up narrating images they never generated.
+            err = (
+                f"Image generation failed: HTTP {resp.status_code} — "
+                f"{resp.text[:300]}"
+            )
+            logger.error(err)
+            yield _HostedUpdate([_HostedTextContent(err)])
+            return
+        payload = resp.json()
+        b64 = ((payload.get("data") or [{}])[0] or {}).get("b64_json")
+        if not b64:
+            yield _HostedUpdate(
+                [
+                    _HostedTextContent(
+                        "Image generation returned no image data: "
+                        + str(payload)[:200]
+                    )
+                ]
+            )
+            return
+        image_bytes = base64.b64decode(b64)
+        filename = f"generated_{uuid.uuid4().hex[:8]}.png"
+
+        from azure.ai.agents.aio import AgentsClient
+
+        from common.config.app_config import config
+
+        creds = config.get_azure_credential_async(config.AZURE_CLIENT_ID)
+        async with AgentsClient(
+            endpoint=config.AZURE_AI_PROJECT_ENDPOINT,
+            credential=creds,
+        ) as agents_client:
+            uploaded = await agents_client.files.upload(
+                file=(filename, image_bytes, "image/png"),
+                purpose="assistants",
+            )
+        logger.info(
+            "Generated image uploaded to Foundry: file_id=%s name=%s size=%d",
+            uploaded.id,
+            filename,
+            len(image_bytes),
+        )
+        # hosted_file → the SSE handler emits the generated_file event with the
+        # download_url and persists it in the assistant message metadata — the
+        # same end-to-end channel code_interpreter files already use.
+        yield _HostedUpdate([_HostedTextContent("Imagen generada:")])
+        yield _HostedUpdate(
+            [
+                _HostedHostedFile(
+                    file_id=uploaded.id,
+                    name=filename,
+                    additional_properties={"filename": filename},
+                )
+            ]
+        )
 
     async def _execute_responses(
         self,
@@ -3319,6 +3440,21 @@ async def chat_message_stream(
                                 }
                                 collected_generated_files.append(_gf_entry)
                                 yield _sse_event(_gf_entry)
+                                # Express the file IN the message content —
+                                # markdown image (rendered inline in the
+                                # bubble) or link — so it persists and
+                                # re-renders with the conversation.
+                                _md = (
+                                    f"\n\n![{fname}]({_gf_entry['download_url']})"
+                                    if str(fname)
+                                    .lower()
+                                    .endswith(
+                                        (".png", ".jpg", ".jpeg", ".webp", ".gif")
+                                    )
+                                    else f"\n\n[{fname}]({_gf_entry['download_url']})"
+                                )
+                                full_text += _md
+                                yield _sse_event({"type": "token", "content": _md})
 
                     elif ct == "hosted_file":
                         # Streaming path: agent_framework emits container_file_citation
@@ -3363,6 +3499,16 @@ async def chat_message_stream(
                             }
                             collected_generated_files.append(_gf_entry)
                             yield _sse_event(_gf_entry)
+                            # Same unified rule: the file IS message content.
+                            _md = (
+                                f"\n\n![{fname}]({_gf_entry['download_url']})"
+                                if str(fname)
+                                .lower()
+                                .endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
+                                else f"\n\n[{fname}]({_gf_entry['download_url']})"
+                            )
+                            full_text += _md
+                            yield _sse_event({"type": "token", "content": _md})
 
                     elif ct == "oauth_consent_request":
                         # Tool (e.g. GitHub MCP) needs the user to complete OAuth.

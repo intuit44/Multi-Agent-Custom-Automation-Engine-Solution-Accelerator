@@ -1,7 +1,7 @@
-import { Plan, PlanStatus } from "../models";
-import { Task } from "../models/taskList";
-import { apiService } from "../api/apiService";
-import { InputTask, InputTaskResponse } from "../models/inputTask";
+import { Plan, PlanStatus } from '../models';
+import { Task } from '../models/taskList';
+import { apiService } from '../api/apiService';
+import { InputTask, InputTaskResponse } from '../models/inputTask';
 
 /**
  * TaskService - Service for handling task-related operations and transformations
@@ -27,17 +27,18 @@ export class TaskService {
       const task: Task = {
         id: plan.session_id,
         name: plan.initial_goal,
-        status: plan.overall_status === PlanStatus.COMPLETED ? "completed" : "inprogress",
+        status:
+          plan.overall_status === PlanStatus.COMPLETED
+            ? 'completed'
+            : 'inprogress',
         date: new Intl.DateTimeFormat(undefined, {
-          dateStyle: "long",
+          dateStyle: 'long',
           // timeStyle: "short",
         }).format(new Date(plan.timestamp)),
       };
 
       // Categorize based on plan status and completion
-      if (
-        plan.overall_status === PlanStatus.COMPLETED
-      ) {
+      if (plan.overall_status === PlanStatus.COMPLETED) {
         completed.push(task);
       } else {
         inProgress.push(task);
@@ -86,7 +87,7 @@ export class TaskService {
    */
   static filterTasksByStatus(
     tasks: Task[],
-    status: "inprogress" | "completed"
+    status: 'inprogress' | 'completed'
   ): Task[] {
     return tasks.filter((task) => task.status === status);
   }
@@ -120,7 +121,7 @@ export class TaskService {
     }
 
     // Check for any colon pattern - split on first colon
-    const colonIndex = action.indexOf(":");
+    const colonIndex = action.indexOf(':');
     if (colonIndex !== -1) {
       return {
         description: action.substring(0, colonIndex).trim(),
@@ -140,11 +141,11 @@ export class TaskService {
    * @returns Cleaned text string with only letters, numbers, and spaces
    */
   static cleanTextToSpaces(text: string): string {
-    if (!text) return "";
+    if (!text) return '';
 
     let cleanedText = text
-      .replace("Hr_Agent", "HR Agent")
-      .replace("Hr Agent", "HR Agent")
+      .replace('Hr_Agent', 'HR Agent')
+      .replace('Hr Agent', 'HR Agent')
       .trim();
 
     // Convert camelCase and PascalCase to spaces
@@ -164,11 +165,11 @@ export class TaskService {
   }
 
   static cleanHRAgent(text: string): string {
-    if (!text) return "";
+    if (!text) return '';
     // Replace any non-alphanumeric character with a space
     let cleanedText = text
-      .replace("Hr_Agent", "HR Agent")
-      .replace("Hr Agent", "HR Agent")
+      .replace('Hr_Agent', 'HR Agent')
+      .replace('Hr Agent', 'HR Agent')
       .trim();
 
     return cleanedText;
@@ -195,9 +196,8 @@ export class TaskService {
     try {
       return await apiService.createPlan(inputTask);
     } catch (error: any) {
-
       // You can customize this logic as needed
-      let message = "Unable to create plan. Please try again.";
+      let message = 'Unable to create plan. Please try again.';
 
       throw new Error(message);
     }

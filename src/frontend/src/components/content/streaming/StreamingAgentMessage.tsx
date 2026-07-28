@@ -132,10 +132,25 @@ const isClarificationMessage = (content: string): boolean => {
   return clarificationKeywords.some(keyword => lowerContent.includes(keyword));
 };
 
-// Static markdown link renderer — hoisted to module scope so the `components`
+// Static markdown renderers — hoisted to module scope so the `components`
 // object is stable across renders. An inline object here would be a new
 // reference on every render and defeat ReactMarkdown's internal memoization.
-const markdownComponents = {
+// Shared by every agent-bubble ReactMarkdown (this file + StreamingBufferMessage)
+// so links and generated images render identically everywhere.
+export const markdownComponents = {
+  img: ({ node, alt, ...props }: any) => (
+    <img
+      alt={alt ?? ''}
+      {...props}
+      style={{
+        maxWidth: '100%',
+        height: 'auto',
+        display: 'block',
+        borderRadius: '8px',
+        margin: '8px 0',
+      }}
+    />
+  ),
   a: ({ node, children, ...props }: any) => (
     <a
       {...props}

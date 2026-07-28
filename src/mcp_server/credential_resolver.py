@@ -101,7 +101,7 @@ class CredentialResolver:
             secret_name = self._secret_name_from_ref(secret_ref)
             secret = await kv_client.get_secret(secret_name)
             if secret.value is None:
-                logger.warning("Secret '%s' has no value", secret_name)
+                logger.warning("Retrieved secret has no value")
                 return None
 
             try:
@@ -110,7 +110,7 @@ class CredentialResolver:
                 credentials = {"token": secret.value}
 
             self._cache[secret_ref] = credentials
-            logger.info("Resolved credentials via secret_ref")
+            logger.info("Credentials resolved successfully from Key Vault")
             return credentials
         except Exception as e:  # noqa: BLE001 - never surface KV internals
             logger.warning("Failed to resolve secret_ref: %s", type(e).__name__)
@@ -167,7 +167,7 @@ class CredentialResolver:
         """
         if not audience:
             logger.warning(
-                "managed_identity credential_source has no audience configured"
+                "managed_identity credential_source requires an audience but none is configured"
             )
             return None
         client_id = (
@@ -180,7 +180,7 @@ class CredentialResolver:
         )
         try:
             token = await credential.get_token(audience)
-            logger.info("Minted managed-identity token (audience=%s)", audience)
+            logger.info("Minted managed-identity token successfully")
             return token.token
         except Exception as e:  # noqa: BLE001 - never surface credential internals
             logger.error("Failed to mint managed-identity token: %s", type(e).__name__)
@@ -283,7 +283,9 @@ class CredentialResolver:
             kv_client = self._get_keyvault_client()
             secret_name = self._secret_name_from_ref(secret_ref)
             await kv_client.set_secret(secret_name, json.dumps(blob))
-            logger.info("oauth_refresh: rotated token persisted to Key Vault")
+            logger.info(
+                "oauth_refresh: rotated token persisted to Key Vault successfully"
+            )
         except Exception as e:  # noqa: BLE001 - never surface KV internals
             logger.error(
                 "oauth_refresh: write-back failed (MI needs Key Vault Secrets "
