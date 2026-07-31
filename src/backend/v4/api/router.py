@@ -5733,8 +5733,9 @@ async def connect_user_to_mcp_server(server_name: str, request: Request):
         body = {}
         try:
             body = await request.json()
-        except Exception:
-            pass
+        except (json.JSONDecodeError, ValueError):
+            logger.debug(
+                "connect_user_to_mcp_server: request body missing or not valid JSON; proceeding with empty body")
 
         credentials = body.get("credentials")
 
@@ -5846,8 +5847,9 @@ async def activate_user_mcp_connection(server_name: str, request: Request):
         body = {}
         try:
             body = await request.json()
-        except Exception:
-            pass
+        except (json.JSONDecodeError, ValueError):
+            logger.debug(
+                "activate_user_mcp_connection: request body missing or not valid JSON; proceeding with empty body")
 
         svc = await MCPConnectionsService.get_instance()
         result = await svc.mark_connection_active(
