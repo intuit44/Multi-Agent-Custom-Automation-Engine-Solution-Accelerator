@@ -2044,8 +2044,11 @@ class _RouterChatClient:
         if _fn_name == "run_python_execution":
             logger.info("Dispatching run_python_execution")
             task = _args.get("task") or prompt
-            async for update in self._execute_responses(
-                task, history, use_code_interpreter=True
+            async for update in self._redact_via_router(
+                self._execute_responses(task, history, use_code_interpreter=True),
+                _fn_name,
+                _args,
+                _messages,
             ):
                 yield update
         elif _fn_name == "run_image_generation":
@@ -2056,27 +2059,41 @@ class _RouterChatClient:
         elif _fn_name == "run_macae_mcp_server":
             logger.info("Dispatching run_macae_mcp_server")
             task = _args.get("task") or prompt
-            async for update in self._execute_responses(task, history, use_macae=True):
+            async for update in self._redact_via_router(
+                self._execute_responses(task, history, use_macae=True),
+                _fn_name,
+                _args,
+                _messages,
+            ):
                 yield update
         elif _fn_name == "run_knowledge_base":
             logger.info("Dispatching run_knowledge_base")
             task = _args.get("task") or prompt
-            async for update in self._execute_responses(
-                task, history, use_toolbox=True
+            async for update in self._redact_via_router(
+                self._execute_responses(task, history, use_toolbox=True),
+                _fn_name,
+                _args,
+                _messages,
             ):
                 yield update
         elif _fn_name == "run_foundry_mcp":
             logger.info("Dispatching run_foundry_mcp")
             task = _args.get("task") or prompt
-            async for update in self._execute_responses(
-                task, history, use_foundry=True
+            async for update in self._redact_via_router(
+                self._execute_responses(task, history, use_foundry=True),
+                _fn_name,
+                _args,
+                _messages,
             ):
                 yield update
         elif _fn_name == "run_web_search":
             logger.info("Dispatching run_web_search")
             task = _args.get("task") or prompt
-            async for update in self._execute_responses(
-                task, history, use_web_search=True
+            async for update in self._redact_via_router(
+                self._execute_responses(task, history, use_web_search=True),
+                _fn_name,
+                _args,
+                _messages,
             ):
                 yield update
         elif _fn_name == "run_plan" and not allow_plan:
@@ -2103,6 +2120,69 @@ class _RouterChatClient:
             logger.info("Router produced nothing; falling back to o4-mini execution")
             async for update in self._execute_responses(prompt, history):
                 yield update
+
+    async def _redact_via_router(self, gen, fn_name: str, args: dict, messages: list):
+        """Responses ejecuta; el Router redacta.
+
+        La actividad de herramienta y los artefactos (container_id/file_id/
+        anotaciones) salen tal cual — el Router no puede transportarlos. El
+        TEXTO vuelve como resultado ``tool`` y el Router escribe la respuesta
+        final con el modelo que eligió, igual que en los turnos sin herramienta.
+        """
+        from openai import AsyncOpenAI
+
+        text: list[str] = []
+        async for update in gen:
+            keep = [c for c in update.contents if getattr(c, "type", None) != "text"]
+            text += [
+                getattr(c, "text", "") or ""
+                for c in update.contents
+                if getattr(c, "type", None) == "text"
+            ]
+            if keep:
+                yield _HostedUpdate(keep)
+
+        call_id = f"call_{fn_name}"
+        _msgs = list(messages) + [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {
+                            "name": fn_name,
+                            "arguments": json.dumps(args or {}),
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": "".join(text).strip() or f"({fn_name}: no text output)",
+            },
+        ]
+        router = AsyncOpenAI(
+            api_key=await self._bearer(),
+            base_url=self._router_base_url,
+            default_query={"api-version": self._router_api_version},
+            timeout=120,
+        )
+        try:
+            # Sin `tools`: esta pasada sólo redacta, no encadena otra herramienta.
+            stream = await router.chat.completions.create(
+                model=self._router_model, messages=cast(Any, _msgs), stream=True
+            )
+            async for chunk in stream:
+                choice = chunk.choices[0] if getattr(chunk, "choices", None) else None
+                delta = getattr(choice, "delta", None) if choice else None
+                content = getattr(delta, "content", None) if delta else None
+                if content:
+                    yield _HostedUpdate([_HostedTextContent(content)])
+        finally:
+            await router.close()
 
     async def _execute_image_generation(self, prompt: str):
         """Generate an image with the configured gpt-image deployment and
