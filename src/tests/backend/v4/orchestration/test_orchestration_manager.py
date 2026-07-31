@@ -319,7 +319,12 @@ class MockTeamConfiguration:
         self.deployment_name = deployment_name
 
 
-sys.modules["common.models.messages_af"] = Mock(TeamConfiguration=MockTeamConfiguration)
+sys.modules["common.models.messages_af"] = Mock(
+    TeamConfiguration=MockTeamConfiguration,
+    # Real PlanStatus is a str-enum; the failure-marking block sets
+    # plan.overall_status = PlanStatus.failed and tests assert the string.
+    PlanStatus=Mock(failed="failed"),
+)
 
 
 class MockDatabaseBase:
@@ -439,7 +444,9 @@ sys.modules["v4.magentic_agents.magentic_agent_factory"] = Mock(
 sys.modules["v4.magentic_agents.proxy_agent"] = Mock(ProxyAgent=MockProxyAgent)
 
 # Now import the module under test
-from backend.v4.orchestration.orchestration_manager import OrchestrationManager  # noqa: E402
+from backend.v4.orchestration.orchestration_manager import (  # noqa: E402
+    OrchestrationManager,
+)
 
 # Get mocked references for tests
 connection_config = sys.modules["v4.config.settings"].connection_config
@@ -1076,6 +1083,105 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         # Verify streaming callback was called (for output event with AgentResponseUpdate data)
         streaming_agent_response_callback.assert_called()
+
+    # ── Harvested from upstream dev-v4 (functional spec, anti-zombie plans) ──
+    # Adapted: session_id added (local signature requires it — mechanical drift)
+    # and DatabaseFactory patched on the module attribute instead of upstream's
+    # global sys.modules mock, which would poison the rest of the suite.
+
+    async def test_run_orchestration_marks_plan_failed_on_exception(self):
+        """When orchestration raises and plan_id is set, plan.overall_status must be
+        updated to FAILED via DatabaseFactory/get_plan_by_plan_id/update_plan."""
+        mock_workflow = Mock()
+        mock_workflow.executors = {}
+        mock_workflow.run = Mock(side_effect=Exception("Workflow execution failed"))
+        orchestration_config.get_current_orchestration.return_value = mock_workflow
+
+        mock_plan = Mock()
+        mock_plan.overall_status = "in_progress"
+        mock_memory_store = Mock()
+        mock_memory_store.get_plan_by_plan_id = AsyncMock(return_value=mock_plan)
+        mock_memory_store.update_plan = AsyncMock()
+
+        db_factory_mock = Mock()
+        db_factory_mock.get_database = AsyncMock(return_value=mock_memory_store)
+
+        input_task = Mock()
+        input_task.description = "Test task"
+        input_task.context = ""  # local seeding does len(context) — a bare Mock breaks it
+
+        with patch.dict(
+            sys.modules,
+            {"common.database.database_factory": Mock(DatabaseFactory=db_factory_mock)},
+        ):
+            with self.assertRaises(Exception):
+                await self.orchestration_manager.run_orchestration(
+                    user_id=self.test_user_id,
+                    session_id=self.test_session_id,
+                    input_task=input_task,
+                    plan_id="plan-123",
+                )
+
+        db_factory_mock.get_database.assert_awaited_with(user_id=self.test_user_id)
+        mock_memory_store.get_plan_by_plan_id.assert_awaited_with(plan_id="plan-123")
+        mock_memory_store.update_plan.assert_awaited_once()
+        self.assertEqual(mock_plan.overall_status, "failed")
+
+    async def test_run_orchestration_db_failure_does_not_mask_original_error(self):
+        """If the DB update itself fails, the original orchestration error must still
+        propagate (the DB error is logged and swallowed)."""
+        mock_workflow = Mock()
+        mock_workflow.executors = {}
+        original_error = RuntimeError("Workflow boom")
+        mock_workflow.run = Mock(side_effect=original_error)
+        orchestration_config.get_current_orchestration.return_value = mock_workflow
+
+        db_factory_mock = Mock()
+        db_factory_mock.get_database = AsyncMock(side_effect=Exception("DB unavailable"))
+
+        input_task = Mock()
+        input_task.description = "Test task"
+        input_task.context = ""  # local seeding does len(context) — a bare Mock breaks it
+
+        with patch.dict(
+            sys.modules,
+            {"common.database.database_factory": Mock(DatabaseFactory=db_factory_mock)},
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                await self.orchestration_manager.run_orchestration(
+                    user_id=self.test_user_id,
+                    session_id=self.test_session_id,
+                    input_task=input_task,
+                    plan_id="plan-123",
+                )
+        self.assertIn("Workflow boom", str(ctx.exception))
+
+    async def test_run_orchestration_skips_db_update_when_no_plan_id(self):
+        """When plan_id is not provided, the orchestration must not touch the DB on failure."""
+        mock_workflow = Mock()
+        mock_workflow.executors = {}
+        mock_workflow.run = Mock(side_effect=Exception("Workflow execution failed"))
+        orchestration_config.get_current_orchestration.return_value = mock_workflow
+
+        db_factory_mock = Mock()
+        db_factory_mock.get_database = AsyncMock()
+
+        input_task = Mock()
+        input_task.description = "Test task"
+        input_task.context = ""  # local seeding does len(context) — a bare Mock breaks it
+
+        with patch.dict(
+            sys.modules,
+            {"common.database.database_factory": Mock(DatabaseFactory=db_factory_mock)},
+        ):
+            with self.assertRaises(Exception):
+                await self.orchestration_manager.run_orchestration(
+                    user_id=self.test_user_id,
+                    session_id=self.test_session_id,
+                    input_task=input_task,
+                )
+
+        db_factory_mock.get_database.assert_not_awaited()
 
 
 class TestExtractResponseText(IsolatedAsyncioTestCase):

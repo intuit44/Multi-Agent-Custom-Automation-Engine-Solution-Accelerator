@@ -29,7 +29,7 @@ from requests import session
 
 from common.config.app_config import config
 from common.database.database_base import DatabaseBase
-from common.models.messages_af import TeamConfiguration
+from common.models.messages_af import PlanStatus, TeamConfiguration
 from v4.callbacks.response_handlers import (
     streaming_agent_response_callback,
 )
@@ -810,6 +810,29 @@ class OrchestrationManager:
             if hasattr(e, "__dict__"):
                 self.logger.error("Error attributes: %s", e.__dict__)
             self.logger.info("=" * 50)
+
+            # Mirror of upstream dev-v4: mark the plan FAILED in the store so it
+            # cannot resurrect as an in_progress zombie (a page refresh re-triggers
+            # orphaned orchestrations; stale approvals re-send). A DB error here
+            # must never mask the original orchestration error.
+            try:
+                if plan_id:
+                    # Lazy import: the test harness stubs common.database as a
+                    # bare Mock, which breaks this import at module load.
+                    from common.database.database_factory import DatabaseFactory
+
+                    memory_store = await DatabaseFactory.get_database(user_id=user_id)
+                    plan = await memory_store.get_plan_by_plan_id(plan_id=plan_id)
+                    if plan:
+                        plan.overall_status = PlanStatus.failed
+                        await memory_store.update_plan(plan)
+                        self.logger.info(
+                            "Plan '%s' status updated to FAILED", plan_id
+                        )
+            except Exception as db_error:
+                self.logger.error(
+                    "Failed to update plan status to FAILED: %s", db_error
+                )
 
             # Send error status to user
             try:

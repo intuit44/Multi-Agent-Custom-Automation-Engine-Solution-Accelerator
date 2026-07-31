@@ -10,6 +10,9 @@ export interface ChatMessageRequest {
     model?: string;
     file_ids?: string[];  // Foundry file IDs from /v4/chat/upload-file
     plan_id?: string;     // Set when the message originates from an open plan
+    // Chat|Plan selector: false = this message may never create a plan.
+    // Plan position never uses this flag — it calls /process_request directly.
+    allow_plan?: boolean;
 }
 
 /** Response from POST /v4/chat/message */

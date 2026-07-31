@@ -1,7 +1,7 @@
 import ChatInput from "@/coral/modules/ChatInput";
 import { PlanChatProps } from "@/models";
 import { resolveApiUrl } from "@/api/config";
-import { Button, Menu, MenuTrigger, MenuPopover, MenuList, MenuItem, Divider } from "@fluentui/react-components";
+import { Button, Menu, MenuTrigger, MenuPopover, MenuList, MenuItem, Divider, Switch, Tooltip } from "@fluentui/react-components";
 import { Send } from "@/coral/imports/bundleicons";
 import {
     Attach20Regular,
@@ -26,6 +26,11 @@ interface SimplifiedPlanChatProps extends PlanChatProps {
     onFileSelect?: (file: File) => void;
     onRemoveFile?: (file_id: string) => void;
     onRemoveGeneratedFile?: (file_id: string) => void;
+    /** Chat|Plan selector: true = this message creates a formal plan. */
+    planLane?: boolean;
+    onPlanLaneChange?: (checked: boolean) => void;
+    /** Hidden while inside an existing plan (in-plan messages never create plans). */
+    showPlanLaneToggle?: boolean;
 }
 
 const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
@@ -40,13 +45,18 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
     onFileSelect,
     onRemoveFile,
     onRemoveGeneratedFile,
+    planLane = false,
+    onPlanLaneChange,
+    showPlanLaneToggle = false,
 }) => {
     const isDisabled = submittingChatDisableInput || waitingForPlan;
     const placeholder = waitingForPlan
         ? "Waiting for plan..."
-        : planData
-            ? "Type your message here..."
-            : "Describe your task...";
+        : planLane && showPlanLaneToggle
+            ? "Describe the objective for your plan..."
+            : planData
+                ? "Type your message here..."
+                : "Describe your task...";
     const fileInputRef = useRef<HTMLInputElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const [menuOpen, setMenuOpen] = useState(false);
@@ -248,6 +258,28 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
                             </a>
                         ))}
                     </div>
+                </div>
+            )}
+
+            {/* Chat|Plan selector — the explicit switch that decides the lane:
+                OFF = pure chat (the message can never create a plan);
+                ON  = this message goes to the formal Plan lane. */}
+            {showPlanLaneToggle && (
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
+                    <Tooltip
+                        content={planLane
+                            ? "This message will create a formal multi-agent plan (with your approval)."
+                            : "Pure chat: this message can never create a plan."}
+                        relationship="description"
+                    >
+                        <Switch
+                            checked={planLane}
+                            onChange={(_e, data) => onPlanLaneChange?.(data.checked)}
+                            disabled={isDisabled}
+                            label={planLane ? "Plan" : "Chat"}
+                            style={{ minWidth: '96px' }}
+                        />
+                    </Tooltip>
                 </div>
             )}
 

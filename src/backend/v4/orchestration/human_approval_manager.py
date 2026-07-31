@@ -46,6 +46,7 @@ class HumanApprovalMagenticManager(StandardMagenticManager):
 
         plan_append = """
 
+IMPORTANT: Never ask the user for information or clarification until all agents on the team have been asked first.
 
 EXAMPLE: If the user request involves product information, first ask all agents on the team to provide the information.
 Do not ask the user unless all agents have been consulted and the information is still missing.
@@ -58,6 +59,10 @@ CRITICAL: Each agent should only be called ONCE to perform their task. Do NOT ca
 After an agent has provided their response, move on to the next agent in the plan.
 
 Here is an example of a well-structured plan:
+- **EnhancedResearchAgent** to gather authoritative data on the latest industry trends and best practices in employee onboarding
+- **EnhancedResearchAgent** to gather authoritative data on Innovative onboarding techniques that enhance new hire engagement and retention.
+- **DocumentCreationAgent** to draft a comprehensive onboarding plan that includes a detailed schedule of onboarding activities and milestones.
+- **DocumentCreationAgent** to draft a comprehensive onboarding plan that includes a checklist of resources and materials needed for effective onboarding.
 - **ProxyAgent** to review the drafted onboarding plan for clarity and completeness.
 - **MagenticManager** to finalize the onboarding plan and prepare it for presentation to stakeholders.
 """
@@ -70,7 +75,7 @@ Only re-call an agent if their previous response was explicitly an error or fail
 """
 
         final_append = """
-You must ALWAYS offer additional help at the end of your response. Never end the conversation without asking whether the user wants to go deeper, continue, or receive further assistance..
+DO NOT EVER OFFER TO HELP FURTHER IN THE FINAL ANSWER! Just provide the final answer and end with a polite closing.
 """
 
         kwargs["task_ledger_plan_prompt"] = (
@@ -268,45 +273,13 @@ You must ALWAYS offer additional help at the end of your response. Never end the
         # Delegate to base for normal progress ledger creation
         ledger = await super().create_progress_ledger(magentic_context)
 
-        # Compute uncalled business agents once — used in both guards below.
+        # NOTE: there is deliberately NO ProxyAgent redirect here. A local
+        # "loop guard" used to veto ProxyAgent whenever business agents were
+        # uncalled — it does not exist upstream, and it suppressed the plan's
+        # own clarification steps (the manager then looped the same business
+        # agent instead of asking the user). Upstream arbitration is the
+        # prompt, not a runtime veto.
         uncalled = self._get_uncalled_agents(magentic_context)
-
-        # --- ProxyAgent loop guard ---
-        # When the LLM chooses ProxyAgent as next_speaker but there are still
-        # business agents that haven't responded, redirect to the first uncalled
-        # agent instead.  Without this, ProxyAgent enters an infinite
-        # clarification-timeout-reinvoke cycle that consumes all max_rounds
-        # while the actual business agents are never called.
-        if ledger.next_speaker.answer == "ProxyAgent" and uncalled:
-            next_agent = uncalled[0]
-            logger.info(
-                "ProxyAgent chosen as next_speaker but %d business agent(s) uncalled: %s. "
-                "Redirecting to '%s' to prevent loop.",
-                len(uncalled),
-                uncalled,
-                next_agent,
-            )
-            task_text = getattr(
-                magentic_context.task, "text", str(magentic_context.task)
-            )
-            ledger.next_speaker.answer = next_agent
-            ledger.next_speaker.reason = (
-                f"{next_agent} has not yet been consulted; redirected from ProxyAgent"
-            )
-            ledger.is_request_satisfied.answer = False
-            ledger.is_request_satisfied.reason = (
-                f"Not all agents have responded yet. Waiting for: {', '.join(uncalled)}"
-            )
-            ledger.is_progress_being_made.answer = True
-            ledger.is_progress_being_made.reason = "Continuing to consult remaining agents"
-            ledger.instruction_or_question.answer = (
-                f"Using your available tools and data sources, provide your response "
-                f"for the following task: {task_text}"
-            )
-            ledger.instruction_or_question.reason = (
-                f"Routing to {next_agent} who has not yet contributed"
-            )
-            return ledger
 
         # --- Premature satisfaction guard ---
         # If the LLM says the request is satisfied, verify that all planned
@@ -398,7 +371,7 @@ You must ALWAYS offer additional help at the end of your response. Never end the
             timeout_message = messages.TimeoutNotification(
                 timeout_type="approval",
                 request_id=m_plan_id,
-                message=f"Plan approval request timed out after {orchestration_config.default_timeout} seconds. Please try again.",
+                message=f"Plan approval request timed out after {orchestration_config.approval_timeout} seconds. Please try again.",
                 timestamp=asyncio.get_event_loop().time(),
                 timeout_duration=orchestration_config.default_timeout,
             )

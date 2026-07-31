@@ -31,6 +31,10 @@ interface SimplifiedPlanChatProps extends PlanChatProps {
   onFileSelect?: (file: File) => void;
   onRemoveFile?: (file_id: string) => void;
   onRemoveGeneratedFile?: (file_id: string) => void;
+  /** Chat|Plan selector state + change handler (rendered by PlanChatBody). */
+  planLane?: boolean;
+  onPlanLaneChange?: (checked: boolean) => void;
+  showPlanLaneToggle?: boolean;
 }
 
 const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
@@ -59,6 +63,9 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
   onFileSelect,
   onRemoveFile,
   onRemoveGeneratedFile,
+  planLane,
+  onPlanLaneChange,
+  showPlanLaneToggle,
 }) => {
   // Notify parent when an MPlan arrives via planData.
   useEffect(() => {
@@ -74,6 +81,30 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
     await handleRejectPlan();
     onPlanApproval?.(false);
   };
+
+  // The plan card belongs WHERE IT HAPPENED: after the conversation that
+  // already existed when the plan was created, before the messages its own
+  // execution produced. Any fixed position is wrong in one direction —
+  // bottom put it under its own clarifications, top put it above the prior
+  // chat. Split by the plan's creation timestamp instead.
+  const planStartedAt = planData?.plan?.timestamp
+    ? new Date(planData.plan.timestamp).getTime()
+    : 0;
+  const priorMessages = planStartedAt
+    ? agentMessages.filter((m) => m.timestamp < planStartedAt)
+    : [];
+  const planMessages = planStartedAt
+    ? agentMessages.filter((m) => m.timestamp >= planStartedAt)
+    : agentMessages;
+
+  // The synthetic "user task" bubble existed only because the request that
+  // created the plan was never persisted. Now that the backend stores it, the
+  // real message is in the history — render the synthetic one ONLY when the
+  // request is absent (older plans), or the task shows twice.
+  const goal = (planData?.plan?.initial_goal || '').trim();
+  const requestAlreadyInHistory =
+    goal.length > 0 &&
+    agentMessages.some((m) => (m.content || '').trim() === goal);
 
   if (notFound) {
     return <ContentNotFound subtitle="The requested page could not be found." />;
@@ -116,6 +147,9 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
           onFileSelect={onFileSelect}
           onRemoveFile={onRemoveFile}
           onRemoveGeneratedFile={onRemoveGeneratedFile}
+          planLane={planLane}
+          onPlanLaneChange={onPlanLaneChange}
+          showPlanLaneToggle={showPlanLaneToggle}
         />
       </div>
     );
@@ -139,16 +173,13 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
           width: '100%'
         }}
       >
-        {/* Render agent messages first (includes user messages) */}
-        <RenderAgentMessages agentMessages={agentMessages} />
+        {/* Conversation that already existed when the plan started */}
+        <RenderAgentMessages agentMessages={priorMessages} />
 
-        {/* AI thinking state */}
-        {renderThinkingState(waitingForPlan)}
+        {/* The task and its proposed plan, in place */}
+        {!requestAlreadyInHistory &&
+          renderUserPlanMessage(planApprovalRequest, initialTask, planData)}
 
-        {/* User plan message */}
-        {renderUserPlanMessage(planApprovalRequest, initialTask, planData)}
-
-        {/* Plan response with all information - now renders AFTER agent messages */}
         <RenderPlanResponse
           planApprovalRequest={planApprovalRequest}
           handleApprovePlan={onApprove}
@@ -156,6 +187,12 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
           processingApproval={processingApproval}
           showApprovalButtons={showApprovalButtons}
         />
+
+        {/* Everything the plan execution produced afterwards */}
+        <RenderAgentMessages agentMessages={planMessages} />
+
+        {/* AI thinking state */}
+        {renderThinkingState(waitingForPlan)}
 
         {showProcessingPlanSpinner && renderPlanExecutionMessage()}
         {/* Streaming plan updates */}
@@ -181,6 +218,9 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
         onFileSelect={onFileSelect}
         onRemoveFile={onRemoveFile}
         onRemoveGeneratedFile={onRemoveGeneratedFile}
+        planLane={planLane}
+        onPlanLaneChange={onPlanLaneChange}
+        showPlanLaneToggle={showPlanLaneToggle}
       />
     </div>
   );

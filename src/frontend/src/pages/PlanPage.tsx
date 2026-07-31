@@ -15,7 +15,6 @@ import {
   StreamMessage,
 } from '../models';
 import PlanChat from '../components/content/PlanChat';
-import PlanPanelRight from '../components/content/PlanPanelRight';
 import PlanPanelLeft from '../components/content/PlanPanelLeft';
 import CoralShellColumn from '../coral/components/Layout/CoralShellColumn';
 import CoralShellRow from '../coral/components/Layout/CoralShellRow';
@@ -42,6 +41,12 @@ import {
   setApprovalRequest,
   setProcessingApproval,
 } from '../store/slices/planSlice';
+
+// Interruptor chat|plan: the plan tree (right panel) is code-split out of the
+// initial bundle and only downloaded/mounted once a real plan exists.
+const PlanPanelRight = React.lazy(
+  () => import('../components/content/PlanPanelRight')
+);
 
 /**
  * Page component for displaying a specific plan
@@ -73,7 +78,24 @@ const PlanPage: React.FC = () => {
   const [clarificationMessage, setClarificationMessage] =
     useState<ParsedUserClarification | null>(null);
   const [reloadLeftList, setReloadLeftList] = useState<boolean>(true);
-  const [waitingForPlan, setWaitingForPlan] = useState<boolean>(true);
+  // waitingForPlan is ONLY true when a plan is being loaded/created.
+  // Sessions without a planId must never trigger the "Creating your plan..." spinner.
+  const [waitingForPlan, setWaitingForPlan] = useState<boolean>(!!planId);
+  // Chat|Plan selector (the interruptor). OFF = pure chat: the stream carries
+  // allow_plan=false, so a chat message can NEVER create a plan. ON = the next
+  // message goes to the formal lane (/process_request) explicitly — the
+  // "future UI selector" the backend anticipates. One-shot: resets to Chat
+  // after firing so a stray second message never clones another plan.
+  const [planLane, setPlanLane] = useState<boolean>(false);
+  // Return-to-chat is STATE, not routes (navigate()-based returns are
+  // rejected: they remount and refetch). When the final arrives on
+  // /plan/:id, the SAME canvas flips back to chat where it already is.
+  const [planClosed, setPlanClosed] = useState<boolean>(false);
+  const [closedSessionId, setClosedSessionId] = useState<string>('');
+  // Interruptor chat|plan: without a planId this page IS chat — every piece of
+  // plan machinery (WS subscriptions below, right panel) stays off until a real
+  // plan exists; when the plan completes, planClosed flips it back off.
+  const isPlanMode = Boolean(planId) && !planClosed;
   const [showProcessingPlanSpinner, setShowProcessingPlanSpinner] =
     useState<boolean>(false);
   const [showApprovalButtons, setShowApprovalButtons] = useState<boolean>(true);
@@ -233,48 +255,23 @@ const PlanPage: React.FC = () => {
 
   const processAgentMessage = useCallback(
     (
-      agentMessageData: AgentMessageData,
-      planData: ProcessedPlanData,
+      _agentMessageData: AgentMessageData,
+      _planData: ProcessedPlanData,
       is_final: boolean = false,
-      streaming_message: string = ''
+      _streaming_message: string = ''
     ) => {
-      // Persist / forward to backend (fire-and-forget with logging)
-      const agentMessageResponse = PlanDataService.createAgentMessageResponse(
-        agentMessageData,
-        planData,
-        is_final,
-        streaming_message
-      );
-      console.log('📤 Persisting agent message:', agentMessageResponse);
-      const sendPromise = apiService
-        .sendAgentMessage(agentMessageResponse)
-        .then(() => {
-          console.log('[agent_message][persisted]', {
-            agent: agentMessageData.agent,
-            type: agentMessageData.agent_type,
-            ts: agentMessageData.timestamp,
-          });
-
-          // If this is a final message, refresh the task list after successful persistence
-          if (is_final) {
-            // Single refresh with a delay to ensure backend processing is complete
-            setTimeout(() => {
-              setReloadLeftList(true);
-            }, 1000);
-          }
-        })
-        .catch((err) => {
-          console.warn('[agent_message][persist-failed]', err);
-          // Even if persistence fails, still refresh the task list for final messages
-          // The local plan data has been updated, so the UI should reflect that
-          if (is_final) {
-            setTimeout(() => {
-              setReloadLeftList(true);
-            }, 1000);
-          }
-        });
-
-      return sendPromise;
+      // SINGLE WRITER: the backend persists every plan utterance itself
+      // (_persist_agent_message + final write-back). The old POST to
+      // /agent_message here was a second writer re-persisting the SAME
+      // utterance (fingerprinted in Cosmos: duplicate contents ~0.5s apart
+      // with a {"type":"agent_message",...} raw shape). Do NOT echo.
+      if (is_final) {
+        // Refresh the task list once the backend has settled the final state.
+        setTimeout(() => {
+          setReloadLeftList(true);
+        }, 1000);
+      }
+      return Promise.resolve();
     },
     [setReloadLeftList]
   );
@@ -289,7 +286,10 @@ const PlanPage: React.FC = () => {
     setErrorLoading(false);
     setClarificationMessage(null);
     setReloadLeftList(true);
-    setWaitingForPlan(true);
+    // Mirror the planId guard: only signal "waiting for plan" when there IS a plan to wait for.
+    setWaitingForPlan(!!planId);
+    setPlanClosed(false);
+    setClosedSessionId('');
     setShowProcessingPlanSpinner(false);
     setShowApprovalButtons(true);
     setContinueWithWebsocketFlow(false);
@@ -334,6 +334,7 @@ const PlanPage: React.FC = () => {
 
   //WebsocketMessageType.PLAN_APPROVAL_REQUEST
   useEffect(() => {
+    if (!isPlanMode) return;
     const unsubscribe = webSocketService.on(
       WebsocketMessageType.PLAN_APPROVAL_REQUEST,
       (approvalRequest: any) => {
@@ -379,10 +380,11 @@ const PlanPage: React.FC = () => {
     );
 
     return () => unsubscribe();
-  }, [scrollToBottom, dispatch]);
+  }, [isPlanMode, scrollToBottom, dispatch]);
 
   //(WebsocketMessageType.AGENT_MESSAGE_STREAMING
   useEffect(() => {
+    if (!isPlanMode) return;
     const unsubscribe = webSocketService.on(
       WebsocketMessageType.AGENT_MESSAGE_STREAMING,
       (streamingMessage: any) => {
@@ -396,10 +398,11 @@ const PlanPage: React.FC = () => {
     );
 
     return () => unsubscribe();
-  }, []);
+  }, [isPlanMode]);
 
   //WebsocketMessageType.USER_CLARIFICATION_REQUEST
   useEffect(() => {
+    if (!isPlanMode) return;
     const unsubscribe = webSocketService.on(
       WebsocketMessageType.USER_CLARIFICATION_REQUEST,
       (clarificationMessage: any) => {
@@ -435,9 +438,10 @@ const PlanPage: React.FC = () => {
     );
 
     return () => unsubscribe();
-  }, [scrollToBottom, planData, processAgentMessage]);
+  }, [isPlanMode, scrollToBottom, planData, processAgentMessage]);
   //WebsocketMessageType.AGENT_TOOL_MESSAGE
   useEffect(() => {
+    if (!isPlanMode) return;
     const unsubscribe = webSocketService.on(
       WebsocketMessageType.AGENT_TOOL_MESSAGE,
       (toolMessage: any) => {
@@ -446,10 +450,11 @@ const PlanPage: React.FC = () => {
     );
 
     return () => unsubscribe();
-  }, []);
+  }, [isPlanMode]);
 
   //WebsocketMessageType.FINAL_RESULT_MESSAGE
   useEffect(() => {
+    if (!isPlanMode) return;
     const unsubscribe = webSocketService.on(
       WebsocketMessageType.FINAL_RESULT_MESSAGE,
       (finalMessage: any) => {
@@ -543,6 +548,14 @@ const PlanPage: React.FC = () => {
               dispatch(setPlanData({ planId: planId || '', data: null }));
               dispatch(setApprovalRequest(null));
             }, 500);
+          } else if (routePlanId) {
+            // Estado, no rutas: el mismo lienzo vuelve a chat donde ya está.
+            setClosedSessionId(planData?.plan?.session_id || '');
+            setPlanClosed(true);
+            setTimeout(() => {
+              dispatch(setPlanData({ planId: planId || '', data: null }));
+              dispatch(setApprovalRequest(null));
+            }, 500);
           }
         }
       }
@@ -550,19 +563,23 @@ const PlanPage: React.FC = () => {
 
     return () => unsubscribe();
   }, [
+    isPlanMode,
     scrollToBottom,
     planData,
     processAgentMessage,
     setSelectedTeam,
     dispatch,
     planId,
+    routePlanId,
     routeSessionId,
     queryPlanId,
     setSearchParams,
+    navigate,
   ]);
 
   // WebsocketMessageType.ERROR_MESSAGE
   useEffect(() => {
+    if (!isPlanMode) return;
     const unsubscribe = webSocketService.on(
       WebsocketMessageType.ERROR_MESSAGE,
       (errorMessage: any) => {
@@ -600,10 +617,11 @@ const PlanPage: React.FC = () => {
     );
 
     return () => unsubscribe();
-  }, [scrollToBottom, showToast, formatErrorMessage]);
+  }, [isPlanMode, scrollToBottom, showToast, formatErrorMessage]);
 
   //WebsocketMessageType.AGENT_MESSAGE
   useEffect(() => {
+    if (!isPlanMode) return;
     const unsubscribe = webSocketService.on(
       WebsocketMessageType.AGENT_MESSAGE,
       (agentMessage: any) => {
@@ -621,7 +639,7 @@ const PlanPage: React.FC = () => {
     );
 
     return () => unsubscribe();
-  }, [scrollToBottom, planData, processAgentMessage]);
+  }, [isPlanMode, scrollToBottom, planData, processAgentMessage]);
 
   // Loading message rotation effect
   useEffect(() => {
@@ -773,11 +791,17 @@ const PlanPage: React.FC = () => {
           (msg): AgentMessageData => {
             const role = (msg as any).role || (msg as any).sender;
             const metadata = (msg as any).metadata || {};
+            // Plan-lane messages carry metadata.agent (e.g. ProductAgent);
+            // chat-lane ones carry metadata.selected_agent. Reading only the
+            // latter relabeled every plan utterance as Group_Chat_Manager.
+            const content = (msg.content || '').split('\n\n[turn-log]\n')[0];
             return {
               agent:
                 role === 'user'
                   ? 'human'
-                  : metadata.selected_agent || AgentType.GROUP_CHAT_MANAGER,
+                  : metadata.agent ||
+                    metadata.selected_agent ||
+                    AgentType.GROUP_CHAT_MANAGER,
               agent_type:
                 role === 'user'
                   ? AgentMessageType.HUMAN_AGENT
@@ -785,8 +809,8 @@ const PlanPage: React.FC = () => {
               timestamp: new Date(msg.timestamp).getTime(),
               steps: [],
               next_steps: [],
-              content: msg.content,
-              raw_data: msg.content,
+              content,
+              raw_data: content,
             };
           }
         );
@@ -923,7 +947,8 @@ const PlanPage: React.FC = () => {
       }
 
       // ── Mode 2: — route through IntentRouter SSE ────────────
-      const sessionId = planData?.plan?.session_id || routeSessionId || '';
+      const sessionId =
+        planData?.plan?.session_id || closedSessionId || routeSessionId || '';
       const userMsg: AgentMessageData = {
         agent: 'human',
         agent_type: AgentMessageType.HUMAN_AGENT,
@@ -938,11 +963,40 @@ const PlanPage: React.FC = () => {
       setShowProcessingPlanSpinner(true);
       scrollToBottom();
 
+      // ── Interruptor in Plan position: formal lane, explicitly ──────
+      // No router guessing: the plan is created via /process_request and the
+      // page flips to plan mode when the planId lands in the URL.
+      if (planLane && (!planId || planClosed)) {
+        try {
+          // session_id must always be PRESENT (pydantic requires the field);
+          // the backend mints a uuid when it arrives empty.
+          const resp = await apiService.createPlan({
+            session_id: sessionId || '',
+            description: chatInput,
+          });
+          setPlanLane(false);
+          setWaitingForPlan(true);
+          if (routeSessionId) {
+            setSearchParams({ planId: resp.plan_id });
+          } else {
+            navigate(`/plan/${resp.plan_id}`);
+          }
+        } catch (e: any) {
+          showToast(e?.message || 'Failed to create plan', 'error');
+          setShowProcessingPlanSpinner(false);
+          setSubmittingChatDisableInput(false);
+        }
+        return;
+      }
+
       let accumulated = '';
       let placeholderAdded = false;
       let respondingAgent = AgentType.GROUP_CHAT_MANAGER;
-      const activePlanId =
-        planData?.plan?.plan_id || planData?.plan?.id || planId || '';
+      // Once the plan is closed in place, follow-ups are plain chat: no
+      // in-plan flag, or the backend would treat them as plan follow-ups.
+      const activePlanId = planClosed
+        ? ''
+        : planData?.plan?.plan_id || planData?.plan?.id || planId || '';
       const fileIds = attachedFiles.map((f) => f.file_id);
       const collectedFiles: Array<{
         file_id: string;
@@ -984,6 +1038,9 @@ const PlanPage: React.FC = () => {
               collectedFiles.push(f);
             },
             fileIds,
+            // Chat position: this message may never become a plan. Plans are
+            // born ONLY through the explicit selector branch above.
+            allowPlan: false,
             onOAuthConsentRequest: (consentLink) => {
               // NOTE: no 'noopener' — with it window.open() returns null (per
               // spec), so popup.closed polling never runs and the auto-retry
@@ -1053,6 +1110,9 @@ const PlanPage: React.FC = () => {
       planData,
       routeSessionId,
       planId,
+      planLane,
+      planClosed,
+      closedSessionId,
       planApprovalRequest,
       showToast,
       dismissToast,
@@ -1085,7 +1145,7 @@ const PlanPage: React.FC = () => {
 
       if (planId) {
         try {
-          await loadPlanData(false);
+          await loadPlanData(true);
         } catch (err) {
           console.error('Failed to initialize plan loading:', err);
         }
@@ -1160,7 +1220,11 @@ const PlanPage: React.FC = () => {
         />
 
         <Content>
-          {planId && (loading || !planData) ? (
+          {/* isPlanMode, NOT planId: once the plan closes in place the URL
+              still carries /plan/:id while planData is cleared — keyed on
+              planId this guard swapped the whole chat for the plan spinner
+              (no input, canvas gone). Chat mode never shows it. */}
+          {isPlanMode && (loading || !planData) ? (
             <>
               <div className="plan-loading-spinner">
                 <Spinner size="medium" />
@@ -1170,7 +1234,11 @@ const PlanPage: React.FC = () => {
             </>
           ) : (
             <>
-              <ContentToolbar panelTitle="Multi-Agent Planner">
+              <ContentToolbar
+                panelTitle={
+                  isPlanMode ? 'Multi-Agent Planner' : 'Multi-Agent Chat'
+                }
+              >
                 <InspectorLink />
               </ContentToolbar>
 
@@ -1197,17 +1265,22 @@ const PlanPage: React.FC = () => {
                 onFileSelect={handleFileSelect}
                 onRemoveFile={removeAttachedFile}
                 onRemoveGeneratedFile={removeGeneratedFile}
+                planLane={planLane}
+                onPlanLaneChange={setPlanLane}
+                showPlanLaneToggle={!isPlanMode}
               />
             </>
           )}
         </Content>
 
-        {planId && (
-          <PlanPanelRight
-            planData={planData}
-            loading={loading}
-            planApprovalRequest={planApprovalRequest}
-          />
+        {isPlanMode && (
+          <React.Suspense fallback={null}>
+            <PlanPanelRight
+              planData={planData}
+              loading={loading}
+              planApprovalRequest={planApprovalRequest}
+            />
+          </React.Suspense>
         )}
       </CoralShellRow>
 

@@ -60,7 +60,7 @@ class ProxyAgent(BaseAgent):
         super().__init__(name=name, description=description, **kwargs)
         self.user_id = user_id or ""
         self.session_id = session_id or ""
-        self._timeout = timeout_seconds or orchestration_config.default_timeout
+        self._timeout = timeout_seconds or orchestration_config.clarification_timeout
 
     # ---------------------------
     # AgentProtocol implementation

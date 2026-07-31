@@ -103,14 +103,21 @@ class OrchestrationConfig:
         self.clarification_contexts: Dict[
             str, Dict[str, str]
         ] = {}  # request_id -> session/user context for routing answers
-        self.max_rounds: int = 5  # Maximum replanning rounds
+        self.max_rounds: int = 2  # Maximum replanning rounds
 
         # Event-driven notification system for approvals and clarifications
         self._approval_events: Dict[str, asyncio.Event] = {}
         self._clarification_events: Dict[str, asyncio.Event] = {}
 
         # Default timeout (seconds) for waiting operations
-        self.default_timeout: float = 200.0
+        self.default_timeout: float = 1800.0
+
+        # Human-scale windows: approval and clarification block on a HUMAN
+        # reading and typing — 200s kills plans before anyone can answer
+        # (forensic: clarifications timed out silently at ~200s). Machine
+        # operations keep default_timeout.
+        self.approval_timeout: float = 1800.0
+        self.clarification_timeout: float = 1800.0
 
         # Sessions with an orchestration run currently in flight (created /
         # awaiting approval / executing). Makes resume_plan idempotent: a plan
@@ -156,7 +163,7 @@ class OrchestrationConfig:
 
         Args:
             plan_id: The plan ID to wait for
-            timeout: Timeout in seconds (defaults to default_timeout)
+            timeout: Timeout in seconds (defaults to approval_timeout)
 
         Returns:
             The approval decision (True/False)
@@ -167,7 +174,7 @@ class OrchestrationConfig:
         """
         logger.info(f"Waiting for approval: {plan_id}")
         if timeout is None:
-            timeout = self.default_timeout
+            timeout = self.approval_timeout
 
         if plan_id not in self.approvals:
             raise KeyError(f"Plan ID {plan_id} not found in approvals")
@@ -252,7 +259,7 @@ class OrchestrationConfig:
     ) -> str:
         """Wait for clarification response with timeout."""
         if timeout is None:
-            timeout = self.default_timeout
+            timeout = self.clarification_timeout
 
         if request_id not in self.clarifications:
             raise KeyError(f"Request ID {request_id} not found in clarifications")

@@ -320,6 +320,10 @@ class ChatMessageRequest(BaseModel):
     model: Optional[str] = None  # Optional model selector
     file_ids: list[str] = []  # Foundry file IDs attached by the user (code_interpreter)
     plan_id: Optional[str] = None  # When set, message is in-plan: never create a new plan
+    # UI chat|plan selector. False = this message may NEVER create a plan (the
+    # run_plan capability is withheld from the router). Plan position in the UI
+    # does not use this flag — it calls /process_request explicitly instead.
+    allow_plan: bool = True
 
 
 class ChatMessageResponse(BaseModel):

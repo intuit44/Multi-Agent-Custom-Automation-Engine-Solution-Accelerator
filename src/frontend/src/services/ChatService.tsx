@@ -50,12 +50,14 @@ export class ChatService {
         callbacks: StreamCallbacks,
         fileIds?: string[],
         planId?: string,
+        allowPlan?: boolean,
     ): Promise<void> {
         const request: ChatMessageRequest = {
             session_id: sessionId || '',
             message,
             ...(fileIds && fileIds.length > 0 ? { file_ids: fileIds } : {}),
             ...(planId ? { plan_id: planId } : {}),
+            ...(allowPlan === false ? { allow_plan: false } : {}),
         };
         await apiService.sendChatMessageStream(request, callbacks);
     }
@@ -126,9 +128,11 @@ export class ChatService {
             onGeneratedFile?: (f: { file_id: string; filename: string; download_url: string }) => void;
             planId?: string;
             onOAuthConsentRequest?: (consentLink: string) => void;
+            /** false = the backend withholds run_plan: this message can never create a plan. */
+            allowPlan?: boolean;
         } = {},
     ): AsyncIterable<string> {
-        const { onPlanCreated, onSessionId, onDone, fileIds, onGeneratedFile, planId, onOAuthConsentRequest } = options;
+        const { onPlanCreated, onSessionId, onDone, fileIds, onGeneratedFile, planId, onOAuthConsentRequest, allowPlan } = options;
         return {
             [Symbol.asyncIterator](): AsyncIterator<string> {
                 // Queue of resolved chunks; resolve/reject hooks for the consumer.
@@ -157,7 +161,7 @@ export class ChatService {
                     onError:       (msg) => fail(new Error(msg)),
                     onGeneratedFile: (f) => { onGeneratedFile?.(f); },
                     onOAuthConsentRequest: (link) => { onOAuthConsentRequest?.(link); finish(); },
-                }, fileIds, planId).catch(fail);
+                }, fileIds, planId, allowPlan).catch(fail);
 
                 return {
                     next(): Promise<IteratorResult<string>> {
@@ -206,6 +210,9 @@ export class ChatService {
                 // Strip sandbox: markdown links unconditionally — replace with real
                 // download_url when the filename matches a known generated file.
                 let content = m.content ?? '';
+                // The [turn-log] tail is a memory instrument persisted for the
+                // backend's context recovery — never for human eyes on reload.
+                content = content.split('\n\n[turn-log]\n')[0];
                 content = content.replace(
                     /\[([^\]]+)\]\(sandbox:[^)]+\)/g,
                     (_match: string, label: string) => {

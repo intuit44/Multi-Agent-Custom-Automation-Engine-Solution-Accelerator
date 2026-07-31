@@ -1,7 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" translate="no" class="notranslate">
   <head>
     <meta charset="utf-8" />
+    <!-- Browser page-translation rewrites live DOM nodes (<font> injection)
+         while the SPA streams state updates: React loses its nodes, re-renders,
+         Translate re-fires -> request loop + white screen. Translation belongs
+         to app-level i18n, never the browser extension. -->
+    <meta name="google" content="notranslate" />
     <link rel="icon" href="/contosoLogo.svg" type="image/svg+xml" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#000000" />

@@ -365,6 +365,7 @@ async def process_request(
         user_access_token=user_access_token,
         description=input_task.description,
         session_id=input_task.session_id,
+        persist_user_task=True,
     )
     return {
         "status": "Request started successfully",
@@ -382,6 +383,7 @@ async def _create_plan_and_start(
     description: str,
     session_id: str,
     history: Optional[list] = None,
+    persist_user_task: bool = False,
 ) -> str:
     """Create a Plan and kick off the Magentic orchestration as a BackgroundTask.
 
@@ -446,6 +448,28 @@ async def _create_plan_and_start(
 
     try:
         plan_id = str(uuid.uuid4())
+
+        if persist_user_task:
+            # The plan result IS written back to this session, so without the
+            # originating request the history reads as orphan reports with no
+            # questions — indistinguishable from duplication. The chat lane
+            # already persists the user message before escalating; the direct
+            # lane (/process_request) had no writer at all.
+            # Written BEFORE the plan document so its timestamp precedes the
+            # plan's: the UI orders the canvas by that boundary, and a request
+            # must never render below the plan it produced.
+            try:
+                _chat_svc_q = await get_chat_cosmos_service()
+                await _chat_svc_q.add_message(
+                    session_id=session_id,
+                    user_id=user_id,
+                    content=description,
+                    role="user",
+                    metadata={"intent": "task", "plan_id": plan_id},
+                )
+            except Exception as _qe:
+                logger.warning("Could not persist plan request to chat_cosmos: %s", _qe)
+
         # Initialize memory store and service
         plan = Plan(
             id=plan_id,
@@ -616,19 +640,24 @@ def _format_context_block(history: list) -> str:
 
     The Magentic manager plans from a single task string, so the session context
     must ride along inside it. Empty history → empty string (no grounding added).
+
+    Only [user] turns are included. Assistant messages are plan drafts / tool
+    output returned by AI Search because they are semantically relevant — but
+    injecting them into the grounding causes the Group Chat Manager to re-emit
+    them verbatim instead of acting on the user's actual intent.
     """
     if not history:
         return ""
     lines = [
-        f"[{m.get('role', 'user')}] {m.get('content', '')}".strip()
+        f"[user] {m.get('content', '')}".strip()
         for m in history
-        if (m.get("content") or "").strip()
+        if m.get("role") == "user" and (m.get("content") or "").strip()
     ]
     if not lines:
         return ""
     return (
-        "Prior conversation context (grounding — use it to plan; do not repeat "
-        "verbatim):\n" + "\n".join(lines)
+        "Prior conversation context (grounding — use it to understand the user "
+        "intent; do not repeat verbatim):\n" + "\n".join(lines)
     )
 
 
@@ -824,6 +853,7 @@ async def chat_download_file(
             headers={
                 "Content-Disposition": f'{disposition}; filename="{filename}"',
                 "Content-Length": str(len(data)),
+                "Cache-Control": "private, max-age=86400, immutable",
             },
         )
     except HTTPException:
@@ -891,18 +921,22 @@ async def chat_message(
         chat_request.message[:80],
     )
 
-    # When the message originates from an open plan, never create a new plan.
-    if chat_request.plan_id and intent_result.intent == Intent.TASK:
+    # Never create a new plan when the message originates from an open plan OR
+    # the UI selector is in Chat position (allow_plan=False).
+    if (
+        chat_request.plan_id or not chat_request.allow_plan
+    ) and intent_result.intent == Intent.TASK:
         logger.info(
-            "plan_id=%s present — downgrading TASK to CONVERSATIONAL",
+            "plan_id=%s allow_plan=%s — downgrading TASK to CONVERSATIONAL",
             chat_request.plan_id,
+            chat_request.allow_plan,
         )
         from v4.orchestration.intent_router import IntentResult
 
         intent_result = IntentResult(
             intent=Intent.CONVERSATIONAL,
             confidence=intent_result.confidence,
-            reasoning="plan_id present — in-plan follow-up, not a new task",
+            reasoning="in-plan follow-up or chat-only selector — not a new task",
         )
 
     # ── Route by intent ──────────────────────────────────────────
@@ -1866,7 +1900,13 @@ class _RouterChatClient:
         token = await cred.get_token(self._foundry_mcp_scope)
         return token.token
 
-    async def invoke(self, prompt: str, history: Optional[list] = None, **_ignored):
+    async def invoke(
+        self,
+        prompt: str,
+        history: Optional[list] = None,
+        allow_plan: bool = True,
+        **_ignored,
+    ):
         """Entry point: the Model Router picks a CAPABILITY, the backend runs it.
 
         The petition hits the deployed **Model Router** (chat/completions), which
@@ -1906,12 +1946,47 @@ class _RouterChatClient:
         _router_answered = False
         # history (Cosmos + AI Search) gives the router memory; chat/completions is
         # stateless, so the conversation is supplied as prior messages.
-        _messages = list(history or []) + [{"role": "user", "content": prompt}]
+        # Anchoring rule: recovered history mixes cross-session retrieval with
+        # this session's turns (short memory comes LAST, adjacent to the user
+        # message). Without the rule, a bare "si, adelante" binds to whatever
+        # old retrieved turns dominate and the router fabricates tool tasks
+        # from them (reproduced live: post-plan affirmation -> invented
+        # code-interpreter job).
+        _messages = (
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "Ground every decision in the CURRENT user message and the "
+                        "immediately preceding assistant message of this "
+                        "conversation. When the current message is a bare "
+                        "acknowledgement or continuation (e.g. 'si', 'ok', "
+                        "'adelante', 'correcto', 'continua'), it refers ONLY to "
+                        "that immediately preceding assistant message — answer in "
+                        "that context. NEVER pick a capability based on older or "
+                        "retrieved context alone: a capability requires an "
+                        "explicit request in the CURRENT message. If the "
+                        "preceding assistant message presented a completed "
+                        "multi-agent plan, continue that discussion directly "
+                        "instead of launching tools."
+                    ),
+                }
+            ]
+            + list(history or [])
+            + [{"role": "user", "content": prompt}]
+        )
+        # UI chat|plan selector in Chat position: the message may never become a
+        # plan, so run_plan is not even offered to the router.
+        _tools = (
+            _ROUTER_FUNCTIONS
+            if allow_plan
+            else [t for t in _ROUTER_FUNCTIONS if t["function"]["name"] != "run_plan"]
+        )
         try:
             stream = await router.chat.completions.create(
                 model=self._router_model,
                 messages=cast(Any, _messages),
-                tools=cast(Any, _ROUTER_FUNCTIONS),
+                tools=cast(Any, _tools),
                 stream=True,
             )
             async for chunk in stream:
@@ -2003,6 +2078,13 @@ class _RouterChatClient:
             async for update in self._execute_responses(
                 task, history, use_web_search=True
             ):
+                yield update
+        elif _fn_name == "run_plan" and not allow_plan:
+            # Belt over the tools filter above: in Chat position a plan signal
+            # must never surface — answer the task inline instead.
+            logger.info("run_plan suppressed (allow_plan=False) — answering inline")
+            task = _args.get("task") or prompt
+            async for update in self._execute_responses(task, history):
                 yield update
         elif _fn_name == "run_plan":
             logger.info("Dispatching run_plan (escalate to Magentic orchestration)")
@@ -3171,6 +3253,8 @@ async def chat_message_stream(
                 "user_id": user_id,
                 "file_ids": chat_request.file_ids,
                 "history": _history,
+                # In-plan turns never create a NEW plan regardless of the flag.
+                "allow_plan": chat_request.allow_plan and not chat_request.plan_id,
             }
 
             async for update in agent.invoke(

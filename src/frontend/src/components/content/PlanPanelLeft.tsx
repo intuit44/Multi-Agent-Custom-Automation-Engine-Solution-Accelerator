@@ -209,7 +209,7 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
             <Caption1 style={{ fontWeight: 600 }}>Recent Chats</Caption1>
           </div>
           <div className="echat-recent-list">
-            {recentChats.slice(0, 10).map((chat) => (
+            {recentChats.slice(0, 100).map((chat) => (
               <div
                 key={chat.id}
                 className="echat-recent-item"

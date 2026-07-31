@@ -10,13 +10,12 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, Mock, patch
 
 # Environment variables are set by conftest.py
-
 # Import from backend - conftest.py handles path setup and external module mocking
 from backend.v4.config.settings import (
     AzureConfig,
+    ConnectionConfig,
     MCPConfig,
     OrchestrationConfig,
-    ConnectionConfig,
     TeamConfig,
 )
 
@@ -217,10 +216,16 @@ class TestOrchestrationConfig(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(config.approvals, dict)
         self.assertIsInstance(config.sockets, dict)
         self.assertIsInstance(config.clarifications, dict)
-        self.assertEqual(config.max_rounds, 5)
+        # Tuned by the operator (was 5 upstream); assert the live value so the
+        # suite tracks the fork's setting instead of an upstream default.
+        self.assertEqual(config.max_rounds, 2)
         self.assertIsInstance(config._approval_events, dict)
         self.assertIsInstance(config._clarification_events, dict)
-        self.assertEqual(config.default_timeout, 200.0)
+        self.assertEqual(config.default_timeout, 1800.0)
+        # Human-scale windows: approval/clarification block on a human reading
+        # and typing — these must never regress to machine-scale timeouts.
+        self.assertEqual(config.approval_timeout, 1800.0)
+        self.assertEqual(config.clarification_timeout, 1800.0)
         self.assertIsInstance(config.active_runs, set)
 
     def test_get_current_orchestration(self):
