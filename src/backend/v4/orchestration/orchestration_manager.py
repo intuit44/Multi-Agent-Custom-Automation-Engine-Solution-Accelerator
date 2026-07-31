@@ -719,14 +719,14 @@ class OrchestrationManager:
             self.logger.info("=" * 50)
 
             # Send final result via WebSocket
+            # send_status_update_async already wraps this in {type, data}.
+            # Pre-wrapping here produced {type, data:{type, data:{...}}} on the
+            # wire — the frontend only survived it via defensive fallbacks.
             await connection_config.send_status_update_async(
                 {
-                    "type": WebsocketMessageType.FINAL_RESULT_MESSAGE,
-                    "data": {
-                        "content": final_text,
-                        "status": "completed",
-                        "timestamp": asyncio.get_event_loop().time(),
-                    },
+                    "content": final_text,
+                    "status": "completed",
+                    "timestamp": asyncio.get_event_loop().time(),
                 },
                 user_id,
                 message_type=WebsocketMessageType.FINAL_RESULT_MESSAGE,
@@ -788,12 +788,9 @@ class OrchestrationManager:
                 try:
                     await connection_config.send_status_update_async(
                         {
-                            "type": WebsocketMessageType.FINAL_RESULT_MESSAGE,
-                            "data": {
-                                "content": "Plan execution cancelled by user or approval timeout.",
-                                "status": "cancelled",
-                                "timestamp": asyncio.get_event_loop().time(),
-                            },
+                            "content": "Plan execution cancelled by user or approval timeout.",
+                            "status": "cancelled",
+                            "timestamp": asyncio.get_event_loop().time(),
                         },
                         user_id,
                         message_type=WebsocketMessageType.FINAL_RESULT_MESSAGE,
@@ -838,12 +835,9 @@ class OrchestrationManager:
             try:
                 await connection_config.send_status_update_async(
                     {
-                        "type": WebsocketMessageType.FINAL_RESULT_MESSAGE,
-                        "data": {
-                            "content": f"Error during orchestration: {str(e)}",
-                            "status": "error",
-                            "timestamp": asyncio.get_event_loop().time(),
-                        },
+                        "content": f"Error during orchestration: {str(e)}",
+                        "status": "error",
+                        "timestamp": asyncio.get_event_loop().time(),
                     },
                     user_id,
                     message_type=WebsocketMessageType.FINAL_RESULT_MESSAGE,

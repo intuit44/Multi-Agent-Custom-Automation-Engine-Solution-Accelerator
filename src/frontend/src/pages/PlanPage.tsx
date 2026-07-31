@@ -475,39 +475,29 @@ const PlanPage: React.FC = () => {
         const finalContent =
           finalMessage?.content ?? finalMessage?.data?.content ?? '';
         const finalStatus = finalMessage?.status ?? finalMessage?.data?.status;
-        // Deduplicate: if AGENT_MESSAGEs already populated the UI, skip adding FINAL_RESULT
-        // to avoid showing the same content twice (once per agent, once as Group Chat Manager).
-        setAgentMessages((prev) => {
-          const hasAgentMessages = prev.some(
-            (m) =>
-              m.agent_type === AgentMessageType.AI_AGENT && m.agent !== 'human'
-          );
-          if (hasAgentMessages) {
-            console.log(
-              '📋 Skipping FINAL_RESULT duplicate — AGENT_MESSAGEs already rendered'
+        // The consolidated result is THE answer, not a duplicate of the agents'
+        // intermediate turns — it used to be dropped whenever any agent had
+        // spoken, so the synthesis never reached the screen (it only survived
+        // in Cosmos). Render it; the raw per-agent turns are the trace and live
+        // in the collapsible. Only guard against the SAME text arriving twice.
+        if (finalContent.trim()) {
+          setAgentMessages((prev) => {
+            const already = prev.some(
+              (m) => (m.content || '').trim() === finalContent.trim()
             );
-            return prev;
-          }
-          // No individual agent messages yet — use the final result as sole response
-          const lastAiAgent = [...prev]
-            .reverse()
-            .find(
-              (m) =>
-                m.agent_type === AgentMessageType.AI_AGENT &&
-                m.agent !== 'human'
-            );
-          const agentName = lastAiAgent?.agent || AgentType.GROUP_CHAT_MANAGER;
-          const agentMessageData = {
-            agent: agentName,
-            agent_type: AgentMessageType.AI_AGENT,
-            timestamp: Date.now(),
-            steps: [],
-            next_steps: [],
-            content: finalContent,
-            raw_data: finalMessage,
-          } as AgentMessageData;
-          return [...prev, agentMessageData];
-        });
+            if (already) return prev;
+            const finalMsg = {
+              agent: AgentType.GROUP_CHAT_MANAGER,
+              agent_type: AgentMessageType.AI_AGENT,
+              timestamp: Date.now(),
+              steps: [],
+              next_steps: [],
+              content: finalContent,
+              raw_data: finalMessage,
+            } as AgentMessageData;
+            return [...prev, finalMsg];
+          });
+        }
         if (finalStatus === PlanStatus.COMPLETED) {
           setShowBufferingText(true);
           setBufferAt(Date.now());

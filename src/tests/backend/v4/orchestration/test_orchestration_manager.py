@@ -1501,7 +1501,10 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
         connection_config.send_status_update_async.assert_called()
         last_call = connection_config.send_status_update_async.call_args
         payload = last_call[0][0] if last_call[0] else last_call[1].get("message", {})
-        self.assertEqual(payload["data"]["status"], "cancelled")
+        # Flat payload: send_status_update_async is the ONLY place that adds the
+        # {type, data} envelope. Senders used to pre-wrap, producing a double
+        # envelope on the wire ({type, data:{type, data:{...}}}).
+        self.assertEqual(payload["status"], "cancelled")
 
     async def test_run_orchestration_hitl_cancellation_send_failure(self):
         """Test HITL cancellation when the WebSocket send itself fails.
