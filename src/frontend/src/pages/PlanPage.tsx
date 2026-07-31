@@ -92,6 +92,9 @@ const PlanPage: React.FC = () => {
   // /plan/:id, the SAME canvas flips back to chat where it already is.
   const [planClosed, setPlanClosed] = useState<boolean>(false);
   const [closedSessionId, setClosedSessionId] = useState<string>('');
+  // Instant the plan ended: anchors the result summary in the timeline so the
+  // Hosted Agent's later turns render below it instead of pushing it down.
+  const [bufferAt, setBufferAt] = useState<number>(0);
   // Interruptor chat|plan: without a planId this page IS chat — every piece of
   // plan machinery (WS subscriptions below, right panel) stays off until a real
   // plan exists; when the plan completes, planClosed flips it back off.
@@ -290,6 +293,7 @@ const PlanPage: React.FC = () => {
     setWaitingForPlan(!!planId);
     setPlanClosed(false);
     setClosedSessionId('');
+    setBufferAt(0);
     setShowProcessingPlanSpinner(false);
     setShowApprovalButtons(true);
     setContinueWithWebsocketFlow(false);
@@ -506,6 +510,7 @@ const PlanPage: React.FC = () => {
         });
         if (finalStatus === PlanStatus.COMPLETED) {
           setShowBufferingText(true);
+          setBufferAt(Date.now());
           setShowProcessingPlanSpinner(false);
           setSelectedTeam(planData?.team || null);
           setSubmittingChatDisableInput(false);
@@ -1268,6 +1273,7 @@ const PlanPage: React.FC = () => {
                 planLane={planLane}
                 onPlanLaneChange={setPlanLane}
                 showPlanLaneToggle={!isPlanMode}
+                bufferAt={bufferAt}
               />
             </>
           )}

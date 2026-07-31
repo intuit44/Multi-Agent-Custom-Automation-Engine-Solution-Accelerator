@@ -35,6 +35,9 @@ interface SimplifiedPlanChatProps extends PlanChatProps {
   planLane?: boolean;
   onPlanLaneChange?: (checked: boolean) => void;
   showPlanLaneToggle?: boolean;
+  /** When the plan ended (ms). Anchors the result summary in time so later
+   *  chat turns render BELOW it instead of pushing it to the bottom. */
+  bufferAt?: number;
 }
 
 const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
@@ -66,6 +69,7 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
   planLane,
   onPlanLaneChange,
   showPlanLaneToggle,
+  bufferAt = 0,
 }) => {
   // Notify parent when an MPlan arrives via planData.
   useEffect(() => {
@@ -101,6 +105,16 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
   // created the plan was never persisted. Now that the backend stores it, the
   // real message is in the history — render the synthetic one ONLY when the
   // request is absent (older plans), or the task shows twice.
+  // Result summary anchored in time: once the plan ends (bufferAt > 0) the
+  // messages split around it. While the plan streams (bufferAt === 0) it is
+  // the live tail, so everything stays before it.
+  const beforeBuffer =
+    bufferAt > 0
+      ? agentMessages.filter((m) => m.timestamp <= bufferAt)
+      : agentMessages;
+  const afterBuffer =
+    bufferAt > 0 ? agentMessages.filter((m) => m.timestamp > bufferAt) : [];
+
   const goal = (planData?.plan?.initial_goal || '').trim();
   const requestAlreadyInHistory =
     goal.length > 0 &&
@@ -126,12 +140,18 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
           }}
         >
           {renderThinkingState(waitingForPlan)}
-          <RenderAgentMessages agentMessages={agentMessages} />
+          {/* The result summary keeps the position where the plan ENDED.
+              Anything that came after (the Hosted Agent continuing the
+              conversation in chat) renders below it, not above. */}
+          <RenderAgentMessages agentMessages={beforeBuffer} />
           {showBufferingText && (
             <StreamingBufferMessage
               streamingMessageBuffer={streamingMessageBuffer}
-              isStreaming={true}
+              isStreaming={bufferAt === 0}
             />
+          )}
+          {afterBuffer.length > 0 && (
+            <RenderAgentMessages agentMessages={afterBuffer} />
           )}
         </div>
         <PlanChatBody
