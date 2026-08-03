@@ -21,12 +21,9 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi==0.60b0",
     "opentelemetry-instrumentation-openai==0.46.2",
     "opentelemetry-sdk==1.39.0",
-    "pytest==8.4.1",
-    "pytest-asyncio==0.24.0",
-    "pytest-cov==5.0.0",
     "python-dotenv==1.1.1",
     "python-multipart==0.0.22",
-    "uvicorn==0.35.0",
+    "uvicorn[standard]==0.35.0",
     "pylint-pydantic==0.3.5",
     "pexpect==4.9.0",
     "mcp==1.28.1",
@@ -46,6 +43,18 @@ dependencies = [
     "agent-framework-openai==1.0.0rc6",
 ]
 
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "."
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["azure.functions", "azure.monitor.events.extension"]
+ignore_missing_imports = true
+
+[tool.fastapi]
+entrypoint = "app:app"
+
 [tool.ruff]
 line-length = 88
 target-version = "py311"
@@ -64,7 +73,12 @@ line-ending = "auto"
 dev = [
     "mypy>=1.19.1",
     "pytest>=8.4.1",
-    "pytest-asyncio>=0.24.0",
+    # 1.4+: 0.24 fugaba un event loop "de repuesto" por test (destapado por el
+    # gate error::ResourceWarning en pytest.ini)
+    "pytest-asyncio>=1.4.0",
     "pytest-cov>=5.0.0",
     "ruff>=0.15.7",
+    "types-regex",
+    "types-python-dateutil",
+    "types-requests",
 ]

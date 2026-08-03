@@ -2,19 +2,11 @@
 
 import logging
 import os
-from typing import Any, List, Optional, cast
+from typing import List, Optional
 
-from agent_framework import Agent, ChatOptions, Message
-from agent_framework_azure_ai import AzureAIClient
-
-try:
-    from agent_framework_azure_ai import AzureAIProjectAgentOptions
-except ImportError:
-    try:
-        from agent_framework_azure_ai._client import AzureAIProjectAgentOptions
-    except (ImportError, ModuleNotFoundError):
-        AzureAIProjectAgentOptions = ChatOptions
-
+from agent_framework import Agent, Message
+from agent_framework_azure_ai import AzureAIClient, AzureAIProjectAgentOptions
+from agent_framework_openai import OpenAIChatOptions
 from azure.ai.projects.models import (
     AISearchIndexResource,
     AzureAISearchTool,
@@ -378,13 +370,10 @@ class FoundryAgentTemplate(AzureAgentBase):
                     instructions=self.agent_instructions,
                     name=self.agent_name,
                     description=self.agent_description,
-                    default_options=cast(
-                        Any,
-                        AzureAIProjectAgentOptions(
-                            store=False,
-                            tool_choice="required",
-                            temperature=temp,
-                        ),
+                    default_options=AzureAIProjectAgentOptions(
+                        store=False,
+                        tool_choice="required",
+                        temperature=temp,
                     ),
                 )
             else:
@@ -399,37 +388,32 @@ class FoundryAgentTemplate(AzureAgentBase):
                     # Code Interpreter is server-side in Foundry portal.
                     # Must use AzureAIClient to access it — ResponsesClient
                     # cannot reach server-side tools configured in the portal.
-                    client = self.get_chat_client()
                     self.logger.info(
                         "Using AzureAIClient for '%s' (server-side Code Interpreter).",
                         self.agent_name,
                     )
                     self._agent = Agent(
                         id=self.get_agent_id(),
-                        client=client,
+                        client=self.get_chat_client(),
                         instructions=self.agent_instructions,
                         name=self.agent_name,
                         description=self.agent_description,
-                        default_options=cast(
-                            Any,
-                            AzureAIProjectAgentOptions(
-                                store=True,
-                                tool_choice="auto",
-                                temperature=temp,
-                            ),
+                        default_options=AzureAIProjectAgentOptions(
+                            store=True,
+                            tool_choice="auto",
+                            temperature=temp,
                         ),
                     )
                 elif tools:
                     # Runtime MCP tools present → AzureOpenAIResponsesClient
                     # supports dynamic MCP tools passed at runtime.
-                    client = self.get_responses_client()
                     self.logger.info(
                         "Using AzureOpenAIResponsesClient for '%s' (runtime tools).",
                         self.agent_name,
                     )
                     self._agent = Agent(
                         id=self.get_agent_id(),
-                        client=client,
+                        client=self.get_responses_client(),
                         instructions=self.agent_instructions,
                         name=self.agent_name,
                         description=self.agent_description,
@@ -439,36 +423,31 @@ class FoundryAgentTemplate(AzureAgentBase):
                         # tool failure can be returned to the model for in-turn
                         # retry instead of crashing the request.
                         middleware=[SelfHealToolMiddleware()],
-                        default_options=cast(
-                            Any,
-                            ChatOptions(
-                                store=True,
-                                tool_choice="auto",
-                                temperature=temp,
-                            ),
+                        # The Responses client's options type is OpenAIChatOptions —
+                        # generic ChatOptions is not assignable to it (Pylance).
+                        default_options=OpenAIChatOptions(
+                            store=True,
+                            tool_choice="auto",
+                            temperature=temp,
                         ),
                     )
                 else:
                     # No runtime tools → AzureAIClient with published
                     # Foundry agent (server-side KB + tools).
-                    client = self.get_chat_client()
                     self.logger.info(
                         "Using AzureAIClient for '%s' (published agent, server-side tools).",
                         self.agent_name,
                     )
                     self._agent = Agent(
                         id=self.get_agent_id(),
-                        client=client,
+                        client=self.get_chat_client(),
                         instructions=self.agent_instructions,
                         name=self.agent_name,
                         description=self.agent_description,
-                        default_options=cast(
-                            Any,
-                            AzureAIProjectAgentOptions(
-                                store=True,
-                                tool_choice="auto",
-                                temperature=temp,
-                            ),
+                        default_options=AzureAIProjectAgentOptions(
+                            store=True,
+                            tool_choice="auto",
+                            temperature=temp,
                         ),
                     )
 

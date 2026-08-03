@@ -172,7 +172,7 @@ class ChatCosmosService:
                 "ORDER BY c.updated_at DESC "
                 "OFFSET 0 LIMIT @limit"
             )
-            params = [
+            params: List[Dict[str, object]] = [
                 {"name": "@user_id", "value": user_id},
                 {"name": "@limit", "value": limit},
             ]
@@ -318,13 +318,13 @@ class ChatCosmosService:
                     for attempt in range(3):
                         try:
                             await search_svc.index_chat_message(
-                                message_id=_msg_id,
+                                message_id=str(_msg_id),
                                 session_id=session_id,
                                 user_id=user_id,
                                 role=role,
                                 content=content,
                                 intent=_intent,
-                                timestamp=_timestamp,
+                                timestamp=str(_timestamp),
                                 session_name=_session_name,
                             )
                             return  # success

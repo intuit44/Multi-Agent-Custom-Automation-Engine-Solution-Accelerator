@@ -245,7 +245,7 @@ class PlanWithSteps(Plan):
     total_steps: int = 0
     planned: int = 0
     awaiting_feedback: int = 0
-    approved: int = 0
+    approved_steps: int = 0
     rejected: int = 0
     action_requested: int = 0
     completed: int = 0
@@ -268,7 +268,7 @@ class PlanWithSteps(Plan):
         self.total_steps = len(self.steps)
         self.planned = status_counts[StepStatus.planned]
         self.awaiting_feedback = status_counts[StepStatus.awaiting_feedback]
-        self.approved = status_counts[StepStatus.approved]
+        self.approved_steps = status_counts[StepStatus.approved]
         self.rejected = status_counts[StepStatus.rejected]
         self.action_requested = status_counts[StepStatus.action_requested]
         self.completed = status_counts[StepStatus.completed]
@@ -319,7 +319,8 @@ class ChatMessageRequest(BaseModel):
     message: str
     model: Optional[str] = None  # Optional model selector
     file_ids: list[str] = []  # Foundry file IDs attached by the user (code_interpreter)
-    plan_id: Optional[str] = None  # When set, message is in-plan: never create a new plan
+    # When set, message is in-plan: never create a new plan
+    plan_id: Optional[str] = None
     # UI chat|plan selector. False = this message may NEVER create a plan (the
     # run_plan capability is withheld from the router). Plan position in the UI
     # does not use this flag — it calls /process_request explicitly instead.

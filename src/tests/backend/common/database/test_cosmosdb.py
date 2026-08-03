@@ -1097,41 +1097,53 @@ class TestCosmosDBMiscellaneousOperations:
 
     @pytest.mark.asyncio
     async def test_add_mplan(self, client):
-        """Test adding an mplan."""
+        """Test adding an mplan (persisted directly — MPlan is not a BaseDataModel)."""
         mock_mplan = Mock()
+        mock_mplan.model_dump.return_value = {"id": "mplan1", "plan_id": "p1"}
 
         await client.add_mplan(mock_mplan)
 
-        client.add_item.assert_called_once_with(mock_mplan)
+        client.container.create_item.assert_called_once_with(
+            body={"id": "mplan1", "plan_id": "p1"}
+        )
 
     @pytest.mark.asyncio
     async def test_update_mplan(self, client):
-        """Test updating an mplan."""
+        """Test updating an mplan (upserted directly — MPlan is not a BaseDataModel)."""
         mock_mplan = Mock()
+        mock_mplan.model_dump.return_value = {"id": "mplan1", "plan_id": "p1"}
 
         await client.update_mplan(mock_mplan)
 
-        client.update_item.assert_called_once_with(mock_mplan)
+        client.container.upsert_item.assert_called_once_with(
+            body={"id": "mplan1", "plan_id": "p1"}
+        )
 
     @pytest.mark.asyncio
     async def test_get_mplan(self, client):
         """Test getting an mplan by plan ID."""
-        mock_mplan = Mock()
-        client.query_items.return_value = [mock_mplan]
+        # v4.models.messages is replaced by a Mock() at module import, so the
+        # MPlan "class" here is a mock — assert on model_validate, not isinstance.
+        raw = {"plan_id": "test_plan_id", "user_id": "u1"}
+
+        async def async_gen():
+            yield raw
+
+        client.container.query_items = Mock(return_value=async_gen())
+        messages.MPlan.model_validate.reset_mock()
 
         result = await client.get_mplan("test_plan_id")
 
-        assert result == mock_mplan
-        expected_query = (
+        assert result is messages.MPlan.model_validate.return_value
+        messages.MPlan.model_validate.assert_called_once_with(raw)
+        _, kwargs = client.container.query_items.call_args
+        assert kwargs["query"] == (
             "SELECT * FROM c WHERE c.plan_id=@plan_id AND c.data_type=@data_type"
         )
-        expected_params = [
+        assert kwargs["parameters"] == [
             {"name": "@plan_id", "value": "test_plan_id"},
             {"name": "@data_type", "value": DataType.m_plan},
         ]
-        client.query_items.assert_called_once_with(
-            expected_query, expected_params, messages.MPlan
-        )
 
     @pytest.mark.asyncio
     async def test_add_team_agent(self, client):

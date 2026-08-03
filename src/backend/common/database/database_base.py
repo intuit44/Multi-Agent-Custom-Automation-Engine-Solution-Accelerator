@@ -1,10 +1,8 @@
 
 """Database base class for managing database operations."""
 
-# pylint: disable=unnecessary-pass
-
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type, TypeVar
 
 import v4.models.messages as messages
 
@@ -17,6 +15,8 @@ from ..models.messages_af import (
     TeamConfiguration,
     UserCurrentTeam,
 )
+
+_T = TypeVar("_T", bound="BaseDataModel")
 
 
 class DatabaseBase(ABC):
@@ -45,8 +45,8 @@ class DatabaseBase(ABC):
 
     @abstractmethod
     async def get_item_by_id(
-        self, item_id: str, partition_key: str, model_class: Type[BaseDataModel]
-    ) -> Optional[BaseDataModel]:
+        self, item_id: str, partition_key: str, model_class: Type[_T]
+    ) -> Optional[_T]:
         """Retrieve an item by its ID and partition key."""
         pass
 
@@ -55,8 +55,8 @@ class DatabaseBase(ABC):
         self,
         query: str,
         parameters: List[Dict[str, Any]],
-        model_class: Type[BaseDataModel],
-    ) -> List[BaseDataModel]:
+        model_class: Type[_T],
+    ) -> List[_T]:
         """Query items from the database and return a list of model instances."""
         pass
 
@@ -187,8 +187,8 @@ class DatabaseBase(ABC):
         pass
 
     @abstractmethod
-    async def delete_current_team(self, user_id: str) -> Optional[UserCurrentTeam]:
-        """Retrieve the current team for a user."""
+    async def delete_current_team(self, user_id: str) -> bool:
+        """Delete the current team for a user and return True on success."""
         pass
 
     @abstractmethod
@@ -232,7 +232,7 @@ class DatabaseBase(ABC):
         pass
 
     @abstractmethod
-    async def get_agent_messages(self, plan_id: str) -> Optional[AgentMessageData]:
+    async def get_agent_messages(self, plan_id: str) -> List[AgentMessageData]:
         """Retrieve agent messages by plan_id."""
         pass
 

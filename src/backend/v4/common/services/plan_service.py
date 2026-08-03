@@ -11,6 +11,7 @@ from common.models.messages_af import (
     PlanStatus,
 )
 from v4.config.settings import orchestration_config
+from v4.models.models import PlanStatus as V4PlanStatus
 
 logger = logging.getLogger(__name__)
 
@@ -144,12 +145,15 @@ class PlanService:
                     orchestration_config.plans[human_feedback.m_plan_id],
                 )
                 if human_feedback.approved:
-                    plan = await memory_store.get_plan(human_feedback.plan_id)
-                    mplan.plan_id = human_feedback.plan_id
-                    mplan.team_id = plan.team_id  # just to keep consistency
-                    mplan.overall_status = PlanStatus.approved
+                    plan_id_val = human_feedback.plan_id
+                    if plan_id_val is None:
+                        return False
+                    plan = await memory_store.get_plan(plan_id_val)
+                    mplan.plan_id = plan_id_val
+                    mplan.team_id = plan.team_id if plan is not None and plan.team_id is not None else ""
+                    mplan.overall_status = V4PlanStatus.APPROVED
                     orchestration_config.plans[human_feedback.m_plan_id] = mplan
-                    if plan:
+                    if plan is not None:
                         plan.overall_status = PlanStatus.approved
                         plan.approved = (
                             True  # keep boolean field consistent with overall_status
@@ -160,7 +164,8 @@ class PlanService:
                         print("Plan not found in memory store.")
                         return False
                 else:  # reject plan
-                    await memory_store.delete_plan_by_plan_id(human_feedback.plan_id)
+                    if human_feedback.plan_id is not None:
+                        await memory_store.delete_plan_by_plan_id(human_feedback.plan_id)
 
         except Exception as e:
             print(f"Error processing plan approval: {e}")
@@ -195,11 +200,12 @@ class PlanService:
             await memory_store.add_agent_message(agent_msg)
             if agent_message.is_final:
                 plan = await memory_store.get_plan(agent_msg.plan_id)
-                plan.streaming_message = agent_message.streaming_message
-                plan.overall_status = PlanStatus.completed
-                if plan.m_plan:
-                    plan.m_plan["overall_status"] = PlanStatus.completed.value
-                await memory_store.update_plan(plan)
+                if plan is not None:
+                    plan.streaming_message = agent_message.streaming_message
+                    plan.overall_status = PlanStatus.completed
+                    if plan.m_plan:
+                        plan.m_plan["overall_status"] = PlanStatus.completed.value
+                    await memory_store.update_plan(plan)
             return True
         except Exception as e:
             logger.exception(

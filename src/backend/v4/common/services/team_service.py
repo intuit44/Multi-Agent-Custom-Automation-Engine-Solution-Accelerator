@@ -338,7 +338,7 @@ class TeamService:
         Extract all possible model references from a single agent configuration.
          Skip proxy agents as they don't require deployment models.
         """
-        models = set()
+        models: set[str] = set()
 
         # Skip proxy agents - they don't need deployment models
         if agent.get("name", "").lower() == "proxyagent":

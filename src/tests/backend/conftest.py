@@ -138,6 +138,11 @@ def _setup_agent_framework_mock():
         mock_af_ai.AzureAIProjectAgentOptions = type('AzureAIProjectAgentOptions', (dict,), {})
         sys.modules['agent_framework_azure_ai'] = mock_af_ai
 
+    if 'agent_framework_openai' not in sys.modules:
+        mock_af_openai = ModuleType('agent_framework_openai')
+        mock_af_openai.OpenAIChatOptions = type('OpenAIChatOptions', (dict,), {})
+        sys.modules['agent_framework_openai'] = mock_af_openai
+
 
 def _setup_azure_monitor_mock():
     """Mock azure.monitor.opentelemetry which may not be installed."""

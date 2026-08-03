@@ -793,7 +793,7 @@ async def chat_download_file(
                     timeout=60,
                 )
                 try:
-                    file_info = await openai.containers.files.retrieve(
+                    file_info: Any = await openai.containers.files.retrieve(
                         file_id=file_id,
                         container_id=container_id,
                     )
@@ -1871,8 +1871,10 @@ class _RouterChatClient:
         if self._user_access_token and config.ENABLE_OBO:
             if self._user_cred is None:
                 self._user_cred = config.build_user_credential(self._user_access_token)
-            token = await self._user_cred.get_token("https://ai.azure.com/.default")
-            return token.token
+            _cred_bearer = self._user_cred
+            if _cred_bearer is not None:
+                token = await _cred_bearer.get_token("https://ai.azure.com/.default")
+                return token.token
 
         # No user token / OBO not enabled: borrow the process-shared credential
         # (app identity in prod, az-login user in dev). Never closed here — owned
@@ -1894,8 +1896,10 @@ class _RouterChatClient:
         if self._user_access_token and config.ENABLE_OBO:
             if self._user_cred is None:
                 self._user_cred = config.build_user_credential(self._user_access_token)
-            token = await self._user_cred.get_token(self._foundry_mcp_scope)
-            return token.token
+            _cred_mcp = self._user_cred
+            if _cred_mcp is not None:
+                token = await _cred_mcp.get_token(self._foundry_mcp_scope)
+                return token.token
         cred = config.get_shared_async_credential()
         token = await cred.get_token(self._foundry_mcp_scope)
         return token.token
@@ -5350,7 +5354,7 @@ async def get_plan_by_id(
             team = None
             if plan.team_id:
                 team = await memory_store.get_team_by_id(team_id=plan.team_id)
-            agent_messages = await memory_store.get_agent_messages(plan_id=plan.plan_id)
+            agent_messages: Any = await memory_store.get_agent_messages(plan_id=plan.plan_id)
 
             # Merge session chat history (pre-plan conversation) into agent_messages
             if plan.session_id:
@@ -6093,3 +6097,20 @@ async def disconnect_user_from_mcp_server(server_name: str, request: Request):
     except Exception as e:
         logger.error(f"Error disconnecting from MCP server: {e}")
         raise HTTPException(status_code=500, detail="Failed to disconnect")
+
+
+@app_v4.get("/mcp/inspector/status")
+async def mcp_inspector_status():
+    """Status of the MCP Inspector proxy (health + tokenized UI link).
+
+    Existed before the router surgery (May logs show it answering 200) and the
+    frontend still calls it (InspectorLink); the service layer survived intact,
+    so this is a re-wire to MCPInspectorBridge, not a new subsystem.
+    """
+    try:
+        from v4.common.services.mcp_inspector_bridge import get_inspector_bridge
+
+        return await get_inspector_bridge().get_status()
+    except Exception as e:
+        logger.error(f"Error getting Inspector status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get Inspector status")

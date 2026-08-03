@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Spinner, Text } from '@fluentui/react-components';
 import { PlanDataService } from '../services/PlanDataService';
@@ -304,13 +310,13 @@ const PlanPage: React.FC = () => {
   }, [dispatch, planId]);
 
   // Auto-scroll helper
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
-    setTimeout(() => {
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    requestIdleCallback(() => {
       messagesContainerRef.current?.scrollTo({
         top: messagesContainerRef.current.scrollHeight,
         behavior,
       });
-    }, 100);
+    });
   }, []);
 
   // Initial scroll on load/refresh.
@@ -320,21 +326,29 @@ const PlanPage: React.FC = () => {
   // Wait until loading finishes (container mounted) and then jump to the last
   // message exactly once per load — subsequent appends are handled by the
   // WebSocket/send handlers that call scrollToBottom themselves.
-  const didInitialScrollRef = useRef(false);
-  useEffect(() => {
+  // Chat identity: also keys PlanChat so a session switch replaces the whole
+  // message tree instead of mutating the old one in place.
+  const chatKey = routeSessionId || routePlanId || 'new';
+  const didInitialScrollRef = useRef('');
+  useLayoutEffect(() => {
     if (loading) {
       // New load in flight — re-arm the one-shot for when it completes.
-      didInitialScrollRef.current = false;
+      didInitialScrollRef.current = '';
       return;
     }
-    if (didInitialScrollRef.current) return;
+    // One-shot PER CHAT: on a session switch the remounted container briefly
+    // holds the previous chat's messages (state clears on the next commit);
+    // a boolean one-shot skips that commit and it paints at the top.
+    if (didInitialScrollRef.current === chatKey) return;
     if (agentMessages.length === 0) return;
-    if (!messagesContainerRef.current) return; // container not mounted yet
-    didInitialScrollRef.current = true;
-    // Instant ("auto") so we land at the bottom on refresh without a long
-    // smooth animation over the whole history.
-    scrollToBottom('auto');
-  }, [loading, planData, agentMessages.length, scrollToBottom]);
+    const el = messagesContainerRef.current;
+    if (!el) return; // container not mounted yet
+    didInitialScrollRef.current = chatKey;
+    // Layout effect + direct assignment: runs after the DOM commit but BEFORE
+    // paint, so the frame with the full history is never presented at the top.
+    // scrollToBottom (requestIdleCallback) runs after paint — too late here.
+    el.scrollTop = el.scrollHeight;
+  }, [loading, planData, agentMessages.length, chatKey]);
 
   //WebsocketMessageType.PLAN_APPROVAL_REQUEST
   useEffect(() => {
@@ -1238,6 +1252,7 @@ const PlanPage: React.FC = () => {
               </ContentToolbar>
 
               <PlanChat
+                key={chatKey}
                 planData={planData}
                 loading={loading}
                 messagesContainerRef={messagesContainerRef}

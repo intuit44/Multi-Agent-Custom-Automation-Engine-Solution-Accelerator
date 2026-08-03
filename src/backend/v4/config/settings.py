@@ -49,8 +49,8 @@ class AzureConfig:
         )
         return AzureOpenAIChatClient(
             endpoint=self.endpoint,
-            model_deployment_name=model_name,
-            azure_ad_token_provider=self.ad_token_provider,  # function returning token string
+            deployment_name=model_name,
+            credential=self.ad_token_provider,  # function returning token string
         )
 
     def create_execution_settings(self) -> ChatOptions:

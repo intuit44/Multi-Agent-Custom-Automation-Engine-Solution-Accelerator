@@ -80,10 +80,11 @@ class MCPEnabledBase:
         # Falls back to Managed Identity in local/dev (no user token present).
         if self.user_access_token and config.APP_ENV != "dev":
             # Per-user credential: this agent owns it and closes it on close().
-            self.creds = config.build_user_credential(self.user_access_token)
+            new_creds = config.build_user_credential(self.user_access_token)
+            self.creds = new_creds
             self._owns_creds = True
             if self._stack:
-                await self._stack.enter_async_context(self.creds)
+                await self._stack.enter_async_context(new_creds)
         else:
             # In local dev the device-code/EasyAuth user token is NOT audienced for
             # the Foundry data plane (https://ai.azure.com), so forwarding it verbatim
@@ -94,7 +95,8 @@ class MCPEnabledBase:
             # entered into this agent's stack and is NOT closed by close(), so
             # closing/rebuilding this agent can never tear down the transport that
             # other in-flight tasks (e.g. a background orchestration run) share.
-            self.creds = config.get_shared_async_credential()
+            new_creds = config.get_shared_async_credential()
+            self.creds = new_creds
             self._owns_creds = False
         # Create AgentsClient with a custom aiohttp connector to avoid
         # 'SSL shutdown timed out' errors on long-running Foundry calls.
@@ -107,7 +109,7 @@ class MCPEnabledBase:
         )
         self.client = AgentsClient(
             endpoint=self.project_endpoint or "",
-            credential=self.creds,
+            credential=new_creds,
             connection=_connector,
         )
         if self._stack:

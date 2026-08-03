@@ -6,7 +6,7 @@ import logging
 import re
 import time as _time
 import uuid
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from agent_framework import (
     Agent,
@@ -25,7 +25,6 @@ from agent_framework_orchestrations._base_group_chat_orchestrator import (
 from agent_framework_orchestrations._magentic import (
     MagenticProgressLedger,
 )
-from requests import session
 
 from common.config.app_config import config
 from common.database.database_base import DatabaseBase
@@ -188,7 +187,7 @@ class OrchestrationManager:
             raise
 
         # Build participant map: use each agent's name as key
-        participants = {}
+        participants: Dict[str, Any] = {}
         for ag in agents:
             name = getattr(ag, "agent_name", None) or getattr(ag, "name", None)
             if not name:
@@ -751,7 +750,7 @@ class OrchestrationManager:
             # This closes the visibility gap: after Plan execution the chat
             # agent will have the Plan outcome in its Cosmos history so the
             # user can continue the conversation with full context.
-            if final_text and session:
+            if final_text and session_id:
                 try:
                     from common.services.chat_cosmos_service import (
                         get_chat_cosmos_service,
