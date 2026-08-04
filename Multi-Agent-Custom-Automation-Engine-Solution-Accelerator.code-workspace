@@ -12,6 +12,9 @@
       "name": "e2e-tests",
       "path": "./tests/e2e-test",
     },
+    {
+      "path": "src/backend",
+    },
   ],
   "settings": {
     "terminal.integrated.suggest.suggestOnTriggerCharacters": true,

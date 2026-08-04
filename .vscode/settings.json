@@ -1,6 +1,11 @@
 {
   "azureFunctions.projectSubpath": "src/backend/azure_functions",
-  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  // El venv artesanal de la raíz fue eliminado (todo entorno proviene de un
+  // contrato). El entorno canónico para tests/análisis es el del backend.
+  // NOTE: Pylance analysis (extraPaths, venv) is governed by the root
+  // pyrightconfig.json — do not duplicate python.analysis.* here.
+  // This path only feeds the Python extension (run/debug/pytest discovery).
+  "python.defaultInterpreterPath": "${workspaceFolder}/src/backend/.venv/bin/python",
   "python.terminal.activateEnvironment": true,
 
   // ── Testing: pytest auto-discovery ────────────────────────────────

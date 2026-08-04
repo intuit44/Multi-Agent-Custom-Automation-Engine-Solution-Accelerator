@@ -70,6 +70,9 @@ const useStyles = makeStyles({
     fontSize: '14px',
     lineHeight: '1.5',
     wordWrap: 'break-word',
+    // Padding must count INSIDE maxWidth: 100% — content-box made the bubble
+    // 736px in a 704px parent, giving the whole chat a horizontal scrollbar.
+    boxSizing: 'border-box',
   },
   humanBubble: {
     backgroundColor: 'var(--colorBrandBackground)',
@@ -140,18 +143,40 @@ const isClarificationMessage = (content: string): boolean => {
 // Shared by every agent-bubble ReactMarkdown (this file + StreamingBufferMessage)
 // so links and generated images render identically everywhere.
 export const markdownComponents = {
+  // Wide code blocks scroll inside their own box; without this a long
+  // unbreakable line widens the whole message column (horizontal scrollbar
+  // on the chat itself).
+  pre: ({ node, ...props }: any) => (
+    <pre
+      {...props}
+      style={{
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        overflowX: 'auto',
+        borderRadius: '8px',
+      }}
+    />
+  ),
   img: ({ node, alt, src, ...props }: any) => (
     <img
       alt={alt ?? ''}
       src={resolveApiUrl(src)}
       {...props}
       style={{
-        maxWidth: '100%',
-        height: 'auto',
+        // Rectangular card, visually paired with the chat input: full column
+        // width, 12px radius, 3:2 crop (Gemini card proportions). Without a
+        // cap a 1024px-square generated image fills the viewport and reads as
+        // a backdrop, not a message. Click opens the uncropped file.
+        width: '100%',
+        aspectRatio: '3 / 2',
+        objectFit: 'cover',
+        maxHeight: '480px',
         display: 'block',
-        borderRadius: '8px',
+        borderRadius: '12px',
         margin: '8px 0',
+        cursor: 'zoom-in',
       }}
+      onClick={() => window.open(resolveApiUrl(src), '_blank', 'noopener')}
     />
   ),
   a: ({ node, children, href, ...props }: any) => (

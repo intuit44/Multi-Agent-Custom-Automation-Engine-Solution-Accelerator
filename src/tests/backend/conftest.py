@@ -7,9 +7,18 @@ This module handles proper test isolation and minimal external module mocking.
 import os
 import sys
 from types import ModuleType
+from typing import Any, cast
 from unittest.mock import Mock, MagicMock
 
 import pytest
+
+
+def _stub_module(name: str) -> Any:
+    """A ModuleType typed as Any: these stubs exist to be stuffed with fake
+    attributes (modules accept arbitrary attributes at runtime). Typing them
+    Any confines the relaxation to the stub objects themselves — attribute
+    errors on everything else in this file stay fully checked."""
+    return cast(Any, ModuleType(name))
 
 
 def _setup_environment_variables():
@@ -46,7 +55,7 @@ def _setup_agent_framework_mock():
     """
     if 'agent_framework' not in sys.modules:
         # Top-level: agent_framework
-        mock_af = ModuleType('agent_framework')
+        mock_af = _stub_module('agent_framework')
 
         # Names used as base classes or in Union type hints MUST be real classes
         # to avoid SyntaxError from typing module's forward reference evaluation.
@@ -68,20 +77,20 @@ def _setup_agent_framework_mock():
             }))
 
         # Sub-module: agent_framework._types
-        mock_af_types = ModuleType('agent_framework._types')
+        mock_af_types = _stub_module('agent_framework._types')
         mock_af_types.ResponseStream = type('ResponseStream', (), {})
         mock_af._types = mock_af_types
         sys.modules['agent_framework._types'] = mock_af_types
 
         # Sub-module: agent_framework.azure
-        mock_af_azure = ModuleType('agent_framework.azure')
+        mock_af_azure = _stub_module('agent_framework.azure')
         mock_af_azure.AzureOpenAIChatClient = type('AzureOpenAIChatClient', (), {})
         mock_af_azure.AzureOpenAIResponsesClient = type('AzureOpenAIResponsesClient', (), {})
         mock_af.azure = mock_af_azure
 
         # Sub-module: agent_framework._workflows._magentic
-        mock_af_workflows = ModuleType('agent_framework._workflows')
-        mock_af_magentic = ModuleType('agent_framework._workflows._magentic')
+        mock_af_workflows = _stub_module('agent_framework._workflows')
+        mock_af_magentic = _stub_module('agent_framework._workflows._magentic')
         for name in [
             'MagenticContext', 'StandardMagenticManager',
         ]:
@@ -102,19 +111,19 @@ def _setup_agent_framework_mock():
         sys.modules['agent_framework._workflows._magentic'] = mock_af_magentic
 
     if 'agent_framework_orchestrations' not in sys.modules:
-        mock_af_orch = ModuleType('agent_framework_orchestrations')
+        mock_af_orch = _stub_module('agent_framework_orchestrations')
         mock_af_orch.MagenticBuilder = type('MagenticBuilder', (), {
             '__init__': lambda self, *args, **kwargs: None,
             'build': lambda self: Mock(),
         })
         sys.modules['agent_framework_orchestrations'] = mock_af_orch
 
-        mock_af_orch_base = ModuleType('agent_framework_orchestrations._base_group_chat_orchestrator')
+        mock_af_orch_base = _stub_module('agent_framework_orchestrations._base_group_chat_orchestrator')
         for name in ['GroupChatRequestSentEvent', 'GroupChatResponseReceivedEvent']:
             setattr(mock_af_orch_base, name, type(name, (), {}))
         sys.modules['agent_framework_orchestrations._base_group_chat_orchestrator'] = mock_af_orch_base
 
-        mock_af_orch_mag = ModuleType('agent_framework_orchestrations._magentic')
+        mock_af_orch_mag = _stub_module('agent_framework_orchestrations._magentic')
         for name in ['MagenticContext', 'MagenticProgressLedger']:
             setattr(mock_af_orch_mag, name, type(name, (), {}))
         # StandardMagenticManager needs a proper __init__ that accepts args/kwargs
@@ -133,13 +142,13 @@ def _setup_agent_framework_mock():
         sys.modules['agent_framework_orchestrations._magentic'] = mock_af_orch_mag
 
     if 'agent_framework_azure_ai' not in sys.modules:
-        mock_af_ai = ModuleType('agent_framework_azure_ai')
+        mock_af_ai = _stub_module('agent_framework_azure_ai')
         mock_af_ai.AzureAIClient = type('AzureAIClient', (), {})
         mock_af_ai.AzureAIProjectAgentOptions = type('AzureAIProjectAgentOptions', (dict,), {})
         sys.modules['agent_framework_azure_ai'] = mock_af_ai
 
     if 'agent_framework_openai' not in sys.modules:
-        mock_af_openai = ModuleType('agent_framework_openai')
+        mock_af_openai = _stub_module('agent_framework_openai')
         mock_af_openai.OpenAIChatOptions = type('OpenAIChatOptions', (dict,), {})
         sys.modules['agent_framework_openai'] = mock_af_openai
 
@@ -147,7 +156,7 @@ def _setup_agent_framework_mock():
 def _setup_azure_monitor_mock():
     """Mock azure.monitor.opentelemetry which may not be installed."""
     if 'azure.monitor.opentelemetry' not in sys.modules:
-        mock_module = ModuleType('azure.monitor.opentelemetry')
+        mock_module = _stub_module('azure.monitor.opentelemetry')
         mock_module.configure_azure_monitor = lambda *args, **kwargs: None
         sys.modules['azure.monitor.opentelemetry'] = mock_module
 
