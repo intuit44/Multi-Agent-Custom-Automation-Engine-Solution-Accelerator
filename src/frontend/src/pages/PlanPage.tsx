@@ -309,9 +309,13 @@ const PlanPage: React.FC = () => {
     wsStreamingBufferRef.current = '';
   }, [dispatch, planId]);
 
-  // Auto-scroll helper
+  // Auto-scroll helper.
+  // requestAnimationFrame, NOT requestIdleCallback: Safari/WebKit never
+  // implemented rIC, so a bare call throws ReferenceError — it killed every
+  // mobile send right after the optimistic bubble (message painted, POST
+  // never fired). rAF exists in every engine and fires pre-paint.
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
-    requestIdleCallback(() => {
+    requestAnimationFrame(() => {
       messagesContainerRef.current?.scrollTo({
         top: messagesContainerRef.current.scrollHeight,
         behavior,
@@ -346,7 +350,7 @@ const PlanPage: React.FC = () => {
     didInitialScrollRef.current = chatKey;
     // Layout effect + direct assignment: runs after the DOM commit but BEFORE
     // paint, so the frame with the full history is never presented at the top.
-    // scrollToBottom (requestIdleCallback) runs after paint — too late here.
+    // scrollToBottom (requestAnimationFrame) runs after paint — too late here.
     el.scrollTop = el.scrollHeight;
   }, [loading, planData, agentMessages.length, chatKey]);
 
