@@ -22,11 +22,13 @@ const API_ENDPOINTS = {
     PLANS: '/v4/plans',
     PLAN: '/v4/plan',
     PLAN_APPROVAL: '/v4/plan_approval',
+    RESUME_PLAN: '/v4/resume_plan',
     HUMAN_CLARIFICATION: '/v4/user_clarification',
     USER_BROWSER_LANGUAGE: '/user_browser_language',
     AGENT_MESSAGE: '/v4/agent_message',
     CHAT_MESSAGE: '/v4/chat/message',
     CHAT_MESSAGE_STREAM: '/v4/chat/message/stream',
+    CHAT_UPLOAD_FILE: '/v4/chat/upload-file',
     CHAT_SESSIONS: '/v4/chat/sessions',
     CHAT_SESSION_NEW: '/v4/chat/sessions/new',
 };
@@ -211,6 +213,16 @@ export class APIService {
         });
     }
 
+    /**
+     * Resume orchestration for an orphaned in_progress plan (m_plan is null).
+     * Called by PlanPage when it detects a plan stuck without steps.
+     */
+    async triggerPlanOrchestration(planId: string): Promise<void> {
+        console.log('🔄 Re-triggering orchestration for plan:', planId);
+        await apiClient.post(API_ENDPOINTS.RESUME_PLAN, { plan_id: planId });
+        console.log('✅ Orchestration re-triggered for plan:', planId);
+    }
+
 
     /**
      * Submit clarification for a plan
@@ -277,6 +289,16 @@ export class APIService {
     }
 
     /**
+     * Upload a file to Foundry for use with code_interpreter.
+     * Returns { file_id, filename, size } to attach to subsequent chat messages.
+     */
+    async uploadChatFile(file: File): Promise<{ file_id: string; filename: string; size: number }> {
+        const formData = new FormData();
+        formData.append('file', file, file.name);
+        return apiClient.upload(API_ENDPOINTS.CHAT_UPLOAD_FILE, formData);
+    }
+
+    /**
      * Send a chat message through IntentRouter classification
      * @param chatRequest Chat message with optional session_id
      * @returns Promise with intent classification + response
@@ -299,14 +321,16 @@ export class APIService {
         chatRequest: ChatMessageRequest,
         callbacks: {
             onToken: (token: string) => void;
-            onIntent: (data: { intent: string; confidence: number; session_id: string }) => void;
-            onDone: (data: { intent: string; agent: string; confidence: number; session_id: string }) => void;
+            onIntent: (data: { intent: string; confidence: number; session_id: string; plan_id?: string; m_plan_id?: string }) => void;
+            onDone: (data: { intent: string; agent: string; confidence: number; session_id: string; plan_id?: string; m_plan_id?: string }) => void;
             /** Called when intent router detects a task and creates a plan inline (new unified flow). */
             onPlanCreated?: (planId: string) => void;
             /** Legacy redirect callback — kept for backward compat with HomeInput. */
             onRedirect?: (planId: string) => void;
             onError: (error: string) => void;
             onToolActivity?: (data: { activity: string; tool: string; server?: string; success?: boolean }) => void;
+            onGeneratedFile?: (data: { file_id: string; filename: string; download_url: string }) => void;
+            onOAuthConsentRequest?: (consentLink: string) => void;
         },
     ): Promise<void> {
         const t0 = performance.now();
@@ -364,6 +388,12 @@ export class APIService {
                             case 'tool_activity':
                                 callbacks.onToolActivity?.(data);
                                 break;
+                            case 'generated_file':
+                                callbacks.onGeneratedFile?.(data);
+                                break;
+                            case 'oauth_consent_request':
+                                callbacks.onOAuthConsentRequest?.(data.consent_link);
+                                break;
                         }
                     } catch {
                         console.warn('[chat_stream] Failed to parse SSE event:', dataLine);
@@ -419,6 +449,166 @@ export class APIService {
      */
     async deleteChatSession(sessionId: string): Promise<{ success: boolean }> {
         return apiClient.delete(`${API_ENDPOINTS.CHAT_SESSIONS}/${sessionId}`);
+    }
+
+    // ── MCP Connections ────────────────────────────────────────
+
+    /**
+     * Get all available MCP servers from the catalog.
+     */
+    async getMcpServers(): Promise<{
+        servers: Array<{
+            id: string;
+            server_name: string;
+            display_name: string;
+            description?: string;
+            endpoint: string;
+            transport: string;
+            auth_type: string;
+            capabilities?: string[];
+            tool_count?: number;
+            icon_url?: string;
+            enabled?: boolean;
+        }>;
+        total: number;
+    }> {
+        return apiClient.get('/v4/mcp/connections/servers');
+    }
+
+    /**
+     * Get user's MCP server connections with status.
+     */
+    async getUserMcpConnections(): Promise<{
+        connections: Array<{
+            server: {
+                id: string;
+                server_name: string;
+                display_name: string;
+                description?: string;
+                endpoint: string;
+                transport: string;
+                auth_type: string;
+                capabilities?: string[];
+                tool_count?: number;
+                icon_url?: string;
+            };
+            connection: {
+                status: string;
+                connected_at?: string;
+                last_error?: string;
+            } | null;
+            is_connected: boolean;
+            needs_auth: boolean;
+        }>;
+        user_id: string;
+    }> {
+        return apiClient.get('/v4/mcp/connections/user');
+    }
+
+    /**
+     * Initiate connection to an MCP server.
+     * Returns OAuth URL if authentication is required.
+     */
+    async connectToMcpServer(
+        serverName: string,
+        credentials?: Record<string, string>
+    ): Promise<{
+        status: string;
+        needs_auth: boolean;
+        oauth_url?: string;
+        connection?: Record<string, unknown>;
+    }> {
+        return apiClient.post(
+            `/v4/mcp/connections/user/${serverName}/connect`,
+            credentials ? { credentials } : undefined
+        );
+    }
+
+    /**
+     * Activate MCP connection (called after OAuth callback).
+     */
+    async activateMcpConnection(
+        serverName: string,
+        secretRef?: string
+    ): Promise<{
+        connection: Record<string, unknown>;
+        activated: boolean;
+    }> {
+        return apiClient.patch(
+            `/v4/mcp/connections/user/${serverName}/activate`,
+            secretRef ? { secret_ref: secretRef } : {}
+        );
+    }
+
+    /**
+     * Disconnect from an MCP server.
+     */
+    async disconnectMcpServer(serverName: string): Promise<{
+        disconnected: boolean;
+        server_name: string;
+    }> {
+        return apiClient.delete(`/v4/mcp/connections/user/${serverName}`);
+    }
+
+    /**
+     * Register a new MCP server in the catalog (admin operation).
+     */
+    async registerMcpServer(entry: {
+        server_name: string;
+        display_name: string;
+        description?: string;
+        endpoint: string;
+        transport: string;
+        auth_type: string;
+        auth_fields?: string[];
+        oauth_scopes?: string[];
+        capabilities?: string[];
+        icon_url?: string | null;
+        allowed_agents?: string[];
+        enabled?: boolean;
+    }): Promise<{
+        server: Record<string, unknown>;
+    }> {
+        return apiClient.post('/v4/mcp/connections/servers', entry);
+    }
+
+    /**
+     * Update an existing MCP server in the catalog (admin operation).
+     */
+    async updateMcpServer(
+        serverId: string,
+        payload: {
+            server_name?: string;
+            display_name?: string;
+            description?: string;
+            endpoint?: string;
+            transport?: string;
+            auth_type?: string;
+            auth_fields?: string[];
+            oauth_scopes?: string[];
+            oauth_authorize_url?: string | null;
+            oauth_token_url?: string | null;
+            oauth_client_id_env?: string | null;
+            capabilities?: string[];
+            icon_url?: string | null;
+            allowed_agents?: string[];
+            enabled?: boolean;
+        }
+    ): Promise<{
+        server: Record<string, unknown>;
+        updated: boolean;
+    }> {
+        return apiClient.put(`/v4/mcp/connections/servers/${serverId}`, payload);
+    }
+
+    /**
+     * Delete an MCP server from the catalog (admin operation).
+     */
+    async deleteMcpServer(serverId: string): Promise<{
+        deleted: boolean;
+        server_id: string;
+    }> {
+        return apiClient.delete(`/v4/mcp/connections/servers/${serverId}`);
     }
 }
 

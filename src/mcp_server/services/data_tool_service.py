@@ -48,7 +48,7 @@ class DataToolService(MCPToolBase):
         logger.warning(
             "File '%s' not found in '%s' directory.", filename, self.dataset_path
         )
-        return None
+        return f"Error reading file '{filename}': File not found."
 
     def register_tools(self, mcp):
         @mcp.tool()
@@ -68,14 +68,14 @@ class DataToolService(MCPToolBase):
             file_path = self._find_file(filename)
             if not file_path:
                 logger.error("File '%s' not found.", filename)
-                return f"File '{filename}' not found."
+                return f"Error reading file '{filename}': File not found."
             try:
                 with open(file_path, "r", encoding="utf-8") as file:
                     data = file.read()
                 return data
             except IOError as e:
                 logger.error("Error reading file '%s': %s", filename, e)
-                return None
+                return f"Error reading file '{filename}': {e}"
 
         @mcp.tool()
         def show_tables() -> List[str]:

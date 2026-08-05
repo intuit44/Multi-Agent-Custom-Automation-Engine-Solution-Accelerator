@@ -13,6 +13,7 @@ interface ChatInputProps {
   value: string;
   onChange: (val: string) => void;
   onEnter?: () => void;
+  onPaste?: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   placeholder?: string;
   children?: React.ReactNode;
   disabledChat?: boolean;
@@ -26,6 +27,7 @@ const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
       value,
       onChange,
       onEnter,
+      onPaste,
       placeholder = "Type a message...",
       children,
       disabledChat,
@@ -96,6 +98,7 @@ const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
             }}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
+            onPaste={onPaste}
             placeholder={placeholder}
             rows={1}
             aria-label={placeholder}
@@ -105,7 +108,7 @@ const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
               overflowY: "auto",
               height: "24px", // Set initial height
               minHeight: "24px",
-              maxHeight: "150px",
+              maxHeight: "320px",
               padding: "8px",
               backgroundColor: "transparent",
               border: "none",

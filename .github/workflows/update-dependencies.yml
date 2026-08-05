@@ -1,0 +1,94 @@
+name: Update Dependencies
+
+# Governed dependency updates for the backend, run on demand from the Actions
+# tab. What it does:
+#   1. Bumps the lockfile — everything within pyproject constraints, or ONE
+#      package to an explicit version (which also updates the pyproject pin).
+#   2. Re-exports requirements.txt FROM the lock, so pip-based consumers
+#      (Docker builds, lint jobs) can never drift from uv.lock.
+#   3. Runs the backend test suite against the new lock.
+#   4. Opens a PR — nothing lands on the branch without review.
+#
+# Notes:
+#   - The agent-framework packages are pinned exactly (==1.0.0rc4 era). A bump
+#     of those REQUIRES the package+version inputs (uv add rewrites the pin);
+#     "upgrade all" only moves what the pyproject ranges already allow.
+#   - Exact pre-release pins (==X.YrcN) resolve fine without --pre; the drift
+#     risk pip has is on unpinned TRANSITIVES, which the lockfile eliminates.
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Package to upgrade (empty = all within constraints). E.g. agent-framework-core"
+        required: false
+        default: ""
+      version:
+        description: "Exact target version (required when package is set). E.g. 1.12.1"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: src/backend/uv.lock
+
+      - name: Bump lockfile (and pyproject pin when package+version given)
+        working-directory: src/backend
+        run: |
+          PKG="${{ github.event.inputs.package }}"
+          VER="${{ github.event.inputs.version }}"
+          if [ -n "$PKG" ] && [ -n "$VER" ]; then
+            # uv add rewrites the pyproject pin AND relocks in one step.
+            uv add "${PKG}==${VER}"
+          elif [ -n "$PKG" ]; then
+            echo "::error::When 'package' is set, 'version' is required (pins are exact)."
+            exit 1
+          else
+            uv lock --upgrade
+          fi
+
+      - name: Re-export requirements.txt from the lock (single source of truth)
+        working-directory: src/backend
+        run: uv export --format requirements-txt --no-hashes --no-dev -o requirements.txt
+
+      - name: Install exact lock
+        working-directory: src/backend
+        run: uv sync --frozen
+
+      - name: Run backend tests (no live-Azure)
+        working-directory: src/backend
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src/backend
+        run: |
+          uv run python -m pytest ../../src/tests/backend \
+            -m "not integration" -q
+
+      - name: Open PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- src/backend/pyproject.toml src/backend/uv.lock src/backend/requirements.txt; then
+            echo "No dependency changes — nothing to PR."
+            exit 0
+          fi
+          BRANCH="deps/backend-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add src/backend/pyproject.toml src/backend/uv.lock src/backend/requirements.txt
+          git commit -m "chore(deps): update backend dependencies"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "chore(deps): update backend dependencies" \
+            --body "Automated dependency update run ${GITHUB_RUN_ID}. Lockfile bumped, requirements.txt re-exported from uv.lock, backend tests passed (integration excluded). Review the diff before merging."

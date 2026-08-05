@@ -15,7 +15,7 @@ services:
       image: backend
       registry: ${AZURE_CONTAINER_REGISTRY_ENDPOINT}
       remoteBuild: true
-  
+
   mcp:
     project: ./src/mcp_server
     language: py
@@ -52,7 +52,7 @@ hooks:
           # Running in Git Bash/MSYS2 environment
           Write-Host ""
           Write-Host "===============================================================" -ForegroundColor Yellow
-          Write-Host " POST-DEPLOYMENT STEPS (Bash)" -ForegroundColor Green  
+          Write-Host " POST-DEPLOYMENT STEPS (Bash)" -ForegroundColor Green
           Write-Host "===============================================================" -ForegroundColor Yellow
           Write-Host ""
 
@@ -81,7 +81,7 @@ hooks:
           Write-Host "   https://$env:webSiteDefaultHostname" -ForegroundColor Cyan
           Write-Host ""
         }
-        
+
       shell: pwsh
       interactive: true
     posix:

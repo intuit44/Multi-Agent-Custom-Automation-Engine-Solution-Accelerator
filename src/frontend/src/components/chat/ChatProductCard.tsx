@@ -9,9 +9,7 @@ import React, { useState } from 'react';
 import {
     Body1,
     Body1Strong,
-    Caption1,
     Card,
-    CardHeader,
 } from '@fluentui/react-components';
 import type { Product } from '../../lib/types';
 
@@ -64,7 +62,7 @@ export const ChatProductCard: React.FC<ChatProductCardProps> = ({ product }) => 
             <div style={{ flex: 1, minWidth: 0 }}>
                 <Body1Strong style={{ display: 'block' }}>{product.title}</Body1Strong>
                 {product.description && (
-                    <Caption1
+                    <Body1
                         style={{
                             display: 'block',
                             color: 'var(--colorNeutralForeground3)',
@@ -74,7 +72,7 @@ export const ChatProductCard: React.FC<ChatProductCardProps> = ({ product }) => 
                         }}
                     >
                         {product.description}
-                    </Caption1>
+                    </Body1>
                 )}
                 <Body1Strong style={{ color: 'var(--colorBrandForeground1)' }}>
                     ${product.price.toFixed(2)} USD

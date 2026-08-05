@@ -1,20 +1,22 @@
 """Orchestration manager (agent_framework version) handling multi-agent Magentic workflow creation and execution."""
 
 import asyncio
+import inspect
 import logging
 import re
+import time as _time
 import uuid
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
-# agent_framework imports
-from agent_framework_azure_ai import AzureAIClient
 from agent_framework import (
     Agent,
     AgentResponseUpdate,
-    ChatOptions,
-    Message,
     InMemoryCheckpointStorage,
+    Message,
 )
+
+# agent_framework imports
+from agent_framework_azure_ai import AzureAIClient, AzureAIProjectAgentOptions
 from agent_framework_orchestrations import MagenticBuilder
 from agent_framework_orchestrations._base_group_chat_orchestrator import (
     GroupChatRequestSentEvent,
@@ -25,15 +27,12 @@ from agent_framework_orchestrations._magentic import (
 )
 
 from common.config.app_config import config
-from common.models.messages_af import TeamConfiguration
-
 from common.database.database_base import DatabaseBase
-
-from v4.common.services.team_service import TeamService
-import time as _time
+from common.models.messages_af import PlanStatus, TeamConfiguration
 from v4.callbacks.response_handlers import (
     streaming_agent_response_callback,
 )
+from v4.common.services.team_service import TeamService
 from v4.config.settings import connection_config, orchestration_config
 from v4.magentic_agents.magentic_agent_factory import MagenticAgentFactory
 from v4.models.messages import WebsocketMessageType
@@ -45,9 +44,20 @@ class OrchestrationManager:
 
     logger = logging.getLogger(f"{__name__}.OrchestrationManager")
 
+    # Per-user-id lock to prevent concurrent orchestration initialization
+    # Ensures idempotency: only one initialization runs per user at a time
+    _initialization_locks: dict[str, asyncio.Lock] = {}
+
     def __init__(self):
         self.user_id: Optional[str] = None
         self.logger = self.__class__.logger
+
+    @classmethod
+    def _get_user_lock(cls, user_id: str) -> asyncio.Lock:
+        """Get or create an asyncio.Lock for the given user_id."""
+        if user_id not in cls._initialization_locks:
+            cls._initialization_locks[user_id] = asyncio.Lock()
+        return cls._initialization_locks[user_id]
 
     def _extract_response_text(self, data) -> str:
         """
@@ -123,9 +133,6 @@ class OrchestrationManager:
         # Get credential from config (same as old version)
         credential = config.get_azure_credential(client_id=config.AZURE_CLIENT_ID)
 
-        # Create Azure AI Agent client for orchestration using config
-        # This replaces AzureChatCompletion from SK
-        # Sanitize agent name: must start/end with alphanumeric, only hyphens allowed, max 63 chars
         raw_name = team_config.name if team_config.name else "OrchestratorAgent"
         # Replace spaces and invalid chars with hyphens, strip leading/trailing hyphens
         sanitized_name = re.sub(r"[^a-zA-Z0-9-]", "-", raw_name)
@@ -146,9 +153,9 @@ class OrchestrationManager:
             manager_agent = Agent(
                 client=chat_client,
                 name="MagenticManager",
-                default_options=ChatOptions(
-                    store=False
-                ),  # Client-managed conversation to avoid stale tool call IDs across rounds
+                default_options=AzureAIProjectAgentOptions(
+                    store=True
+                ),  # Foundry persists conversation so the published agent keeps context across rounds
             )
 
             cls.logger.info(
@@ -180,7 +187,7 @@ class OrchestrationManager:
             raise
 
         # Build participant map: use each agent's name as key
-        participants = {}
+        participants: Dict[str, Any] = {}
         for ag in agents:
             name = getattr(ag, "agent_name", None) or getattr(ag, "name", None)
             if not name:
@@ -207,13 +214,15 @@ class OrchestrationManager:
         participant_list = list(participants.values())
         cls.logger.info("Participants for workflow: %s", list(participants.keys()))
 
+        # Note: When using a custom manager, the framework ignores max_round_count,
+        # max_stall_count, and intermediate_outputs parameters.
+        # These are already configured in the HumanApprovalMagenticManager.
         builder = MagenticBuilder(
             participants=participant_list,
             manager=manager,
             checkpoint_storage=storage,
-            max_round_count=orchestration_config.max_rounds,
-            max_stall_count=3,  # Allow up to 3 stalled rounds before stopping; set to 0 to strictly prevent re-calling stalled agents.
-            intermediate_outputs=True,  # Required: yield agent streaming output events, not just orchestrator output
+            # Required: yield agent streaming output events, not just orchestrator output
+            intermediate_outputs=True,
         )
 
         # Build workflow
@@ -236,77 +245,165 @@ class OrchestrationManager:
         team_switched: bool,
         team_service: Optional[TeamService] = None,
         force_rebuild: bool = False,
+        user_access_token: Optional[str] = None,
     ):
         """
         Return an existing workflow for the user or create a new one if:
           - None exists
           - Team switched flag is True
           - force_rebuild is True (for new tasks after workflow completion)
+
+        Thread-safe: uses per-user-id lock to prevent concurrent initialization.
+        If multiple requests arrive simultaneously, only the first one initializes;
+        the others wait and return the same orchestration instance.
         """
-        current = orchestration_config.get_current_orchestration(user_id)
-        needs_rebuild = current is None or team_switched or force_rebuild
+        # Acquire per-user lock to ensure only one initialization runs at a time
+        user_lock = cls._get_user_lock(user_id)
+        async with user_lock:
+            # Double-check pattern: re-check after acquiring lock
+            current = orchestration_config.get_current_orchestration(user_id)
+            needs_rebuild = current is None or team_switched or force_rebuild
 
-        if needs_rebuild:
-            if team_service is None or team_service.memory_context is None:
-                raise ValueError(
-                    "team_service with initialized memory_context is required"
-                )
-
-            if current is not None and (team_switched or force_rebuild):
-                reason = (
-                    "team switched" if team_switched else "force rebuild for new task"
-                )
-                cls.logger.info(
-                    "Rebuilding orchestration for user '%s' (reason: %s)",
-                    user_id,
-                    reason,
-                )
-                # Close prior agents (same logic as old version)
-                for agent in getattr(current, "_participants", {}).values():
-                    agent_name = getattr(
-                        agent, "agent_name", getattr(agent, "name", "")
+            if needs_rebuild:
+                if team_service is None or team_service.memory_context is None:
+                    raise ValueError(
+                        "team_service with initialized memory_context is required"
                     )
-                    if agent_name != "ProxyAgent":
-                        close_coro = getattr(agent, "close", None)
-                        if callable(close_coro):
-                            try:
-                                await close_coro()
-                                cls.logger.debug("Closed agent '%s'", agent_name)
-                            except Exception as e:
-                                cls.logger.error("Error closing agent: %s", e)
 
-            factory = MagenticAgentFactory(team_service=team_service)
-            try:
-                agents = await factory.get_agents(
-                    user_id=user_id,
-                    team_config_input=team_config,
-                    memory_store=team_service.memory_context,
-                )
-                cls.logger.info("Created %d agents for user '%s'", len(agents), user_id)
-            except Exception as e:
-                cls.logger.error(
-                    "Failed to create agents for user '%s': %s", user_id, e
-                )
-                raise
-            try:
-                cls.logger.info("Initializing new orchestration for user '%s'", user_id)
-                workflow = await cls.init_orchestration(
-                    agents, team_config, team_service.memory_context, user_id
-                )
-                orchestration_config.orchestrations[user_id] = workflow
-            except Exception as e:
-                cls.logger.error(
-                    "Failed to initialize orchestration for user '%s': %s", user_id, e
-                )
-                raise
-        return orchestration_config.get_current_orchestration(user_id)
+                if current is not None and (team_switched or force_rebuild):
+                    reason = (
+                        "team switched"
+                        if team_switched
+                        else "force rebuild for new task"
+                    )
+                    cls.logger.info(
+                        "Rebuilding orchestration for user '%s' (reason: %s)",
+                        user_id,
+                        reason,
+                    )
+
+                    prior_wrappers = orchestration_config.agent_wrappers.pop(
+                        user_id, []
+                    )
+
+                    async def _close_wrapper(agent) -> None:
+                        agent_name = getattr(
+                            agent, "agent_name", getattr(agent, "name", "")
+                        )
+                        close_method = getattr(agent, "close", None)
+                        if callable(close_method) and inspect.iscoroutinefunction(
+                            close_method
+                        ):
+                            try:
+                                await close_method()
+                                cls.logger.debug(
+                                    "Closed agent wrapper '%s'", agent_name
+                                )
+                            except Exception as e:
+                                cls.logger.warning(
+                                    "Non-fatal error closing agent wrapper '%s': %s",
+                                    agent_name,
+                                    e,
+                                )
+
+                    if prior_wrappers:
+                        close_tasks = [
+                            asyncio.ensure_future(_close_wrapper(a))
+                            for a in prior_wrappers
+                        ]
+                        await asyncio.gather(*close_tasks, return_exceptions=True)
+
+                factory = MagenticAgentFactory(team_service=team_service)
+                try:
+                    agents = await factory.get_agents(
+                        user_id=user_id,
+                        team_config_input=team_config,
+                        memory_store=team_service.memory_context,
+                        # OBO: agents authenticate as the user (build_user_credential
+                        # → OnBehalfOfCredential). With offline_access the credential
+                        # self-renews downstream, so it survives long/approval-gated
+                        # runs without recreating agents. Falls back to app MI if None.
+                        user_access_token=user_access_token,
+                    )
+                    cls.logger.info(
+                        "Created %d agents for user '%s'", len(agents), user_id
+                    )
+                except Exception as e:
+                    cls.logger.error(
+                        "Failed to create agents for user '%s': %s", user_id, e
+                    )
+                    raise
+                try:
+                    cls.logger.info(
+                        "Initializing new orchestration for user '%s'", user_id
+                    )
+                    workflow = await cls.init_orchestration(
+                        agents, team_config, team_service.memory_context, user_id
+                    )
+                    orchestration_config.orchestrations[user_id] = workflow
+                    # Store wrappers for proper cleanup on next rebuild
+                    orchestration_config.agent_wrappers[user_id] = agents
+                except Exception as e:
+                    cls.logger.error(
+                        "Failed to initialize orchestration for user '%s': %s",
+                        user_id,
+                        e,
+                    )
+                    raise
+            return orchestration_config.get_current_orchestration(user_id)
 
     # ---------------------------
     # Execution
     # ---------------------------
-    async def run_orchestration(self, user_id: str, input_task) -> None:
+    async def _persist_agent_message(
+        self,
+        *,
+        plan_id: Optional[str],
+        user_id: str,
+        agent_name: str,
+        content: str,
+        is_final: bool,
+    ) -> None:
+        """Persist an agent message to the plan store from the backend.
+
+        Reuses the SAME proven path the ``/agent_message`` endpoint used
+        (``PlanService.handle_agent_messages``) — just triggered in-process
+        instead of by the frontend echo. On ``is_final`` it also flips the plan
+        to completed. Never raises: persistence must not abort the run.
+        """
+        if not plan_id:
+            return
+        try:
+            from v4.common.services.plan_service import PlanService
+            from v4.models.messages import AgentMessageResponse, AgentMessageType
+
+            resp = AgentMessageResponse(
+                plan_id=plan_id,
+                agent=agent_name,
+                content=content,
+                agent_type=AgentMessageType.AI_AGENT,
+                is_final=is_final,
+                streaming_message=content if is_final else None,
+            )
+            await PlanService.handle_agent_messages(resp, user_id)
+        except Exception as _pe:
+            self.logger.warning(
+                "Backend persist of agent message (plan=%s, final=%s) failed: %s",
+                plan_id,
+                is_final,
+                _pe,
+            )
+
+    async def run_orchestration(
+        self, user_id, session_id: str, input_task, plan_id: Optional[str] = None
+    ) -> None:
         """
         Execute the Magentic workflow for the provided user and task description.
+
+        ``plan_id`` makes the BACKEND the single source of truth for plan state:
+        agent messages are persisted to the plan store and the plan is marked
+        completed here, in-process — no longer dependent on the frontend echoing
+        to ``/agent_message`` (which was fragile and duplicated the final).
         """
         job_id = str(uuid.uuid4())
         orchestration_config.set_approval_pending(job_id)
@@ -379,49 +476,34 @@ class OrchestrationManager:
                 )
         # --- END NEW BLOCK ---
 
-        # Build task from input
+        # Build task from input. Prior conversation context (recovered from the
+        # single source of truth at the Plan boundary) rides inside the task string
+        # so the Magentic manager plans WITH context instead of from a bare goal.
+        # Cross-run bleed was already cleared above; this is the CURRENT session's
+        # grounding, seeded deliberately.
         task_text = getattr(input_task, "description", str(input_task))
+        _context = getattr(input_task, "context", "") or ""
+        if _context:
+            task_text = f"{_context}\n\n---\n\nCurrent objective:\n{task_text}"
+            self.logger.info(
+                "Seeded orchestration task with %d chars of session context",
+                len(_context),
+            )
         self.logger.debug("Task: %s", task_text)
 
-        # ── Inject chat conversation context ──────────────────────────────────
-        # Fetch the last N messages from the Cosmos chat session so Plan agents
-        # have the same conversational context the user built up in chat mode.
-        # This closes the gap where the Plan workflow previously had no awareness
-        # of what was discussed before the task was created.
-        session_id = getattr(input_task, "session_id", None)
-        if session_id and user_id:
-            try:
-                from common.services.chat_cosmos_service import get_chat_cosmos_service
-                _chat_svc = await get_chat_cosmos_service()
-                _session = await _chat_svc.get_session(session_id, user_id)
-                if _session and _session.get("messages"):
-                    # Take the last 10 messages (enough context, bounded token cost).
-                    _recent = _session["messages"][-10:]
-                    _lines = []
-                    for _m in _recent:
-                        _role = _m.get("role", "")
-                        _content = (_m.get("content") or "")[:400]
-                        if _content:
-                            _lines.append(f"{_role}: {_content}")
-                    if _lines:
-                        _ctx = "## Conversation context (most recent messages):\n" + "\n".join(_lines)
-                        task_text = f"{_ctx}\n\n## Task to execute:\n{task_text}"
-                        self.logger.info(
-                            "Injected %d chat messages as context for Plan (session=%s)",
-                            len(_lines),
-                            session_id[:12],
-                        )
-            except Exception as _ctx_err:
-                self.logger.warning(
-                    "Could not fetch chat context for Plan (session=%s): %s",
-                    session_id,
-                    _ctx_err,
-                )
+        # ── Stamp session_id on ProxyAgent instances so they can write to chat_cosmos ──
+        from v4.magentic_agents.proxy_agent import ProxyAgent as _ProxyAgent
+
+        for _agent in orchestration_config.agent_wrappers.get(user_id, []):
+            if isinstance(_agent, _ProxyAgent):
+                _agent.session_id = session_id
 
         # Track how many times each agent is called (for debugging duplicate calls)
         agent_call_counts: dict = {}
         # Buffer streamed text per-agent so we can emit a complete AGENT_MESSAGE
         agent_stream_buffers: dict[str, str] = {}
+
+        agents_actively_responding: set[str] = set()
 
         try:
             # Execute workflow using run() with stream=True
@@ -472,6 +554,14 @@ class OrchestrationManager:
                                     "Agent '%s' called %d times", agent_name, call_num
                                 )
 
+                            # Open the response window: clear any residual buffer from a
+                            # previous round and mark this agent as the active speaker.
+                            # Only chunks received while an agent is in this set will be
+                            # forwarded to the UI; broadcast-sync chunks (should_respond=False)
+                            # arrive outside this window and are silently discarded.
+                            agent_stream_buffers.pop(agent_name, None)
+                            agents_actively_responding.add(agent_name)
+
                         elif isinstance(event.data, GroupChatResponseReceivedEvent):
                             agent_name = event.data.participant_name
                             self.logger.info(
@@ -479,6 +569,9 @@ class OrchestrationManager:
                                 event.data.round_index,
                                 agent_name,
                             )
+                            # Close the response window: no more chunks for this agent
+                            # should reach the UI until the next RequestSentEvent.
+                            agents_actively_responding.discard(agent_name)
                             # Flush accumulated streaming content as a complete AGENT_MESSAGE
                             buffered = agent_stream_buffers.pop(agent_name, "")
                             if buffered:
@@ -504,6 +597,18 @@ class OrchestrationManager:
                                         agent_name,
                                         len(cleaned),
                                     )
+                                    # Persist this intermediate agent message to the
+                                    # plan store from the BACKEND (single source of
+                                    # truth) instead of relying on the frontend echo.
+                                    # is_final=False → background detail; the chat
+                                    # thread only ever gets the ONE final (writeback).
+                                    await self._persist_agent_message(
+                                        plan_id=plan_id,
+                                        user_id=user_id,
+                                        agent_name=agent_name,
+                                        content=cleaned,
+                                        is_final=False,
+                                    )
 
                     # Handle executor completed - just log, don't send to UI
                     elif event_type == "executor_completed":
@@ -517,33 +622,61 @@ class OrchestrationManager:
                     elif event_type == "output":
                         executor_id = getattr(event, "executor_id", None)
                         output_data = event.data
-                        self.logger.info(
-                            "[OUTPUT] executor=%s data_type=%s",
-                            executor_id,
-                            type(output_data).__name__,
-                        )
+                        # Streaming AgentResponseUpdate chunks emit per-token —
+                        # log at DEBUG to avoid flooding INFO logs (hundreds per response).
+                        # Other output types (final results, etc.) keep INFO.
+                        _data_type_name = type(output_data).__name__
+                        if _data_type_name == "AgentResponseUpdate":
+                            self.logger.debug(
+                                "[OUTPUT] executor=%s data_type=%s",
+                                executor_id,
+                                _data_type_name,
+                            )
+                        else:
+                            self.logger.info(
+                                "[OUTPUT] executor=%s data_type=%s",
+                                executor_id,
+                                _data_type_name,
+                            )
 
-                        # Streaming chunk from an agent executor
+                        # Streaming chunk from an agent executor.
+                        # Only process chunks for agents that are within a formal
+                        # RequestSent → ResponseReceived window.  Chunks emitted by
+                        # the SDK's internal broadcast (should_respond=False) arrive
+                        # outside that window and are discarded here, preventing the
+                        # duplicate-message problem without altering SDK behaviour.
                         if isinstance(output_data, AgentResponseUpdate) and executor_id:
-                            chunk_text = output_data.text or ""
-                            if chunk_text:
-                                agent_stream_buffers[executor_id] = (
-                                    agent_stream_buffers.get(executor_id, "")
-                                    + chunk_text
-                                )
-                            try:
-                                await streaming_agent_response_callback(
+                            self.logger.debug(
+                                "[OUTPUT] executor_id='%s' actively_responding=%s",
+                                executor_id,
+                                agents_actively_responding,
+                            )
+                            if executor_id not in agents_actively_responding:
+                                self.logger.debug(
+                                    "[OUTPUT] Discarding broadcast chunk from '%s' "
+                                    "(outside active-response window)",
                                     executor_id,
-                                    output_data,
-                                    False,
-                                    user_id,
                                 )
-                            except Exception as e:
-                                self.logger.error(
-                                    "Error in streaming callback for agent %s: %s",
-                                    executor_id,
-                                    e,
-                                )
+                            else:
+                                chunk_text = output_data.text or ""
+                                if chunk_text:
+                                    agent_stream_buffers[executor_id] = (
+                                        agent_stream_buffers.get(executor_id, "")
+                                        + chunk_text
+                                    )
+                                try:
+                                    await streaming_agent_response_callback(
+                                        executor_id,
+                                        output_data,
+                                        False,
+                                        user_id,
+                                    )
+                                except Exception as e:
+                                    self.logger.error(
+                                        "Error in streaming callback for agent %s: %s",
+                                        executor_id,
+                                        e,
+                                    )
                         # Final workflow output (list[Message] or Message)
                         elif isinstance(output_data, Message):
                             final_output = output_data.text or ""
@@ -585,19 +718,33 @@ class OrchestrationManager:
             self.logger.info("=" * 50)
 
             # Send final result via WebSocket
+            # send_status_update_async already wraps this in {type, data}.
+            # Pre-wrapping here produced {type, data:{type, data:{...}}} on the
+            # wire — the frontend only survived it via defensive fallbacks.
             await connection_config.send_status_update_async(
                 {
-                    "type": WebsocketMessageType.FINAL_RESULT_MESSAGE,
-                    "data": {
-                        "content": final_text,
-                        "status": "completed",
-                        "timestamp": asyncio.get_event_loop().time(),
-                    },
+                    "content": final_text,
+                    "status": "completed",
+                    "timestamp": asyncio.get_event_loop().time(),
                 },
                 user_id,
                 message_type=WebsocketMessageType.FINAL_RESULT_MESSAGE,
             )
             self.logger.info("Final result sent via WebSocket to user '%s'", user_id)
+
+            # ── Persist final + mark plan completed (BACKEND-owned) ───────────
+            # is_final=True routes through PlanService.handle_agent_messages, which
+            # persists the final agent message to the plan store AND flips the plan
+            # to overall_status=completed — the state that USED to happen only when
+            # the frontend echoed the final. Now it is guaranteed, headless.
+            if final_text:
+                await self._persist_agent_message(
+                    plan_id=plan_id,
+                    user_id=user_id,
+                    agent_name="Group_Chat_Manager",
+                    content=final_text,
+                    is_final=True,
+                )
 
             # ── Write Plan result back to chat session ────────────────────────
             # This closes the visibility gap: after Plan execution the chat
@@ -605,7 +752,10 @@ class OrchestrationManager:
             # user can continue the conversation with full context.
             if final_text and session_id:
                 try:
-                    from common.services.chat_cosmos_service import get_chat_cosmos_service
+                    from common.services.chat_cosmos_service import (
+                        get_chat_cosmos_service,
+                    )
+
                     _chat_svc_wb = await get_chat_cosmos_service()
                     await _chat_svc_wb.add_message(
                         session_id=session_id,
@@ -637,12 +787,9 @@ class OrchestrationManager:
                 try:
                     await connection_config.send_status_update_async(
                         {
-                            "type": WebsocketMessageType.FINAL_RESULT_MESSAGE,
-                            "data": {
-                                "content": "Plan execution cancelled by user or approval timeout.",
-                                "status": "cancelled",
-                                "timestamp": asyncio.get_event_loop().time(),
-                            },
+                            "content": "Plan execution cancelled by user or approval timeout.",
+                            "status": "cancelled",
+                            "timestamp": asyncio.get_event_loop().time(),
                         },
                         user_id,
                         message_type=WebsocketMessageType.FINAL_RESULT_MESSAGE,
@@ -660,16 +807,36 @@ class OrchestrationManager:
                 self.logger.error("Error attributes: %s", e.__dict__)
             self.logger.info("=" * 50)
 
+            # Mirror of upstream dev-v4: mark the plan FAILED in the store so it
+            # cannot resurrect as an in_progress zombie (a page refresh re-triggers
+            # orphaned orchestrations; stale approvals re-send). A DB error here
+            # must never mask the original orchestration error.
+            try:
+                if plan_id:
+                    # Lazy import: the test harness stubs common.database as a
+                    # bare Mock, which breaks this import at module load.
+                    from common.database.database_factory import DatabaseFactory
+
+                    memory_store = await DatabaseFactory.get_database(user_id=user_id)
+                    plan = await memory_store.get_plan_by_plan_id(plan_id=plan_id)
+                    if plan:
+                        plan.overall_status = PlanStatus.failed
+                        await memory_store.update_plan(plan)
+                        self.logger.info(
+                            "Plan '%s' status updated to FAILED", plan_id
+                        )
+            except Exception as db_error:
+                self.logger.error(
+                    "Failed to update plan status to FAILED: %s", db_error
+                )
+
             # Send error status to user
             try:
                 await connection_config.send_status_update_async(
                     {
-                        "type": WebsocketMessageType.FINAL_RESULT_MESSAGE,
-                        "data": {
-                            "content": f"Error during orchestration: {str(e)}",
-                            "status": "error",
-                            "timestamp": asyncio.get_event_loop().time(),
-                        },
+                        "content": f"Error during orchestration: {str(e)}",
+                        "status": "error",
+                        "timestamp": asyncio.get_event_loop().time(),
                     },
                     user_id,
                     message_type=WebsocketMessageType.FINAL_RESULT_MESSAGE,

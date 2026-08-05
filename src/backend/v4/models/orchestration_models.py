@@ -10,14 +10,15 @@ from typing import List, Optional
 
 from pydantic import BaseModel
 
-
 # ---------------------------------------------------------------------------
 # Core lightweight value object
 # ---------------------------------------------------------------------------
 
+
 @dataclass(slots=True)
 class AgentDefinition:
     """Simple agent descriptor used in planning output."""
+
     name: str
     description: str
 
@@ -29,8 +30,10 @@ class AgentDefinition:
 # Planner response models
 # ---------------------------------------------------------------------------
 
+
 class PlannerResponseStep(BaseModel):
     """One planned step referencing an agent and an action to perform."""
+
     agent: AgentDefinition
     action: str
 
@@ -45,6 +48,7 @@ class PlannerResponsePlan(BaseModel):
     - summarization
     - optional human clarification request
     """
+
     request: str
     team: List[AgentDefinition]
     facts: str

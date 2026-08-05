@@ -1,19 +1,12 @@
 """Agent template for building Foundry agents with Azure AI Search, optional MCP tool, and Code Interpreter (agent_framework version)."""
 
 import logging
+import os
 from typing import List, Optional
 
-from agent_framework import Agent, ChatOptions, Message
-from agent_framework_azure_ai import AzureAIClient
-
-try:
-    from agent_framework_azure_ai import AzureAIProjectAgentOptions
-except ImportError:
-    try:
-        from agent_framework_azure_ai._client import AzureAIProjectAgentOptions
-    except (ImportError, ModuleNotFoundError):
-        AzureAIProjectAgentOptions = ChatOptions  # type: ignore[misc,assignment]
-
+from agent_framework import Agent, Message
+from agent_framework_azure_ai import AzureAIClient, AzureAIProjectAgentOptions
+from agent_framework_openai import OpenAIChatOptions
 from azure.ai.projects.models import (
     AISearchIndexResource,
     AzureAISearchTool,
@@ -26,13 +19,14 @@ from common.database.database_base import DatabaseBase
 from common.models.messages_af import TeamConfiguration
 from v4.common.services.team_service import TeamService
 from v4.config.agent_registry import agent_registry
-from v4.magentic_agents.common.lifecycle import AzureAgentBase
+from v4.magentic_agents.common.lifecycle import (
+    _FOUNDRY_REGISTERED_AGENT_NAMES,
+    AzureAgentBase,
+)
+from v4.magentic_agents.common.self_heal_middleware import SelfHealToolMiddleware
 from v4.magentic_agents.models.agent_models import MCPConfig, SearchConfig
 
-# Number of recent messages injected into the agent context on each invoke().
-# Increase this value if long conversations lose relevant context.
-# Keep in mind that larger windows consume more tokens per request.
-CHAT_HISTORY_WINDOW: int = 20
+CHAT_HISTORY_WINDOW: int = 60
 
 
 class FoundryAgentTemplate(AzureAgentBase):
@@ -81,6 +75,7 @@ class FoundryAgentTemplate(AzureAgentBase):
             agent_description=agent_description,
             agent_instructions=agent_instructions,
             project_client=project_client,
+            user_access_token=user_access_token,  # Pass for OBO flow
         )
 
         self.enable_code_interpreter = enable_code_interpreter
@@ -91,8 +86,6 @@ class FoundryAgentTemplate(AzureAgentBase):
         self._use_azure_search = self._is_azure_search_requested()
         self.use_reasoning = use_reasoning
 
-        # Ephemeral agents (e.g. ChatMCPAgent) skip Foundry registration
-        # to avoid 404 errors from create_version on every request.
         self._ephemeral = ephemeral
         self._user_id = user_id
         self._session_id = session_id
@@ -192,23 +185,109 @@ class FoundryAgentTemplate(AzureAgentBase):
             return None
 
         self.logger.info(
-            "Creating Azure AI Search agent with create_version: connection_name=%s, index=%s, query_type=%s, top_k=%s",
+            "Resolving Azure AI Search agent: name=%s, connection_name=%s, index=%s, query_type=%s, top_k=%s",
+            self.agent_name,
             connection_name,
             index_name,
             query_type,
             top_k,
         )
 
-        # Create agent using create_version with PromptAgentDefinition and AzureAISearchTool
-        # This approach matches the Knowledge Mining Solution Accelerator pattern
         try:
+            if not self.model_deployment_name:
+                self.logger.error(
+                    "model_deployment_name is required for Azure AI Search agent creation."
+                )
+                raise ValueError(
+                    "model_deployment_name must be provided to create Azure AI Search agent."
+                )
+
+            if self.project_client is None:
+                self.logger.error(
+                    "project_client is None; cannot create Azure AI Search agent."
+                )
+                raise ValueError(
+                    "project_client must be initialized to create Azure AI Search agent."
+                )
+
+            # ── Reuse-first: same pattern as _register_in_foundry() in lifecycle.py ──
+            # If the agent already exists in Foundry by name, attach to it
+            # (use_latest_version=True). Only call create_version when the agent
+            # doesn't exist OR MACAE_FORCE_AGENT_PUBLISH=1 is set. This prevents
+            # version sprawl on every backend restart / new session.
+            force_republish = os.getenv("MACAE_FORCE_AGENT_PUBLISH", "").lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+
+            # Process-level cache hit → skip the list call entirely
+            if (
+                self.agent_name in _FOUNDRY_REGISTERED_AGENT_NAMES
+                and not force_republish
+            ):
+                self.logger.info(
+                    "✅ Azure-Search agent '%s' already cached for this process. NO creating new version.",
+                    self.agent_name,
+                )
+                return AzureAIClient(
+                    project_endpoint=self.project_endpoint,
+                    agent_name=self.agent_name,
+                    use_latest_version=True,
+                    model_deployment_name=self.model_deployment_name,
+                    credential=self.creds,
+                )
+
+            existing_agent = None
+            if not force_republish:
+                self.logger.info(
+                    "🔍 Checking if Azure-Search agent '%s' already exists in Foundry to avoid creating new version...",
+                    self.agent_name,
+                )
+                async for agent in self.project_client.agents.list():
+                    if getattr(agent, "name", None) == self.agent_name:
+                        existing_agent = agent
+                        break
+
+            if existing_agent is not None and not force_republish:
+                self._azure_server_agent_id = getattr(existing_agent, "id", None)
+                if self.agent_name:
+                    _FOUNDRY_REGISTERED_AGENT_NAMES.add(self.agent_name)
+                self.logger.info(
+                    "✅ Azure-Search agent '%s' ALREADY EXISTS in Foundry "
+                    "(id=%s, version=%s). REUSING existing agent - NO NEW VERSION CREATED. "
+                    "Set MACAE_FORCE_AGENT_PUBLISH=1 only if you need to update definition.",
+                    self.agent_name,
+                    getattr(existing_agent, "id", "unknown"),
+                    getattr(existing_agent, "version", "unknown"),
+                )
+                return AzureAIClient(
+                    project_endpoint=self.project_endpoint,
+                    agent_name=self.agent_name,
+                    use_latest_version=True,
+                    model_deployment_name=self.model_deployment_name,
+                    credential=self.creds,
+                )
+
+            if force_republish:
+                self.logger.warning(
+                    "⚠️ Force-publishing Azure-Search agent '%s' (MACAE_FORCE_AGENT_PUBLISH=1). Creating NEW version...",
+                    self.agent_name,
+                )
+            else:
+                self.logger.warning(
+                    "⚠️ Azure-Search agent '%s' does NOT exist in Foundry. Creating NEW version...",
+                    self.agent_name,
+                )
+
+            # ── Only create when missing or forced ────────────────────────────
             enhanced_instructions = (
                 f"{self.agent_instructions} "
                 "Always use the Azure AI Search tool and configured index for knowledge retrieval."
             )
 
             azure_agent = await self.project_client.agents.create_version(
-                agent_name=self.agent_name,  # Use original name
+                agent_name=self.agent_name,
                 definition=PromptAgentDefinition(
                     model=self.model_deployment_name,
                     instructions=enhanced_instructions,
@@ -230,20 +309,20 @@ class FoundryAgentTemplate(AzureAgentBase):
             )
 
             self._azure_server_agent_id = azure_agent.id
+            if self.agent_name:
+                _FOUNDRY_REGISTERED_AGENT_NAMES.add(self.agent_name)
 
             self.logger.info(
-                "Created Azure AI Search agent via create_version (name=%s, id=%s, version=%s).",
+                "🆕 CREATED NEW Azure AI Search agent version (name=%s, id=%s, version=%s).",
                 azure_agent.name,
                 azure_agent.id,
                 azure_agent.version,
             )
 
-            # Wrap in AzureAIClient using agent_name and agent_version (NOT agent_id)
-            # AzureAIClient constructor: agent_name, agent_version, project_endpoint, credential
             chat_client = AzureAIClient(
                 project_endpoint=self.project_endpoint,
                 agent_name=azure_agent.name,
-                agent_version=azure_agent.version,  # Use the specific version we just created
+                agent_version=azure_agent.version,
                 model_deployment_name=self.model_deployment_name,
                 credential=self.creds,
             )
@@ -251,7 +330,7 @@ class FoundryAgentTemplate(AzureAgentBase):
 
         except Exception as ex:
             self.logger.error(
-                "Failed to create Azure Search enabled agent via create_version (connection=%s, index=%s): %s",
+                "Failed to resolve Azure Search enabled agent (connection=%s, index=%s): %s",
                 connection_name,
                 index_name,
                 ex,
@@ -259,17 +338,17 @@ class FoundryAgentTemplate(AzureAgentBase):
             return None
 
     # -------------------------
-    # Agent lifecycle override
+    # Agent lifecycle
     # -------------------------
     async def _after_open(self) -> None:
         """Initialize ChatAgent after connections are established."""
         if self.use_reasoning:
             self.logger.info("Initializing agent in Reasoning mode.")
             # Use a deterministic low temperature for reasoning mode
-            temp = 0.0
+            temp = 0.3
         else:
             self.logger.info("Initializing agent in Foundry mode.")
-            temp = 0.1
+            temp = 0.3
 
         try:
             if self._use_azure_search:
@@ -305,23 +384,49 @@ class FoundryAgentTemplate(AzureAgentBase):
                 else:
                     tools = []
 
-                if tools:
-                    # Runtime tools present → AzureOpenAIResponsesClient
+                if self.enable_code_interpreter:
+                    # Code Interpreter is server-side in Foundry portal.
+                    # Must use AzureAIClient to access it — ResponsesClient
+                    # cannot reach server-side tools configured in the portal.
+                    self.logger.info(
+                        "Using AzureAIClient for '%s' (server-side Code Interpreter).",
+                        self.agent_name,
+                    )
+                    self._agent = Agent(
+                        id=self.get_agent_id(),
+                        client=self.get_chat_client(),
+                        instructions=self.agent_instructions,
+                        name=self.agent_name,
+                        description=self.agent_description,
+                        default_options=AzureAIProjectAgentOptions(
+                            store=True,
+                            tool_choice="auto",
+                            temperature=temp,
+                        ),
+                    )
+                elif tools:
+                    # Runtime MCP tools present → AzureOpenAIResponsesClient
                     # supports dynamic MCP tools passed at runtime.
-                    client = self.get_responses_client()
                     self.logger.info(
                         "Using AzureOpenAIResponsesClient for '%s' (runtime tools).",
                         self.agent_name,
                     )
                     self._agent = Agent(
                         id=self.get_agent_id(),
-                        client=client,
+                        client=self.get_responses_client(),
                         instructions=self.agent_instructions,
                         name=self.agent_name,
                         description=self.agent_description,
                         tools=tools,
-                        default_options=ChatOptions(
-                            store=False,
+                        # Runtime tools (MCPStreamableHTTPTool) execute in-process
+                        # inside the function-invocation loop, so a recoverable
+                        # tool failure can be returned to the model for in-turn
+                        # retry instead of crashing the request.
+                        middleware=[SelfHealToolMiddleware()],
+                        # The Responses client's options type is OpenAIChatOptions —
+                        # generic ChatOptions is not assignable to it (Pylance).
+                        default_options=OpenAIChatOptions(
+                            store=True,
                             tool_choice="auto",
                             temperature=temp,
                         ),
@@ -329,25 +434,24 @@ class FoundryAgentTemplate(AzureAgentBase):
                 else:
                     # No runtime tools → AzureAIClient with published
                     # Foundry agent (server-side KB + tools).
-                    client = self.get_chat_client()
                     self.logger.info(
                         "Using AzureAIClient for '%s' (published agent, server-side tools).",
                         self.agent_name,
                     )
                     self._agent = Agent(
                         id=self.get_agent_id(),
-                        client=client,
+                        client=self.get_chat_client(),
                         instructions=self.agent_instructions,
                         name=self.agent_name,
                         description=self.agent_description,
                         default_options=AzureAIProjectAgentOptions(
-                            store=False,
+                            store=True,
                             tool_choice="auto",
                             temperature=temp,
                         ),
                     )
 
-                if tools and not self._ephemeral:
+                if tools and not self._ephemeral and not self.enable_code_interpreter:
                     await self._register_in_foundry()
 
             self.logger.info("Initialized Agent '%s'", self.agent_name)
@@ -370,8 +474,22 @@ class FoundryAgentTemplate(AzureAgentBase):
     # -------------------------
     # Invocation (streaming)
     # -------------------------
-    async def invoke(self, prompt: str, session_id: str = "", user_id: str = ""):
-        """Stream model output for a prompt, with session context."""
+    async def invoke(
+        self,
+        prompt: str,
+        session_id: str = "",
+        user_id: str = "",
+        file_ids: list[str] | None = None,
+    ):
+        """Stream model output for a prompt, with session context.
+
+        Args:
+            prompt: The user message.
+            session_id: Optional session ID for history loading.
+            user_id: Optional user ID for history loading.
+            file_ids: Optional list of Foundry file IDs (uploaded via /chat/upload-file).
+                      Files are attached to the thread message with code_interpreter access.
+        """
         if not self._agent:
             raise RuntimeError("Agent not initialized; call open() first.")
 
@@ -395,38 +513,29 @@ class FoundryAgentTemplate(AzureAgentBase):
             except Exception:
                 pass  # No history available, proceed with just the prompt
 
-        messages.append(Message(role="user", text=prompt))
+        if file_ids:
+            from agent_framework import Content
 
-        async for update in self._agent.run(messages, stream=True):
-            yield update
+            user_contents: list = [Content.from_text(prompt)]
+            for fid in file_ids:
+                user_contents.append(Content.from_hosted_file(file_id=fid))
+            messages.append(Message(role="user", contents=user_contents))
+
+            self.logger.info(
+                "Invoking agent with %d hosted file(s): %s",
+                len(file_ids),
+                file_ids,
+            )
+            async for update in self._agent.run(messages, stream=True):
+                yield update
+        else:
+            messages.append(Message(role="user", text=prompt))
+            async for update in self._agent.run(messages, stream=True):
+                yield update
 
     # -------------------------
     # Cleanup (optional override if you want to delete server-side agent)
     # -------------------------
-    async def close(self) -> None:
-        """Extend base close to optionally delete server-side Azure agent."""
-        try:
-            if (
-                self._use_azure_search
-                and self._azure_server_agent_id
-                and hasattr(self, "project_client")
-            ):
-                try:
-                    await self.project_client.agents.delete_agent(
-                        self._azure_server_agent_id
-                    )
-                    self.logger.info(
-                        "Deleted Azure server agent (id=%s) during close.",
-                        self._azure_server_agent_id,
-                    )
-                except Exception as ex:
-                    self.logger.warning(
-                        "Failed to delete Azure server agent (id=%s): %s",
-                        self._azure_server_agent_id,
-                        ex,
-                    )
-        finally:
-            await super().close()
 
 
 # -------------------------

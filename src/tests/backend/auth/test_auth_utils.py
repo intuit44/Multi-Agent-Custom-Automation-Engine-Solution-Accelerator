@@ -15,7 +15,7 @@ src_path = os.path.abspath(src_path)
 sys.path.insert(0, src_path)
 
 # Import the functions to test - using absolute import path that coverage can track
-from backend.auth.auth_utils import get_authenticated_user_details, get_tenantid
+from backend.auth.auth_utils import get_authenticated_user_details, get_tenantid  # noqa: E402
 
 
 class TestGetAuthenticatedUserDetails:
@@ -28,6 +28,7 @@ class TestGetAuthenticatedUserDetails:
             "x-ms-client-principal-name": "testuser@example.com",
             "x-ms-client-principal-idp": "aad",
             "x-ms-token-aad-id-token": "sample.jwt.token",
+            "x-ms-token-aad-access-token": "sample.access.token",
             "x-ms-client-principal": "sample.principal",
         }
 
@@ -37,6 +38,7 @@ class TestGetAuthenticatedUserDetails:
         assert result["user_name"] == "testuser@example.com"
         assert result["auth_provider"] == "aad"
         assert result["auth_token"] == "sample.jwt.token"
+        assert result["access_token"] == "sample.access.token"
         assert result["client_principal_b64"] == "sample.principal"
         assert result["aad_id_token"] == "sample.jwt.token"
 
@@ -47,6 +49,7 @@ class TestGetAuthenticatedUserDetails:
             "X-MS-CLIENT-PRINCIPAL-NAME": "user@test.com",
             "X-Ms-Client-Principal-Idp": "aad",
             "X-MS-TOKEN-AAD-ID-TOKEN": "test.token",
+            "X-MS-TOKEN-AAD-ACCESS-TOKEN": "test.access.token",
         }
 
         result = get_authenticated_user_details(headers)
@@ -56,9 +59,11 @@ class TestGetAuthenticatedUserDetails:
         assert result["user_name"] == "user@test.com"
         assert result["auth_provider"] == "aad"
         assert result["auth_token"] == "test.token"
+        assert result["access_token"] == "test.access.token"
 
+    @patch.dict(os.environ, {"APP_ENV": "dev"})
     def test_fallback_to_sample_user_when_no_principal_id(self):
-        """Test fallback to sample user when x-ms-client-principal-id is not present."""
+        """Test fallback to sample user when x-ms-client-principal-id is not present in dev mode."""
         headers = {"content-type": "application/json", "accept": "application/json"}
 
         with patch("logging.info") as mock_log:
@@ -83,9 +88,9 @@ class TestGetAuthenticatedUserDetails:
                 # Expected due to relative import issue in test environment
                 pass
 
-            # Verify logging was called regardless
-            mock_log.assert_called_once_with(
-                "No user principal found in headers \u2014 using sample_user (dev mode)"
+            # Verify logging was called with the sample_user message
+            mock_log.assert_any_call(
+                "No user principal found in headers — using sample_user (dev mode)"
             )
 
     def test_with_partial_auth_headers(self):
@@ -104,6 +109,7 @@ class TestGetAuthenticatedUserDetails:
         # Verify missing headers result in None
         assert result["auth_provider"] is None
         assert result["auth_token"] is None
+        assert result["access_token"] is None
         assert result["client_principal_b64"] is None
 
     def test_with_empty_header_values(self):
@@ -113,15 +119,23 @@ class TestGetAuthenticatedUserDetails:
             "x-ms-client-principal-name": "",
             "x-ms-client-principal-idp": "",
             "x-ms-token-aad-id-token": "",
+            "x-ms-token-aad-access-token": "",
         }
 
-        result = get_authenticated_user_details(empty_headers)
+        # Mockear _dev_acquire_user_token para aislar este test del fallback dev.
+        # El test valida que headers vacíos no rompan la función,
+        # no el comportamiento del dev token acquisition.
+        with patch(
+            "backend.auth.auth_utils._dev_acquire_user_token",
+            return_value=None,
+        ):
+            result = get_authenticated_user_details(empty_headers)
 
-        # Verify empty strings are preserved (except user_name which falls back)
         assert result["user_principal_id"] == ""
-        assert result["user_name"] == "dev-user@local"  # fallback for empty
+        assert result["user_name"] == "dev-user@local"
         assert result["auth_provider"] == ""
         assert result["auth_token"] == ""
+        assert result["access_token"] is None
 
 
 class TestGetTenantId:

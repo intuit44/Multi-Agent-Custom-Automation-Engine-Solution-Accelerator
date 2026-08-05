@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
+from e2e_constants import URL
 
 
 # ── Virtual display helper ───────────────────────────────────────────
@@ -174,9 +175,6 @@ def login_logout():
         )
         context.set_default_timeout(150000)
         page = context.new_page()
-        # Navigate to the app URL (import here to avoid stale .pyc cache)
-        from e2e_constants import URL
-
         logging.info("Fixture navigating to: %s", URL)
         page.goto(URL, wait_until="domcontentloaded")
         page.wait_for_timeout(8000)

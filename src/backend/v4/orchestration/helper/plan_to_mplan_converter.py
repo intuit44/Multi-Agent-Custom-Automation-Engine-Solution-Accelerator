@@ -104,7 +104,7 @@ class PlanToMPlanConverter:
 
         if self.enable_sub_bullets:
             # Expose levels so caller can correlate (parallel list)
-            self.last_step_levels = step_levels  # type: ignore[attr-defined]
+            self.last_step_levels = step_levels
 
         return mplan
 
@@ -119,7 +119,7 @@ class PlanToMPlanConverter:
                 cleaned.append(stripped)
         return cleaned
 
-    def _extract_agent_and_action(self, body: str) -> (str, str):
+    def _extract_agent_and_action(self, body: str) -> tuple[str, str]:
         """
         Apply bold-first strategy, then window scan fallback.
         Returns (agent, action_text).
@@ -142,7 +142,7 @@ class PlanToMPlanConverter:
         action = self._finalize_action(original)
         return self.fallback_agent, action
 
-    def _try_bold_agent(self, text: str) -> (Optional[str], str):
+    def _try_bold_agent(self, text: str) -> tuple[Optional[str], str]:
         m = self.BOLD_AGENT_RE.search(text)
         if not m:
             return None, text
@@ -154,7 +154,7 @@ class PlanToMPlanConverter:
                 return canonical, cleaned.strip()
         return None, text
 
-    def _try_window_agent(self, text: str) -> (Optional[str], str):
+    def _try_window_agent(self, text: str) -> tuple[Optional[str], str]:
         head_segment = text[: self.detection_window].lower()
         for canonical in self.team:
             if canonical.lower() in head_segment:

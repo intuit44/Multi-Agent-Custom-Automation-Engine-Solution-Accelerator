@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
     Spinner
 } from '@fluentui/react-components';
@@ -11,21 +11,28 @@ import { NewTaskService } from '../services/NewTaskService';
 import PlanPanelLeft from '@/components/content/PlanPanelLeft';
 import ContentToolbar from '@/coral/components/Content/ContentToolbar';
 import { TeamConfig } from '../models/Team';
-import InspectorLink from '@/components/inspector/InspectorLink';
 import { TeamService } from '../services/TeamService';
 import InlineToaster, { useInlineToaster } from "../components/toast/InlineToaster";
+import { useAppDispatch } from '../store/hooks';
+import {
+    resetChat,
+} from '../store/slices/chatSlice';
 
 /**
  * HomePage component - displays task lists and provides navigation
  * Accessible via the route "/"
  */
 const HomePage: React.FC = () => {
+    const dispatch = useAppDispatch();
     const { showToast } = useInlineToaster();
     const [selectedTeam, setSelectedTeam] = useState<TeamConfig | null>(null);
     const [isLoadingTeam, setIsLoadingTeam] = useState<boolean>(true);
     const [reloadLeftList, setReloadLeftList] = useState<boolean>(true);
+    const initCalledRef = useRef(false);
 
     useEffect(() => {
+        if (initCalledRef.current) return;
+        initCalledRef.current = true;
         const initTeam = async () => {
             setIsLoadingTeam(true);
 
@@ -97,8 +104,9 @@ const HomePage: React.FC = () => {
     * Resets textarea to empty state on HomePage
     */
     const handleNewTaskButton = useCallback(() => {
+        dispatch(resetChat());
         NewTaskService.handleNewTaskFromHome();
-    }, []);
+    }, [dispatch]);
 
     /**
      * Handle team selection from the Settings button
@@ -206,27 +214,22 @@ const HomePage: React.FC = () => {
                         isLoadingTeam={isLoadingTeam}
                     />
                     <Content>
-                        <ContentToolbar
-                            panelTitle={"Multi-Agent Planner"}
-                        >
-                            <InspectorLink />
-                        </ContentToolbar>
+                        <ContentToolbar panelTitle="Multi-Agent Planner" />
                         {!isLoadingTeam ? (
-                            <HomeInput
-                                selectedTeam={selectedTeam}
-                            />
+                            <HomeInput selectedTeam={selectedTeam} />
                         ) : (
-                            <div style={{
-                                display: 'flex',
-                                justifyContent: 'center',
-                                alignItems: 'center',
-                                height: '200px'
-                            }}>
+                            <div
+                                style={{
+                                    display: 'flex',
+                                    justifyContent: 'center',
+                                    alignItems: 'center',
+                                    height: '200px',
+                                }}
+                            >
                                 <Spinner label="Loading team configuration..." />
                             </div>
                         )}
                     </Content>
-
                 </CoralShellRow>
             </CoralShellColumn>
         </>

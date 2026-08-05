@@ -36,6 +36,50 @@ from utils.formatters import format_success_response, format_error_response
 
 logger = logging.getLogger(__name__)
 
+# credential_resolver is optional — only used for Key Vault credential resolution
+# in connect_stdio_server. If backend dependencies aren't available, the feature
+# gracefully degrades to env-var-only resolution.
+credential_resolver = None
+try:
+    import sys
+
+    _backend_path = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "backend")
+    )
+    if _backend_path not in sys.path:
+        sys.path.insert(0, _backend_path)
+    from credential_resolver import credential_resolver
+except ImportError as e:
+    logger.debug(
+        f"credential_resolver not available (backend dependencies missing): {e}"
+    )
+
+logger = logging.getLogger(__name__)
+
+
+def _redact(headers: Dict[str, str]) -> Dict[str, str]:
+    """Redact sensitive headers for logging."""
+    _SENSITIVE = {
+        "authorization",
+        "cookie",
+        "set-cookie",
+        "x-api-key",
+        "api-key",
+        "x-auth-token",
+        "proxy-authorization",
+    }
+
+    return {
+        k: ("***REDACTED***" if k.lower() in _SENSITIVE else v)
+        for k, v in headers.items()
+    }
+
+
+def _truncate(obj: Any, max_len: int) -> str:
+    """Truncate object representation for logging."""
+    s = str(obj)
+    return s if len(s) <= max_len else s[:max_len] + "..."
+
 
 class ExternalMCPSession:
     """Manages a single connection to an external MCP server."""
@@ -138,13 +182,31 @@ class ExternalMCPSession:
             async with self.client.stream(
                 "POST", self.server_url, json=payload, headers=headers
             ) as response:
-                response.raise_for_status()
+                # Read body BEFORE raise_for_status() to avoid stream closure
+                body = await response.aread()
+
+                if response.status_code >= 400:
+                    logger.warning(
+                        "[_call_jsonrpc] HTTP %s for %s method=%s\n"
+                        "  request_headers=%s\n  request_body=%s\n"
+                        "  response_headers=%s\n  response_body=%s",
+                        response.status_code,
+                        self.server_url,
+                        method,
+                        _redact(dict(response.request.headers)),
+                        _truncate(payload, 2000),
+                        _redact(
+                            dict(response.headers)
+                        ),  # redacted to avoid leaking sensitive response headers
+                        body.decode("utf-8", errors="replace")[:4000],
+                    )
+                    response.raise_for_status()
+
                 if "mcp-session-id" in response.headers:
                     new_sid = response.headers["mcp-session-id"]
                     if new_sid != self.session_id:
                         self.session_id = new_sid
 
-                body = await response.aread()
                 result = self._parse_sse_response(body.decode("utf-8"))
 
                 if "error" in result:
@@ -154,11 +216,8 @@ class ExternalMCPSession:
                     )
                 return result.get("result", {})
 
-        except httpx.HTTPStatusError as e:
-            logger.error(
-                f"HTTP {e.response.status_code} from {self.server_url}/{method}"
-            )
-            raise
+        except httpx.HTTPStatusError:
+            raise  # Already logged above
         except Exception as e:
             logger.error(f"Error calling {method} on {self.server_url}: {e}")
             raise
@@ -698,6 +757,9 @@ class ProxiedStdioSession:
         headers = self._build_headers()
         headers["Content-Type"] = "application/json"
 
+        if not self._msg_url:
+            raise RuntimeError("Not connected - message URL not available")
+
         try:
             resp = await self.client.post(self._msg_url, json=payload, headers=headers)
             if resp.status_code not in (200, 202):
@@ -875,12 +937,22 @@ class RegistryBridge:
         self.base = f"{backend_url}/api/v4/mcp/connections"
         self._client = httpx.AsyncClient(timeout=10.0)
 
-    def _user_headers(self, user_id: str) -> Dict[str, str]:
-        """Build auth headers for requests on behalf of a user."""
-        return {
+    def _user_headers(
+        self, user_id: str, bearer_token: Optional[str] = None
+    ) -> Dict[str, str]:
+        """Build auth headers for requests on behalf of a user.
+
+        Forwards the caller's Bearer token so the backend's
+        get_authenticated_user_details can resolve a real identity
+        instead of falling back to sample_user.
+        """
+        headers: Dict[str, str] = {
             "x-ms-client-principal-id": user_id,
             "x-ms-client-principal-name": user_id,
         }
+        if bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
+        return headers
 
     async def lookup_server(self, server_name: str) -> Optional[Dict[str, Any]]:
         """Look up a server in the catalog by name."""
@@ -923,13 +995,13 @@ class RegistryBridge:
             return None
 
     async def initiate_connection(
-        self, user_id: str, server_name: str
+        self, user_id: str, server_name: str, bearer_token: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """Initiate / create a user connection to a cataloged server."""
         try:
             resp = await self._client.post(
                 f"{self.base}/user/{server_name}/connect",
-                headers=self._user_headers(user_id),
+                headers=self._user_headers(user_id, bearer_token),
             )
             resp.raise_for_status()
             return resp.json()
@@ -992,7 +1064,9 @@ class InspectorService(MCPToolBase):
         # Keyed by (user_id, server_name) for per-user session isolation.
         # user_id="" is the anonymous/shared namespace (dev / backward-compat).
         self._sessions: Dict[Tuple[str, str], ExternalMCPSession] = {}
-        self._proxied_sessions: Dict[Tuple[str, str], ProxiedStdioSession] = {}
+        self._proxied_sessions: Dict[
+            Tuple[str, str], ProxiedStdioSession | DirectStdioSession
+        ] = {}
         self._registry = RegistryBridge()
         self._inspector_config = _load_inspector_config()
         self._proxy_url = os.environ.get(
@@ -1045,7 +1119,10 @@ class InspectorService(MCPToolBase):
 
         @mcp.tool(tags={self.domain.value})
         async def connect_mcp_server(
-            server_url: str = "", server_name: str = "", user_id: str = ""
+            server_url: str = "",
+            server_name: str = "",
+            user_id: str = "",
+            access_token: str = "",
         ) -> str:
             """
             Connect to an external MCP server.
@@ -1065,11 +1142,38 @@ class InspectorService(MCPToolBase):
                            Leave empty to look up by server_name.
                 server_name: Friendly name for the server.
                              Auto-generated from URL if not provided.
+                access_token: Optional OAuth bearer token. When provided,
+                              sent as ``Authorization: Bearer <token>`` on
+                              every request to the server (required for
+                              OBO-protected servers such as Agent365).
 
             Returns:
                 Connection status with server info and capabilities.
             """
             try:
+                # Auto-extract user_id from HTTP headers if not provided
+                if not user_id:
+                    try:
+                        from fastmcp.server.dependencies import get_http_headers
+
+                        headers = get_http_headers(include={"x-ms-client-principal-id"})
+                        user_id = headers.get("x-ms-client-principal-id") or ""
+                        if user_id:
+                            logger.info(
+                                f"[connect_mcp_server] Auto-detected user_id: {user_id}"
+                            )
+                    except Exception as e:
+                        logger.debug(
+                            f"[connect_mcp_server] Could not extract user_id: {e}"
+                        )
+
+                logger.info(
+                    "[connect_mcp_server] called: server_url=%s, server_name=%s, user_id=%s, has_token=%s",
+                    server_url,
+                    server_name,
+                    user_id,
+                    bool(access_token),
+                )
                 # --- Registry lookup when no URL provided ---
                 if not server_url and server_name:
                     catalog_entry = await registry.lookup_server(server_name)
@@ -1136,6 +1240,140 @@ class InspectorService(MCPToolBase):
 
                 # Create and initialize new session
                 session = ExternalMCPSession(server_url, server_name)
+
+                # Determine the server's credential_source from the catalog FIRST.
+                # A registry-managed source OWNS the token — for managed_identity the
+                # platform mints it and it MUST win over any access_token the caller
+                # passed (the agent helpfully sends a stale/wrong token, which 401s).
+                # An explicit access_token is honored only for direct/manual
+                # connections (raw URL or servers with no managed source).
+                _cred_source = "static_secret"
+                _audience = None
+                if server_name:
+                    try:
+                        _entry = await registry.lookup_server(server_name)
+                        if _entry:
+                            _cred_source = (
+                                _entry.get("credential_source") or "static_secret"
+                            )
+                            _audience = (
+                                _entry.get("audience")
+                                or ((_entry.get("oauth_scopes") or [None])[0])
+                            )
+                    except Exception as e:
+                        logger.debug(
+                            "[connect_mcp_server] catalog lookup failed for '%s': %s",
+                            server_name,
+                            e,
+                        )
+
+                bearer = None
+                if _cred_source == "managed_identity" and credential_resolver:
+                    # Platform-minted token WINS over anything the caller passed.
+                    try:
+                        bearer = await credential_resolver.resolve_valid_token(
+                            credential_source="managed_identity",
+                            audience=_audience,
+                        )
+                        if bearer:
+                            logger.info(
+                                "[connect_mcp_server] Resolved managed-identity token "
+                                "for '%s' (audience=%s)",
+                                server_name,
+                                _audience,
+                            )
+                    except Exception as mi_err:
+                        logger.error(
+                            "[connect_mcp_server] managed-identity mint failed for "
+                            "'%s': %s",
+                            server_name,
+                            mi_err,
+                        )
+
+                # Caller-provided token — honored only for direct/manual connections
+                # (non-managed_identity servers).
+                if not bearer:
+                    bearer = access_token
+
+                if not bearer:
+                    try:
+                        from fastmcp.server.dependencies import get_http_headers
+
+                        inbound = get_http_headers(include={"authorization"})
+                        auth_hdr = inbound.get("authorization") or inbound.get(
+                            "Authorization"
+                        )
+                        if auth_hdr:
+                            # Strip scheme if caller passed only the token value.
+                            bearer = (
+                                auth_hdr.split(" ", 1)[1]
+                                if auth_hdr.lower().startswith("bearer ")
+                                else auth_hdr
+                            )
+                            logger.info(
+                                "[connect_mcp_server] Forwarding inbound "
+                                "Authorization header to upstream '%s'",
+                                server_name,
+                            )
+                    except Exception as e:
+                        logger.debug(
+                            "[connect_mcp_server] No inbound auth header: %s", e
+                        )
+
+                # If still no token, resolve the registered connection's secret from
+                # the registry/Key Vault. The lookup MUST key on the AUTHENTICATED user
+                # (x-ms-client-principal-id header) — NOT the user_id the agent passed.
+                # The model guesses that value (e.g. "current_user" / a display name),
+                # which never matches how the connection was registered, so the lookup
+                # silently missed and forced passing a token by hand. Prefer the header;
+                # fall back to the passed user_id only when the header is absent.
+                lookup_user_id = user_id
+                try:
+                    from fastmcp.server.dependencies import get_http_headers
+
+                    _principal = get_http_headers(
+                        include={"x-ms-client-principal-id"}
+                    ).get("x-ms-client-principal-id")
+                    if _principal:
+                        lookup_user_id = _principal
+                except Exception:
+                    pass
+
+                if not bearer and lookup_user_id and server_name:
+                    try:
+                        conn = await registry.get_user_connection(
+                            lookup_user_id, server_name
+                        )
+                        if conn and conn.get("status") == "active":
+                            secret_ref = conn.get("secret_ref", "")
+                            if secret_ref and credential_resolver:
+                                bearer = await credential_resolver.resolve_valid_token(
+                                    credential_source=_cred_source,
+                                    secret_ref=secret_ref,
+                                )
+                                if bearer:
+                                    logger.info(
+                                        f"[connect_mcp_server] Resolved token for "
+                                        f"'{server_name}' from Key Vault "
+                                        f"(source={_cred_source}, user={lookup_user_id})"
+                                    )
+                    except Exception as kv_err:
+                        logger.debug(
+                            f"[connect_mcp_server] Could not resolve token from registry: {kv_err}"
+                        )
+
+                if bearer:
+                    # Standard servers take "Bearer <token>". Some (Infobip:
+                    # "App <key>") use a custom scheme — if the resolved secret
+                    # already carries one, forward it verbatim instead of
+                    # double-wrapping ("Bearer App <key>" → 401).
+                    _known_schemes = ("bearer ", "app ", "basic ", "token ")
+                    session.extra_headers["Authorization"] = (
+                        bearer
+                        if bearer.lower().startswith(_known_schemes)
+                        else f"Bearer {bearer}"
+                    )
+
                 server_info = await session.initialize()
 
                 sessions[_key] = session
@@ -1321,6 +1559,9 @@ class InspectorService(MCPToolBase):
                 for part in content_parts:
                     if part.get("type") == "text":
                         text_content += part.get("text", "")
+                    elif part.get("type") == "resource":
+                        res = part.get("resource") or {}
+                        text_content += res.get("text", "") or res.get("blob", "")
 
                 return format_success_response(
                     action="TOOL SUCCESS - External Tool Executed",
@@ -1598,6 +1839,22 @@ class InspectorService(MCPToolBase):
                 Connection result or auth instructions.
             """
             try:
+                _bearer_token: Optional[str] = None
+                try:
+                    from fastmcp.server.dependencies import get_http_headers
+
+                    _headers = get_http_headers(
+                        include={"x-ms-client-principal-id", "authorization"}
+                    )
+                    _principal = _headers.get("x-ms-client-principal-id")
+                    if _principal:
+                        user_id = _principal
+                    _auth = _headers.get("authorization", "")
+                    if _auth.lower().startswith("bearer "):
+                        _bearer_token = _auth[7:].strip() or None
+                except Exception:
+                    pass
+
                 # 1. Lookup server in catalog
                 server = await registry.lookup_server(server_name)
                 if not server:
@@ -1615,8 +1872,12 @@ class InspectorService(MCPToolBase):
                 endpoint = server.get("endpoint", "")
                 auth_type = server.get("auth_type", "none")
 
-                # 2. Initiate / check user connection
-                conn_result = await registry.initiate_connection(user_id, server_name)
+                # 2. Initiate / check user connection — forward the caller's
+                # Bearer token so the backend resolves the real user identity
+                # instead of falling back to sample_user.
+                conn_result = await registry.initiate_connection(
+                    user_id, server_name, bearer_token=_bearer_token
+                )
                 if not conn_result:
                     return format_error_response(
                         error_message=(
@@ -1666,17 +1927,50 @@ class InspectorService(MCPToolBase):
                         context="endpoint resolution",
                     )
 
-                # Build extra headers for auth servers
+                # Build extra headers by resolving a VALID token per the server's
+                # credential_source (managed_identity mints fresh from the platform MI;
+                # static_secret / oauth_refresh come from the user's Key Vault blob).
+                # auth_type stays = what the wire sees (a Bearer); HOW we get it lives
+                # in the resolver.
                 extra_headers: Dict[str, str] = {}
-                if auth_type != "none" and status == "active":
-                    secret_ref = connection.get("secret_ref", "")
-                    if secret_ref:
-                        # TODO: #897 resolve from Key Vault
-                        logger.info(
-                            f"'{server_name}' has secret_ref configured — "
-                            f"KV resolution not yet implemented"
+                if auth_type != "none" and status == "active" and credential_resolver:
+                    _cred_source = server.get("credential_source") or "static_secret"
+                    _audience = (
+                        server.get("audience")
+                        or ((server.get("oauth_scopes") or [None])[0])
+                    )
+                    _secret_ref = connection.get("secret_ref", "")
+                    try:
+                        bearer_token = await credential_resolver.resolve_valid_token(
+                            credential_source=_cred_source,
+                            audience=_audience,
+                            secret_ref=_secret_ref,
                         )
-                        extra_headers["X-MCP-Auth-Ref"] = secret_ref
+                        if bearer_token:
+                            # Same scheme rule as connect_mcp_server: a secret
+                            # that already carries its scheme ("App <key>" for
+                            # Infobip) is forwarded verbatim — double-wrapping
+                            # ("Bearer App <key>") gets a 401.
+                            _known_schemes = ("bearer ", "app ", "basic ", "token ")
+                            extra_headers["Authorization"] = (
+                                bearer_token
+                                if bearer_token.lower().startswith(_known_schemes)
+                                else f"Bearer {bearer_token}"
+                            )
+                            logger.info(
+                                f"[connect_from_registry] Resolved token for "
+                                f"'{server_name}' (source={_cred_source})"
+                            )
+                        else:
+                            logger.warning(
+                                f"[connect_from_registry] No token resolved for "
+                                f"'{server_name}' (source={_cred_source})"
+                            )
+                    except Exception as kv_err:
+                        logger.error(
+                            f"[connect_from_registry] Token resolution failed for "
+                            f"'{server_name}': {kv_err}"
+                        )
 
                 # Already connected?
                 _reg_key = (user_id, server_name)
@@ -1735,10 +2029,11 @@ class InspectorService(MCPToolBase):
                     context=(f"connecting to '{server_name}' from registry"),
                 )
 
-        @mcp.tool(tags={self.domain.value})
+        # Not exposed as an MCP tool — agents must never disconnect servers.
+        # Disconnection is user-only, handled via the REST API (/api/v4/mcp/connections/user/{name}).
         async def disconnect_mcp_server(server_name: str, user_id: str = "") -> str:
             """
-            Disconnect from an external MCP server.
+            Disconnect from an external MCP server (internal use only — not an MCP tool).
 
             Args:
                 server_name: Name of the server to disconnect from.
@@ -1881,40 +2176,32 @@ class InspectorService(MCPToolBase):
                             # Attempt Key Vault resolution using secret name = env_key
                             # normalized to lowercase-hyphen (e.g. GITHUB_PERSONAL_ACCESS_TOKEN
                             # → github-personal-access-token)
-                            try:
-                                import sys as _sys
-
-                                _backend = os.path.normpath(
-                                    os.path.join(
-                                        os.path.dirname(__file__), "..", "..", "backend"
-                                    )
-                                )
-                                if _backend not in _sys.path:
-                                    _sys.path.insert(0, _backend)
-                                from credential_resolver import credential_resolver
-
-                                secret_name = env_key.lower().replace("_", "-")
-                                creds = await credential_resolver.resolve_by_secret_ref(
-                                    secret_name
-                                )
-                                if creds:
-                                    resolved = (
-                                        creds.get("token")
-                                        or creds.get("api_key")
-                                        or creds.get("access_token")
-                                        or creds.get(env_key)
-                                        or next(iter(creds.values()), "")
-                                    )
-                                    if resolved:
-                                        logger.info(
-                                            f"[connect_stdio_server] Resolved credential "
-                                            f"for '{server_name}' from Key Vault"
+                            if credential_resolver:
+                                try:
+                                    secret_name = env_key.lower().replace("_", "-")
+                                    creds = (
+                                        await credential_resolver.resolve_by_secret_ref(
+                                            secret_name
                                         )
-                            except Exception as kv_err:
-                                logger.debug(
-                                    f"[connect_stdio_server] KV lookup failed "
-                                    f"for '{env_key}': {kv_err}"
-                                )
+                                    )
+                                    if creds:
+                                        resolved = (
+                                            creds.get("token")
+                                            or creds.get("api_key")
+                                            or creds.get("access_token")
+                                            or creds.get(env_key)
+                                            or next(iter(creds.values()), "")
+                                        )
+                                        if resolved:
+                                            logger.info(
+                                                f"[connect_stdio_server] Resolved credential "
+                                                f"for '{server_name}' from Key Vault"
+                                            )
+                                except Exception as kv_err:
+                                    logger.debug(
+                                        f"[connect_stdio_server] KV lookup failed "
+                                        f"for '{env_key}': {kv_err}"
+                                    )
 
                         if not resolved:
                             return format_error_response(

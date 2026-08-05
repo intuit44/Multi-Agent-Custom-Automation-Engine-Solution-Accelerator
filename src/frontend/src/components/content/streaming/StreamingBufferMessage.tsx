@@ -6,6 +6,7 @@ import { CheckmarkCircle20Regular, ArrowTurnDownRightRegular } from '@fluentui/r
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypePrism from "rehype-prism";
+import { markdownComponents } from "./StreamingAgentMessage";
 
 interface StreamingBufferMessageProps {
     streamingMessageBuffer: string;
@@ -164,23 +165,7 @@ const StreamingBufferMessage: React.FC<StreamingBufferMessageProps> = ({
                                     remarkPlugins={[remarkGfm]}
                                     rehypePlugins={[rehypePrism]}
                                     components={{
-                                        a: ({ node, children, ...props }) => (
-                                            <a
-                                                {...props}
-                                                style={{
-                                                    color: 'var(--colorNeutralBrandForeground1)',
-                                                    textDecoration: 'none'
-                                                }}
-                                                onMouseEnter={(e) => {
-                                                    e.currentTarget.style.textDecoration = 'underline';
-                                                }}
-                                                onMouseLeave={(e) => {
-                                                    e.currentTarget.style.textDecoration = 'none';
-                                                }}
-                                            >
-                                                {children}
-                                            </a>
-                                        ),
+                                        ...markdownComponents,
                                         p: ({ node, ...props }) => (
                                             <p {...props} style={{ margin: '0 0 8px 0' }} />
                                         )
@@ -202,25 +187,7 @@ const StreamingBufferMessage: React.FC<StreamingBufferMessageProps> = ({
                         <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
                             rehypePlugins={[rehypePrism]}
-                            components={{
-                                a: ({ node, children, ...props }) => (
-                                    <a
-                                        {...props}
-                                        style={{
-                                            color: 'var(--colorNeutralBrandForeground1)',
-                                            textDecoration: 'none'
-                                        }}
-                                        onMouseEnter={(e) => {
-                                            e.currentTarget.style.textDecoration = 'underline';
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            e.currentTarget.style.textDecoration = 'none';
-                                        }}
-                                    >
-                                        {children}
-                                    </a>
-                                )
-                            }}
+                            components={markdownComponents}
                         >
                             {streamingMessageBuffer}
                         </ReactMarkdown>

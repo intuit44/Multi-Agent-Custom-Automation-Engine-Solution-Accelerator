@@ -10,13 +10,12 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, Mock, patch
 
 # Environment variables are set by conftest.py
-
 # Import from backend - conftest.py handles path setup and external module mocking
 from backend.v4.config.settings import (
     AzureConfig,
+    ConnectionConfig,
     MCPConfig,
     OrchestrationConfig,
-    ConnectionConfig,
     TeamConfig,
 )
 
@@ -52,7 +51,7 @@ class TestAzureConfig(unittest.TestCase):
 
         self.assertEqual(settings, mock_settings)
         mock_chat_options.assert_called_once_with(
-            max_output_tokens=4000, temperature=0.1
+            max_tokens=4000, temperature=0.3
         )
 
     @patch("backend.v4.config.settings.config")
@@ -217,10 +216,19 @@ class TestOrchestrationConfig(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(config.approvals, dict)
         self.assertIsInstance(config.sockets, dict)
         self.assertIsInstance(config.clarifications, dict)
-        self.assertEqual(config.max_rounds, 20)
+        # Operator knob (upstream default was 5, this fork tunes it per run).
+        # Sanity-check the type/floor instead of a literal so re-tuning it does
+        # not fail the suite — a plan needs at least one round to execute.
+        self.assertIsInstance(config.max_rounds, int)
+        self.assertGreaterEqual(config.max_rounds, 1)
         self.assertIsInstance(config._approval_events, dict)
         self.assertIsInstance(config._clarification_events, dict)
-        self.assertEqual(config.default_timeout, 300.0)
+        self.assertEqual(config.default_timeout, 1800.0)
+        # Human-scale windows: approval/clarification block on a human reading
+        # and typing — these must never regress to machine-scale timeouts.
+        self.assertEqual(config.approval_timeout, 1800.0)
+        self.assertEqual(config.clarification_timeout, 1800.0)
+        self.assertIsInstance(config.active_runs, set)
 
     def test_get_current_orchestration(self):
         """Test getting current orchestration."""

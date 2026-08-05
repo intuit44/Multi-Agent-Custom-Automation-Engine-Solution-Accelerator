@@ -70,6 +70,8 @@ class MockMagenticContext:
             "TestAgent1": "A test agent",
             "TestAgent2": "Another test agent",
         }
+        # Source's _get_uncalled_agents() scans chat_history author_names
+        self.chat_history = []
 
 
 class MockStandardMagenticManager:

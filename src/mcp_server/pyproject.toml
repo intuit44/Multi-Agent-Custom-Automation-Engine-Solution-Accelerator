@@ -20,6 +20,12 @@ dependencies = [
   "uvicorn[standard]==0.38.0",
   "python-dotenv==1.1.1",
   "azure-identity==1.19.0",
+  "azure-keyvault-secrets==4.11.0",
+  # Required async transport for azure.*.aio (ManagedIdentityCredential token
+  # minting + Key Vault reads in credential_resolver). Without it azure-core
+  # raises "aiohttp package is not installed" and the MI token is never obtained
+  # → the request goes out with no Authorization header → 401.
+  "aiohttp==3.13.2",
   "pydantic==2.11.7",
   "pydantic-settings==2.6.1",
   "python-multipart==0.0.22",
@@ -34,7 +40,13 @@ dependencies = [
 dev = [
   "pytest==8.3.4",
   "pytest-asyncio==0.24.0",
+  "mypy==1.19.1",
 ]
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "."
+explicit_package_bases = true
 
 [project.urls]
 Homepage = "https://github.com/microsoft/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator"

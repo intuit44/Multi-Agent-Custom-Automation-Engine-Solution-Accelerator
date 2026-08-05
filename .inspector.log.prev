@@ -1,9 +1,0 @@
---- Inspector started: 2026-04-16T11:52:34+00:00 ---
-Starting MCP inspector...
-⚙️ Proxy server listening on localhost:16277
-🔑 Session token: 9b80747f44f745631c4df69d8c0c5925214ff95929770bb0e1eb33d3520a50c3
-   Use this token to authenticate requests or set DANGEROUSLY_OMIT_AUTH=true to disable auth
-
-🚀 MCP Inspector is up and running at:
-   http://localhost:16274/?MCP_PROXY_PORT=16277&MCP_PROXY_AUTH_TOKEN=9b80747f44f745631c4df69d8c0c5925214ff95929770bb0e1eb33d3520a50c3
-

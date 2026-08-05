@@ -1,0 +1,31 @@
+/* Settings Modal Styles */
+
+.mcp-connection-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mcp-connection-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Ensure proper spacing in tab panels */
+.fui-TabList {
+  padding: 0 !important;
+}
+
+.fui-Tab {
+  justify-content: flex-start;
+  padding: 10px 20px;
+  border-radius: 0;
+  margin: 0;
+}
+
+.fui-Tab:hover {
+  background: var(--colorNeutralBackground1Hover);
+}
+
+.fui-Tab[aria-selected="true"] {
+  background: var(--colorNeutralBackground1Selected);
+  border-left: 3px solid var(--colorBrandForeground1);
+}

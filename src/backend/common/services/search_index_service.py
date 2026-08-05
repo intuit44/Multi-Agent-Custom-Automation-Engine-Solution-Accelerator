@@ -13,9 +13,6 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import aiohttp
-from azure.identity.aio import (
-    DefaultAzureCredential as DefaultAzureCredentialAsync,
-)
 
 from common.config.app_config import config
 
@@ -43,7 +40,10 @@ class SearchIndexService:
     """AI Search service for embedding, indexing, and hybrid search over chat history."""
 
     def __init__(self) -> None:
-        self._credential: Optional[DefaultAzureCredentialAsync] = None
+        # credential can be different async credential implementations
+        # (DefaultAzureCredential, ManagedIdentityCredential, etc.),
+        # so annotate as Any to avoid overly strict type checks.
+        self._credential: Optional[Any] = None
         self._search_endpoint: str = ""
         self._openai_endpoint: str = ""
         self._embedding_deployment: str = ""
@@ -67,7 +67,13 @@ class SearchIndexService:
             )
             return
 
-        self._credential = config.get_azure_credential_async()
+        self._credential = config.get_azure_credential_async(config.AZURE_CLIENT_ID)
+        if not self._credential:
+            logger.warning(
+                "SearchIndexService: Azure credential not available — search indexing DISABLED."
+            )
+            return
+
         self._initialized = True
         logger.info(
             "SearchIndexService initialized (search=%s, embedding=%s)",
@@ -84,10 +90,18 @@ class SearchIndexService:
     # ── Token helpers ────────────────────────────────────────────
 
     async def _get_search_token(self) -> str:
+        if self._credential is None:
+            raise RuntimeError(
+                "SearchIndexService: credential is not available. Ensure initialize() succeeded."
+            )
         token = await self._credential.get_token("https://search.azure.com/.default")
         return token.token
 
     async def _get_openai_token(self) -> str:
+        if self._credential is None:
+            raise RuntimeError(
+                "SearchIndexService: credential is not available. Ensure initialize() succeeded."
+            )
         token = await self._credential.get_token(
             "https://cognitiveservices.azure.com/.default"
         )
@@ -100,8 +114,6 @@ class SearchIndexService:
         if not await self._ensure():
             return None
 
-        # The embeddings API rejects empty / whitespace-only inputs with
-        # 400 "$.input is invalid" — skip indexing for those.
         if not text or not text.strip():
             return None
 
@@ -323,6 +335,7 @@ class SearchIndexService:
         top_k: int = 15,
         recency_boost: float = 1.3,
         chat_query: str = "",
+        sort_by: str = "relevance",
     ) -> List[Dict[str, Any]]:
         """Search across ALL indices (chat history + documents) in parallel.
 
@@ -338,7 +351,8 @@ class SearchIndexService:
             recency_boost: Multiplier for chat history scores (>1 = prefer recent).
 
         Returns:
-            Fused list sorted by combined score, max 2*top_k items.
+            Fused list sorted by combined score (or by timestamp if sort_by
+            specifies), max 2*top_k items.
         """
         if not await self._ensure():
             return []
@@ -428,15 +442,39 @@ class SearchIndexService:
             if isinstance(result, list):
                 fused.extend(result)
 
-        # Sort by score descending, take the best results
-        fused.sort(key=lambda x: x.get("score", 0), reverse=True)
-        final = fused[:10]
+        # Sort either by semantic score (default) or by timestamp
+        if sort_by == "relevance":
+            fused.sort(key=lambda x: x.get("score", 0), reverse=True)
+            final = fused[:50]
+        else:
+            # Attempt to sort by ISO timestamp. Unsupported/invalid timestamps
+            # will be treated as very old (None -> minimal value).
+            from datetime import datetime
+
+            def _ts_key(item: Dict[str, Any]):
+                ts = item.get("timestamp")
+                if not ts:
+                    return datetime.min
+                try:
+                    # Normalize trailing Z to +00:00 for fromisoformat
+                    if ts.endswith("Z"):
+                        ts_norm = ts.replace("Z", "+00:00")
+                    else:
+                        ts_norm = ts
+                    return datetime.fromisoformat(ts_norm)
+                except Exception:
+                    return datetime.min
+
+            reverse = True if sort_by == "timestamp_desc" else False
+            fused.sort(key=_ts_key, reverse=reverse)
+            final = fused[:50]
 
         logger.info(
-            "search_all_indices: %d results from %d indices (query='%s')",
+            "search_all_indices: %d results from %d indices (query='%s', sort_by=%s)",
             len(final),
             sum(1 for r in all_results_nested if isinstance(r, list) and r),
             query[:60],
+            sort_by,
         )
         return final
 
@@ -468,15 +506,12 @@ class SearchIndexService:
                         "role": "system",
                         "content": (
                             "You are a search query optimizer. Given a user message, "
-                            "output ONLY a search query (no explanation) that captures "
-                            "the semantic intent. Include synonyms and related terms. "
-                            "Keep it under 50 words. Respond in the same language."
                         ),
                     },
                     {"role": "user", "content": user_message},
                 ],
-                "max_tokens": 80,
-                "temperature": 0.0,
+                "max_tokens": 1000,
+                "temperature": 0.3,
             }
 
             async with aiohttp.ClientSession() as session:

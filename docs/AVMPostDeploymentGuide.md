@@ -111,4 +111,4 @@ Upon successful completion, you'll see a success message.
 
 ### Step 5: Set Up App Authentication (Optional)
 
-Follow the steps in [Set Up Authentication in Azure App Service](azure_app_service_auth_setup.md) to add app authentication to your web app running on Azure App Service.
+Follow the steps in [Set Up Authentication in Azure App Service](https://github.com/microsoft/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator/blob/main/docs/azure_app_service_auth_setup.md) to add app authentication to your web app running on Azure App Service.

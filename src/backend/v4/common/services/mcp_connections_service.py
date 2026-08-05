@@ -14,6 +14,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from azure.cosmos import PartitionKey
 from azure.cosmos.aio import CosmosClient
 
 from common.config.app_config import config
@@ -88,6 +89,7 @@ class MCPConnectionsService:
 
             container_name = _get_container_name()
             credential = config.get_azure_credentials()
+            credential = config.get_azure_credential_async(config.AZURE_CLIENT_ID)
             self._client = CosmosClient(url=endpoint, credential=credential)
             db = self._client.get_database_client(config.COSMOSDB_DATABASE)
 
@@ -105,7 +107,7 @@ class MCPConnectionsService:
                 db_proxy = self._client.get_database_client(config.COSMOSDB_DATABASE)
                 self._container = await db_proxy.create_container_if_not_exists(
                     id=container_name,
-                    partition_key={"paths": ["/pk"], "kind": "Hash", "version": 2},
+                    partition_key=PartitionKey(path="/pk"),
                     default_ttl=-1,  # enable TTL but don't auto-expire by default
                 )
 
@@ -127,6 +129,7 @@ class MCPConnectionsService:
     ) -> List[MCPServerEntry]:
         """List all servers in the catalog for a tenant (or global shared catalog)."""
         await self._ensure_initialized()
+        assert self._container is not None
 
         where = "AND c.enabled = true" if enabled_only else ""
         query = f"SELECT * FROM c WHERE c.doc_type = 'mcp_server' {where} ORDER BY c.display_name"
@@ -142,9 +145,12 @@ class MCPConnectionsService:
                 logger.warning("Invalid server entry %s: %s", item.get("id"), e)
         return items
 
-    async def get_server(self, server_id: str, tenant_id: str = "") -> Optional[MCPServerEntry]:
+    async def get_server(
+        self, server_id: str, tenant_id: str = ""
+    ) -> Optional[MCPServerEntry]:
         """Get a server entry by ID."""
         await self._ensure_initialized()
+        assert self._container is not None
         try:
             item = await self._container.read_item(
                 item=server_id, partition_key=_catalog_pk(tenant_id)
@@ -158,11 +164,12 @@ class MCPConnectionsService:
     ) -> Optional[MCPServerEntry]:
         """Find a server by its unique server_name within a tenant catalog."""
         await self._ensure_initialized()
+        assert self._container is not None
 
         query = (
             "SELECT * FROM c WHERE c.doc_type = 'mcp_server' AND c.server_name = @name"
         )
-        params = [{"name": "@name", "value": server_name}]
+        params: List[Dict[str, Any]] = [{"name": "@name", "value": server_name}]
 
         async for item in self._container.query_items(
             query=query,
@@ -178,6 +185,7 @@ class MCPConnectionsService:
         The partition key is derived from entry.tenant_id automatically.
         """
         await self._ensure_initialized()
+        assert self._container is not None
 
         entry.pk = _catalog_pk(entry.tenant_id or "")
         entry.doc_type = "mcp_server"
@@ -196,6 +204,7 @@ class MCPConnectionsService:
     async def delete_server(self, server_id: str, tenant_id: str = "") -> bool:
         """Remove a server from the catalog."""
         await self._ensure_initialized()
+        assert self._container is not None
         try:
             await self._container.delete_item(
                 item=server_id, partition_key=_catalog_pk(tenant_id)
@@ -211,6 +220,7 @@ class MCPConnectionsService:
     ) -> List[MCPServerEntry]:
         """Find enabled servers that a specific agent type is allowed to use."""
         await self._ensure_initialized()
+        assert self._container is not None
 
         # Servers with empty allowed_agents = available to all agents
         query = (
@@ -218,7 +228,7 @@ class MCPConnectionsService:
             "AND c.enabled = true "
             "AND (ARRAY_LENGTH(c.allowed_agents) = 0 OR ARRAY_CONTAINS(c.allowed_agents, @agent))"
         )
-        params = [{"name": "@agent", "value": agent_type}]
+        params: List[Dict[str, Any]] = [{"name": "@agent", "value": agent_type}]
 
         items = []
         async for item in self._container.query_items(
@@ -241,6 +251,7 @@ class MCPConnectionsService:
     ) -> List[MCPUserConnection]:
         """Get all MCP server connections for a user (optionally tenant-scoped)."""
         await self._ensure_initialized()
+        assert self._container is not None
 
         where = "AND c.status = 'active'" if active_only else ""
         query = f"SELECT * FROM c WHERE c.doc_type = 'mcp_user_connection' {where}"
@@ -261,12 +272,13 @@ class MCPConnectionsService:
     ) -> Optional[MCPUserConnection]:
         """Get a specific user connection by server name."""
         await self._ensure_initialized()
+        assert self._container is not None
 
         query = (
             "SELECT * FROM c WHERE c.doc_type = 'mcp_user_connection' "
             "AND c.server_name = @server_name"
         )
-        params = [{"name": "@server_name", "value": server_name}]
+        params: List[Dict[str, Any]] = [{"name": "@server_name", "value": server_name}]
 
         async for item in self._container.query_items(
             query=query,
@@ -285,6 +297,7 @@ class MCPConnectionsService:
         connection.user_id automatically.
         """
         await self._ensure_initialized()
+        assert self._container is not None
 
         connection.pk = _user_pk(connection.user_id, connection.tenant_id)
         connection.doc_type = "mcp_user_connection"
@@ -339,6 +352,7 @@ class MCPConnectionsService:
     ) -> bool:
         """Remove a user's connection to a server."""
         await self._ensure_initialized()
+        assert self._container is not None
 
         conn = await self.get_user_connection(user_id, server_name, tenant_id=tenant_id)
         if not conn:
@@ -374,7 +388,9 @@ class MCPConnectionsService:
             servers = await self.list_servers(enabled_only=True, tenant_id=tenant_id)
 
         # Get user's existing connections (tenant-scoped)
-        user_conns = await self.get_user_connections(user_id, active_only=False, tenant_id=tenant_id)
+        user_conns = await self.get_user_connections(
+            user_id, active_only=False, tenant_id=tenant_id
+        )
         conn_by_name = {c.server_name: c for c in user_conns}
 
         result = []

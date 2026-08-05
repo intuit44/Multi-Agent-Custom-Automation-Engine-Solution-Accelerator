@@ -25,4 +25,7 @@ export * from './Team';
 // Export Chat models (P0 — conversational mode)
 export * from './chatMessage';
 
+// Export MCP Connection models
+export * from './mcp';
+
 // Add other model exports as needed

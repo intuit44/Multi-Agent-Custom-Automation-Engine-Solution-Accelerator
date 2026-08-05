@@ -18,11 +18,11 @@ from typing import Any, AsyncIterable, Awaitable
 from agent_framework import (
     AgentResponse,
     AgentResponseUpdate,
+    AgentSession,
     BaseAgent,
     Content,
     Message,
     UsageDetails,
-    AgentSession,
 )
 from agent_framework._types import ResponseStream
 
@@ -48,6 +48,7 @@ class ProxyAgent(BaseAgent):
     def __init__(
         self,
         user_id: str | None = None,
+        session_id: str | None = None,
         name: str = "ProxyAgent",
         description: str = (
             "Clarification agent. Ask this when instructions are unclear or additional "
@@ -58,7 +59,8 @@ class ProxyAgent(BaseAgent):
     ):
         super().__init__(name=name, description=description, **kwargs)
         self.user_id = user_id or ""
-        self._timeout = timeout_seconds or orchestration_config.default_timeout
+        self.session_id = session_id or ""
+        self._timeout = timeout_seconds or orchestration_config.clarification_timeout
 
     # ---------------------------
     # AgentProtocol implementation
@@ -165,6 +167,28 @@ class ProxyAgent(BaseAgent):
             message_type=WebsocketMessageType.USER_CLARIFICATION_REQUEST,
         )
 
+        # ── Mirror clarification question to chat_cosmos ──
+        if self.session_id and self.user_id:
+            try:
+                from common.services.chat_cosmos_service import get_chat_cosmos_service
+
+                _chat_svc = await get_chat_cosmos_service()
+                await _chat_svc.add_message(
+                    session_id=self.session_id,
+                    user_id=self.user_id,
+                    content=clarification_req_text,
+                    role="assistant",
+                    metadata={
+                        "intent": "task",
+                        "clarification_id": request_id,
+                        "message_type": "clarification_question",
+                    },
+                )
+            except Exception as _ce:
+                logger.warning(
+                    "Could not persist clarification question to chat_cosmos: %s", _ce
+                )
+
         # Await human clarification
         human_response = await self._wait_for_user_clarification(
             clarification_request.request_id
@@ -244,16 +268,17 @@ class ProxyAgent(BaseAgent):
         if isinstance(messages, str):
             return messages
         if isinstance(messages, Message):
-            # Use the .text property which concatenates all TextContent items
             return messages.text or ""
         if isinstance(messages, list):
             if not messages:
                 return ""
-            if isinstance(messages[0], str):
-                return " ".join(messages)
-            if isinstance(messages[0], Message):
-                # Use .text property for each message
-                return " ".join(msg.text or "" for msg in messages)
+            first = messages[0]
+            if isinstance(first, str):
+                return " ".join(str(m) for m in messages)
+            if isinstance(first, Message):
+                return " ".join(
+                    (m.text or "") for m in messages if isinstance(m, Message)
+                )
         return str(messages)
 
     async def _wait_for_user_clarification(
@@ -262,7 +287,11 @@ class ProxyAgent(BaseAgent):
         """
         Wait for user clarification with timeout and cancellation handling.
         """
-        orchestration_config.set_clarification_pending(request_id)
+        orchestration_config.set_clarification_pending(
+            request_id,
+            session_id=self.session_id,
+            user_id=self.user_id,
+        )
         try:
             answer = await orchestration_config.wait_for_clarification(request_id)
             return UserClarificationResponse(request_id=request_id, answer=answer)

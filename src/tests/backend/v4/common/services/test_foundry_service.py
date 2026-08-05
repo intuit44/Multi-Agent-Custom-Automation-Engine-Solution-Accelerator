@@ -92,6 +92,21 @@ class MockConnection:
         return self.data
 
 
+def make_async_iterable(items):
+    """Build an async iterator over items.
+
+    Mirrors the current FoundryService.list_connections contract:
+    client.connections.list() is a sync call returning an async iterable
+    that is consumed with `async for`.
+    """
+
+    async def _gen():
+        for item in items:
+            yield item
+
+    return _gen()
+
+
 class TestFoundryServiceInitialization:
     """Test cases for FoundryService initialization."""
 
@@ -166,7 +181,9 @@ class TestFoundryServiceConnections:
             MockConnection({"name": "conn1", "type": "AzureOpenAI"}),
             MockConnection({"name": "conn2", "type": "AzureAI"}),
         ]
-        mock_client.connections.list = AsyncMock(return_value=mock_connections)
+        mock_client.connections.list = MagicMock(
+            return_value=make_async_iterable(mock_connections)
+        )
 
         service = FoundryService(client=mock_client)
         connections = await service.list_connections()
@@ -180,7 +197,9 @@ class TestFoundryServiceConnections:
     async def test_list_connections_empty(self):
         """Test listing connections when no connections exist."""
         mock_client = MagicMock()
-        mock_client.connections.list = AsyncMock(return_value=[])
+        mock_client.connections.list = MagicMock(
+            return_value=make_async_iterable([])
+        )
 
         service = FoundryService(client=mock_client)
         connections = await service.list_connections()
@@ -207,7 +226,9 @@ class TestFoundryServiceConnections:
         """Test that list_connections handles objects that don't have as_dict method."""
         mock_client = MagicMock()
         mock_connection = {"name": "dict_conn", "type": "Dictionary"}
-        mock_client.connections.list = AsyncMock(return_value=[mock_connection])
+        mock_client.connections.list = MagicMock(
+            return_value=make_async_iterable([mock_connection])
+        )
 
         service = FoundryService(client=mock_client)
         connections = await service.list_connections()
@@ -237,7 +258,9 @@ class TestFoundryServiceConnections:
         service._client = None
         mock_client = MagicMock()
         mock_connections = [MockConnection({"name": "lazy_conn", "type": "Azure"})]
-        mock_client.connections.list = AsyncMock(return_value=mock_connections)
+        mock_client.connections.list = MagicMock(
+            return_value=make_async_iterable(mock_connections)
+        )
 
         # Replace the get_client method to return our mock
         async def mock_get_client():

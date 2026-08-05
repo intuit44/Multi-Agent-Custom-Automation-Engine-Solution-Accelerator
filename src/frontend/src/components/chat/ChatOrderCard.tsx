@@ -72,12 +72,12 @@ export const ChatOrderCard: React.FC<ChatOrderCardProps> = ({ order }) => {
                                 padding: '4px 0',
                             }}
                         >
-                            <Caption1>
+                            <Body1>
                                 {item.name} ({item.quantity} × ${item.unitPrice.toFixed(2)})
-                            </Caption1>
-                            <Caption1 style={{ fontWeight: 600 }}>
+                            </Body1>
+                            <Body1 style={{ fontWeight: 600 }}>
                                 ${item.totalPrice.toFixed(2)}
-                            </Caption1>
+                            </Body1>
                         </div>
                     ))}
                 </div>
@@ -89,14 +89,14 @@ export const ChatOrderCard: React.FC<ChatOrderCardProps> = ({ order }) => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                 {order.subtotal > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Caption1>Subtotal</Caption1>
-                        <Caption1>${order.subtotal.toFixed(2)}</Caption1>
+                        <Body1>Subtotal</Body1>
+                        <Body1>${order.subtotal.toFixed(2)}</Body1>
                     </div>
                 )}
                 {order.tax > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Caption1>Tax</Caption1>
-                        <Caption1>${order.tax.toFixed(2)}</Caption1>
+                        <Body1>Tax</Body1>
+                        <Body1>${order.tax.toFixed(2)}</Body1>
                     </div>
                 )}
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>

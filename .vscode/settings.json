@@ -1,0 +1,34 @@
+{
+  "azureFunctions.projectSubpath": "src/backend/azure_functions",
+  // El venv artesanal de la raíz fue eliminado (todo entorno proviene de un
+  // contrato). El entorno canónico para tests/análisis es el del backend.
+  // NOTE: Pylance analysis (extraPaths, venv) is governed by the root
+  // pyrightconfig.json — do not duplicate python.analysis.* here.
+  // This path only feeds the Python extension (run/debug/pytest discovery).
+  "python.defaultInterpreterPath": "${workspaceFolder}/src/backend/.venv/bin/python",
+  "python.terminal.activateEnvironment": true,
+
+  // ── Testing: pytest auto-discovery ────────────────────────────────
+  // pytest.ini `testpaths` already scopes to src/tests/backend + src/tests/agents.
+  // Integration tests need real Azure infra → deselected by default.
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestArgs": ["--no-header", "-q", "-m", "not integration"],
+
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.autopep8",
+    "editor.formatOnSave": true
+  },
+
+  "editor.codeActionsOnSave": {},
+
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": false,
+  "kiroAgent.configureMCP": "Disabled",
+  "azureFunctions.deploySubpath": "src/backend/azure_functions",
+  "azureFunctions.scmDoBuildDuringDeployment": true,
+  "azureFunctions.pythonVenv": ".venv",
+  "azureFunctions.projectLanguage": "Python",
+  "azureFunctions.projectRuntime": "~4"
+}

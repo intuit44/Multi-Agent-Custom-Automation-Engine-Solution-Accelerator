@@ -36,9 +36,9 @@ COPY pyproject.toml requirements.txt* uv.lock* ./
 # Install Python dependencies using UV
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ -f "requirements.txt" ]; then \
-      uv pip install --system -r requirements.txt && uv pip install --system "uvicorn[standard]";  \
+    uv pip install --system -r requirements.txt && uv pip install --system "uvicorn[standard]";  \
     else \
-      uv pip install --system pyproject.toml && uv pip install --system "uvicorn[standard]"; \
+    uv pip install --system pyproject.toml && uv pip install --system "uvicorn[standard]"; \
     fi
 
 # Stage 3: Final production image
@@ -53,7 +53,7 @@ ENV NODE_ENV=production \
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/* 
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

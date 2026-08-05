@@ -2,15 +2,21 @@
   "include": [
     "src/backend",
     "src/frontend",
-    "src/mcp_server"
+    "src/mcp_server",
+    "src/tests",
+    "infra/scripts",
+    "tests/e2e-test"
   ],
   "extraPaths": [
     "src/backend",
     "src/frontend",
     "src/mcp_server",
-    "src"
+    "src",
+    "infra/scripts",
+    "tests/e2e-test/.venv/lib/python3.11/site-packages",
+    "./tests/e2e-test"
   ],
-  "venvPath": ".",
+  "venvPath": "src/backend",
   "venv": ".venv",
   "pythonVersion": "3.11",
   "typeCheckingMode": "basic",

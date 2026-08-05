@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { PlanChatProps, MPlanData } from "../../models/plan";
 import InlineToaster from "../toast/InlineToaster";
 import { AgentMessageData } from "@/models";
@@ -24,7 +24,20 @@ interface SimplifiedPlanChatProps extends PlanChatProps {
   handleApprovePlan: () => Promise<void>;
   handleRejectPlan: () => Promise<void>;
   processingApproval: boolean;
-
+  /** True when parent attempted to load a plan and failed (404 case). */
+  notFound?: boolean;
+  attachedFiles?: Array<{ name: string; file_id: string }>;
+  generatedFiles?: Array<{ file_id: string; filename: string; download_url: string }>;
+  onFileSelect?: (file: File) => void;
+  onRemoveFile?: (file_id: string) => void;
+  onRemoveGeneratedFile?: (file_id: string) => void;
+  /** Chat|Plan selector state + change handler (rendered by PlanChatBody). */
+  planLane?: boolean;
+  onPlanLaneChange?: (checked: boolean) => void;
+  showPlanLaneToggle?: boolean;
+  /** When the plan ended (ms). Anchors the result summary in time so later
+   *  chat turns render BELOW it instead of pushing it to the bottom. */
+  bufferAt?: number;
 }
 
 const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
@@ -46,13 +59,119 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
   showApprovalButtons,
   handleApprovePlan,
   handleRejectPlan,
-  processingApproval
+  processingApproval,
+  notFound,
+  attachedFiles,
+  generatedFiles,
+  onFileSelect,
+  onRemoveFile,
+  onRemoveGeneratedFile,
+  planLane,
+  onPlanLaneChange,
+  showPlanLaneToggle,
+  bufferAt = 0,
 }) => {
-  // States
+  // Notify parent when an MPlan arrives via planData.
+  useEffect(() => {
+    if (planData?.mplan) onPlanReceived?.(planData.mplan);
+  }, [planData?.mplan, onPlanReceived]);
+
+  // Bridge approval/rejection callbacks through onPlanApproval if provided.
+  const onApprove = async () => {
+    await handleApprovePlan();
+    onPlanApproval?.(true);
+  };
+  const onReject = async () => {
+    await handleRejectPlan();
+    onPlanApproval?.(false);
+  };
+
+  // The plan card belongs WHERE IT HAPPENED: after the conversation that
+  // already existed when the plan was created, before the messages its own
+  // execution produced. Any fixed position is wrong in one direction —
+  // bottom put it under its own clarifications, top put it above the prior
+  // chat. Split by the plan's creation timestamp instead.
+  const planStartedAt = planData?.plan?.timestamp
+    ? new Date(planData.plan.timestamp).getTime()
+    : 0;
+  const priorMessages = planStartedAt
+    ? agentMessages.filter((m) => m.timestamp < planStartedAt)
+    : [];
+  const planMessages = planStartedAt
+    ? agentMessages.filter((m) => m.timestamp >= planStartedAt)
+    : agentMessages;
+
+  // The synthetic "user task" bubble existed only because the request that
+  // created the plan was never persisted. Now that the backend stores it, the
+  // real message is in the history — render the synthetic one ONLY when the
+  // request is absent (older plans), or the task shows twice.
+  // Result summary anchored in time: once the plan ends (bufferAt > 0) the
+  // messages split around it. While the plan streams (bufferAt === 0) it is
+  // the live tail, so everything stays before it.
+  const beforeBuffer =
+    bufferAt > 0
+      ? agentMessages.filter((m) => m.timestamp <= bufferAt)
+      : agentMessages;
+  const afterBuffer =
+    bufferAt > 0 ? agentMessages.filter((m) => m.timestamp > bufferAt) : [];
+
+  const goal = (planData?.plan?.initial_goal || '').trim();
+  const requestAlreadyInHistory =
+    goal.length > 0 &&
+    agentMessages.some((m) => (m.content || '').trim() === goal);
+
+  if (notFound) {
+    return <ContentNotFound subtitle="The requested page could not be found." />;
+  }
 
   if (!planData)
     return (
-      <ContentNotFound subtitle="The requested page could not be found." />
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+        <InlineToaster />
+        <div
+          ref={messagesContainerRef}
+          style={{
+            flex: 1,
+            overflow: 'auto',
+            padding: '32px 0',
+            maxWidth: '800px',
+            margin: '0 auto',
+            width: '100%'
+          }}
+        >
+          {renderThinkingState(waitingForPlan)}
+          {/* The result summary keeps the position where the plan ENDED.
+              Anything that came after (the Hosted Agent continuing the
+              conversation in chat) renders below it, not above. */}
+          <RenderAgentMessages agentMessages={beforeBuffer} />
+          {showBufferingText && (
+            <StreamingBufferMessage
+              streamingMessageBuffer={streamingMessageBuffer}
+              isStreaming={bufferAt === 0}
+            />
+          )}
+          {afterBuffer.length > 0 && (
+            <RenderAgentMessages agentMessages={afterBuffer} />
+          )}
+        </div>
+        <PlanChatBody
+          planData={null as any}
+          input={input}
+          setInput={setInput}
+          submittingChatDisableInput={submittingChatDisableInput}
+          OnChatSubmit={OnChatSubmit}
+          waitingForPlan={waitingForPlan}
+          loading={false}
+          attachedFiles={attachedFiles}
+          generatedFiles={generatedFiles}
+          onFileSelect={onFileSelect}
+          onRemoveFile={onRemoveFile}
+          onRemoveGeneratedFile={onRemoveGeneratedFile}
+          planLane={planLane}
+          onPlanLaneChange={onPlanLaneChange}
+          showPlanLaneToggle={showPlanLaneToggle}
+        />
+      </div>
     );
   return (
     <div style={{
@@ -74,21 +193,26 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
           width: '100%'
         }}
       >
-        {/* User plan message */}
-        {renderUserPlanMessage(planApprovalRequest, initialTask, planData)}
+        {/* Conversation that already existed when the plan started */}
+        <RenderAgentMessages agentMessages={priorMessages} />
 
-        {/* AI thinking state */}
-        {renderThinkingState(waitingForPlan)}
+        {/* The task and its proposed plan, in place */}
+        {!requestAlreadyInHistory &&
+          renderUserPlanMessage(planApprovalRequest, initialTask, planData)}
 
-        {/* Plan response with all information */}
         <RenderPlanResponse
           planApprovalRequest={planApprovalRequest}
-          handleApprovePlan={handleApprovePlan}
-          handleRejectPlan={handleRejectPlan}
+          handleApprovePlan={onApprove}
+          handleRejectPlan={onReject}
           processingApproval={processingApproval}
           showApprovalButtons={showApprovalButtons}
         />
-        <RenderAgentMessages agentMessages={agentMessages} />
+
+        {/* Everything the plan execution produced afterwards */}
+        <RenderAgentMessages agentMessages={planMessages} />
+
+        {/* AI thinking state */}
+        {renderThinkingState(waitingForPlan)}
 
         {showProcessingPlanSpinner && renderPlanExecutionMessage()}
         {/* Streaming plan updates */}
@@ -108,8 +232,16 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
         submittingChatDisableInput={submittingChatDisableInput}
         OnChatSubmit={OnChatSubmit}
         waitingForPlan={waitingForPlan}
-        loading={false} />
-
+        loading={false}
+        attachedFiles={attachedFiles}
+        generatedFiles={generatedFiles}
+        onFileSelect={onFileSelect}
+        onRemoveFile={onRemoveFile}
+        onRemoveGeneratedFile={onRemoveGeneratedFile}
+        planLane={planLane}
+        onPlanLaneChange={onPlanLaneChange}
+        showPlanLaneToggle={showPlanLaneToggle}
+      />
     </div>
   );
 };

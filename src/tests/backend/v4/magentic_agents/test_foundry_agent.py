@@ -50,12 +50,20 @@ sys.modules["azure.identity"] = Mock()
 sys.modules["azure.identity.aio"] = Mock()
 sys.modules["azure.cosmos"] = Mock(CosmosClient=Mock)
 sys.modules["agent_framework"] = Mock(
-    Agent=Mock, Message=Mock, ChatOptions=Mock, ChatMessage=Mock, Role=Mock
+    Agent=Mock, Message=Mock, ChatOptions=Mock, ChatMessage=Mock, Role=Mock,
+    # self_heal_middleware subclasses FunctionMiddleware — it must be a CLASS
+    # (an auto-created Mock attribute is an instance and breaks `class X(...)`).
+    FunctionMiddleware=Mock, FunctionInvocationContext=Mock,
 )
 sys.modules["agent_framework_azure_ai"] = Mock(AzureAIClient=Mock)
 
 # Mock additional Azure modules that may be needed
 sys.modules["azure.monitor"] = Mock()
+# tool_errors -> event_utils imports azure.monitor.events.extension; with
+# azure.monitor stubbed as a plain Mock (not a package) the submodule can't
+# resolve unless stubbed explicitly too.
+sys.modules["azure.monitor.events"] = Mock()
+sys.modules["azure.monitor.events.extension"] = Mock(track_event=Mock())
 sys.modules["azure.monitor.opentelemetry"] = Mock()
 sys.modules["azure.monitor.opentelemetry.exporter"] = Mock()
 sys.modules["opentelemetry"] = Mock()
@@ -1122,9 +1130,18 @@ class TestFoundryAgentTemplate:
             project_endpoint="https://test.project.azure.com/",
         )
 
-        # Mock base class close method
+        # FoundryAgentTemplate no longer overrides close(); cleanup is handled
+        # entirely by the base class (AzureAgentBase -> MCPEnabledBase).
+        assert "close" not in FoundryAgentTemplate.__dict__
+
+        # Patch close on the (mocked) base class. NOTE: agent.__class__ is a
+        # per-instance Mock subclass here, so we patch via the template class
+        # itself. create=True because the mocked base has no real close attr.
         with patch.object(
-            agent.__class__.__bases__[0], "close", new_callable=AsyncMock
+            FoundryAgentTemplate.__bases__[0],
+            "close",
+            new_callable=AsyncMock,
+            create=True,
         ) as mock_super_close:
             await agent.close()
 
@@ -1150,9 +1167,16 @@ class TestFoundryAgentTemplate:
         agent._azure_server_agent_id = "agent-123"
         agent._use_azure_search = False
 
-        # Mock base class close method
+        # FoundryAgentTemplate no longer overrides close(): even with a stale
+        # _azure_server_agent_id, close() just falls through to the base class
+        # (agents are reused; no server-side deletion happens on close).
+        assert "close" not in FoundryAgentTemplate.__dict__
+
         with patch.object(
-            agent.__class__.__bases__[0], "close", new_callable=AsyncMock
+            FoundryAgentTemplate.__bases__[0],
+            "close",
+            new_callable=AsyncMock,
+            create=True,
         ) as mock_super_close:
             await agent.close()
 

@@ -4,12 +4,11 @@
 import json
 import logging
 from types import SimpleNamespace
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 
 from common.config.app_config import config
 from common.database.database_base import DatabaseBase
 from common.models.messages_af import TeamConfiguration
-
 from v4.common.services.team_service import TeamService
 from v4.magentic_agents.foundry_agent import FoundryAgentTemplate
 from v4.magentic_agents.models.agent_models import MCPConfig, SearchConfig
@@ -49,9 +48,10 @@ class MagenticAgentFactory:
     async def create_agent_from_config(
         self,
         user_id: str,
-        agent_obj: SimpleNamespace,
+        agent_obj: Union[SimpleNamespace, Any],
         team_config: TeamConfiguration,
         memory_store: DatabaseBase,
+        user_access_token: Optional[str] = None,
     ) -> Union[FoundryAgentTemplate, ProxyAgent]:
         """
         Create an agent from configuration object.
@@ -71,9 +71,14 @@ class MagenticAgentFactory:
         # Get model from agent config, team model, or environment
         deployment_name = getattr(agent_obj, "deployment_name", None)
 
-        if not deployment_name and agent_obj.name.lower() == "proxyagent":
+        if agent_obj.name.lower() == "proxyagent":
             self.logger.info("Creating ProxyAgent")
             return ProxyAgent(user_id=user_id)
+
+        if not deployment_name:
+            raise InvalidConfigurationError(
+                f"Agent '{agent_obj.name}' missing requiered 'deployment_name' field"
+            )
 
         # Validate supported models
         supported_models = json.loads(config.SUPPORTED_MODELS)
@@ -100,21 +105,41 @@ class MagenticAgentFactory:
 
         # Only create configs for explicitly requested capabilities
         index_name = getattr(agent_obj, "index_name", None)
-        search_config = (
-            SearchConfig.from_env(index_name)
-            if getattr(agent_obj, "use_rag", False)
-            else None
-        )
-        mcp_config = (
-            MCPConfig.from_env() if getattr(agent_obj, "use_mcp", False) else None
-        )
-        # bing_config = BingConfig.from_env() if getattr(agent_obj, 'use_bing', False) else None
+        use_rag_value = getattr(agent_obj, "use_rag", False)
+        use_mcp_value = getattr(agent_obj, "use_mcp", False)
 
         self.logger.info(
-            "Creating agent '%s' with model '%s' %s (Template: %s)",
+            "🔍 DEBUG: Agent '%s' config: use_rag=%s, use_mcp=%s, index_name='%s'",
+            agent_obj.name,
+            use_rag_value,
+            use_mcp_value,
+            index_name,
+        )
+
+        search_config = (
+            SearchConfig.from_env(index_name) if use_rag_value and index_name else None
+        )
+
+        self.logger.info(
+            "🔍 DEBUG: search_config=%s (will %s Azure AI Search)",
+            "CREATED" if search_config else "None",
+            "USE" if search_config else "NOT USE",
+        )
+
+        mcp_config = MCPConfig.from_env() if use_mcp_value else None
+
+        self.logger.info(
+            "🔍 DEBUG: mcp_config=%s (will %s MCP)",
+            "CREATED" if mcp_config else "None",
+            "USE" if mcp_config else "NOT USE",
+        )
+
+        self.logger.info(
+            "Creating agent '%s' with model '%s' (use_rag=%s, use_mcp=%s, Template: %s)",
             agent_obj.name,
             deployment_name,
-            index_name,
+            use_rag_value,
+            use_mcp_value,
             "Reasoning" if use_reasoning else "Foundry",
         )
 
@@ -131,6 +156,7 @@ class MagenticAgentFactory:
             team_service=self.team_service,
             team_config=team_config,
             memory_store=memory_store,
+            user_access_token=user_access_token,
         )
 
         await agent.open()
@@ -144,6 +170,7 @@ class MagenticAgentFactory:
         user_id: str,
         team_config_input: TeamConfiguration,
         memory_store: DatabaseBase,
+        user_access_token: Optional[str] = None,
     ) -> List:
         """
         Create and return a team of agents from JSON configuration.
@@ -170,7 +197,11 @@ class MagenticAgentFactory:
                     )
 
                     agent = await self.create_agent_from_config(
-                        user_id, agent_cfg, team_config_input, memory_store
+                        user_id,
+                        agent_cfg,
+                        team_config_input,
+                        memory_store,
+                        user_access_token=user_access_token,
                     )
                     initalized_agents.append(agent)
                     self._agent_list.append(agent)  # Keep track for cleanup

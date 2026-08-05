@@ -9,6 +9,7 @@ from azure.core.exceptions import (
     ResourceNotFoundError,
 )
 from azure.search.documents.indexes import SearchIndexClient
+
 from common.config.app_config import config
 from common.database.database_base import DatabaseBase
 from common.models.messages_af import (
@@ -167,6 +168,8 @@ class TeamService:
     async def save_team_configuration(self, team_config: TeamConfiguration) -> str:
         """
         Save team configuration to the database.
+        If a document with the same team_id already exists it is replaced (UPSERT),
+        otherwise a new document is created.
 
         Args:
             team_config: TeamConfiguration object to save
@@ -175,12 +178,26 @@ class TeamService:
             The unique ID of the saved configuration
         """
         try:
-            # Use the specific add_team method from cosmos memory context
-            await self.memory_context.add_team(team_config)
+            if self.memory_context is None:
+                raise ValueError("Memory context is not initialized")
 
-            self.logger.info(
-                "Successfully saved team configuration with ID: %s", team_config.id
-            )
+            # Check whether a document with this id already exists.
+            # If it does, use update_team (upsert_item) to replace it;
+            # otherwise use add_team (create_item) to insert a new one.
+            # This prevents duplicate documents when uploading with ?team_id=.
+            existing = await self.memory_context.get_team(team_config.id)
+            if existing is not None:
+                await self.memory_context.update_team(team_config)
+                self.logger.info(
+                    "Updated (upserted) existing team configuration with ID: %s",
+                    team_config.id,
+                )
+            else:
+                await self.memory_context.add_team(team_config)
+                self.logger.info(
+                    "Created new team configuration with ID: %s", team_config.id
+                )
+
             return team_config.id
 
         except Exception as e:
@@ -201,6 +218,9 @@ class TeamService:
             TeamConfiguration object or None if not found
         """
         try:
+            if self.memory_context is None:
+                raise ValueError("Memory context is not initialized")
+
             # Get the specific configuration using the team-specific method
             team_config = await self.memory_context.get_team(team_id)
 
@@ -224,6 +244,9 @@ class TeamService:
             True if successful, False otherwise
         """
         try:
+            if self.memory_context is None:
+                raise ValueError("Memory context is not initialized")
+
             await self.memory_context.delete_current_team(user_id)
             self.logger.info("Successfully deleted current team for user %s", user_id)
             return True
@@ -234,7 +257,7 @@ class TeamService:
 
     async def handle_team_selection(
         self, user_id: str, team_id: str
-    ) -> UserCurrentTeam:
+    ) -> Optional[UserCurrentTeam]:
         """
         Set a default team for a user.
 
@@ -247,6 +270,9 @@ class TeamService:
         """
         print("Handling team selection for user:", user_id, "team:", team_id)
         try:
+            if self.memory_context is None:
+                raise ValueError("Memory context is not initialized")
+
             await self.memory_context.delete_current_team(user_id)
             current_team = UserCurrentTeam(
                 user_id=user_id,
@@ -270,6 +296,9 @@ class TeamService:
             List of TeamConfiguration objects
         """
         try:
+            if self.memory_context is None:
+                raise ValueError("Memory context is not initialized")
+
             # Use the specific get_all_teams method
             team_configs = await self.memory_context.get_all_teams()
             return team_configs
@@ -290,6 +319,9 @@ class TeamService:
             True if deleted successfully, False if not found
         """
         try:
+            if self.memory_context is None:
+                raise ValueError("Memory context is not initialized")
+
             # First, verify the configuration exists and belongs to the user
             success = await self.memory_context.delete_team(team_id)
             if success:
@@ -306,7 +338,7 @@ class TeamService:
         Extract all possible model references from a single agent configuration.
          Skip proxy agents as they don't require deployment models.
         """
-        models = set()
+        models: set[str] = set()
 
         # Skip proxy agents - they don't need deployment models
         if agent.get("name", "").lower() == "proxyagent":

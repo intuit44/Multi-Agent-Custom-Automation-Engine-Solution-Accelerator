@@ -1,21 +1,24 @@
-import React from 'react';
 import './App.css';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { HomePage, PlanPage, ChatPage } from './pages';
+import { Provider } from 'react-redux';
+import store from './store';
+import { PlanPage } from './pages';
 import { useWebSocket } from './hooks/useWebSocket';
 
 function App() {
     useWebSocket();
 
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/plan/:planId" element={<PlanPage />} />
-        <Route path="/chat/:sessionId" element={<ChatPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Router>
+    <Provider store={store}>
+      <Router>
+        <Routes>
+          <Route path="/" element={<PlanPage />} />
+          <Route path="/session/:sessionId" element={<PlanPage />} />
+          <Route path="/plan/:planId" element={<PlanPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Router>
+    </Provider>
   );
 }
 

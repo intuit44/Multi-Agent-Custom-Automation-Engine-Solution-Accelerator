@@ -319,7 +319,12 @@ class MockTeamConfiguration:
         self.deployment_name = deployment_name
 
 
-sys.modules["common.models.messages_af"] = Mock(TeamConfiguration=MockTeamConfiguration)
+sys.modules["common.models.messages_af"] = Mock(
+    TeamConfiguration=MockTeamConfiguration,
+    # Real PlanStatus is a str-enum; the failure-marking block sets
+    # plan.overall_status = PlanStatus.failed and tests assert the string.
+    PlanStatus=Mock(failed="failed"),
+)
 
 
 class MockDatabaseBase:
@@ -347,7 +352,10 @@ sys.modules["v4.common.services.team_service"] = Mock(TeamService=MockTeamServic
 
 sys.modules["v4.callbacks"] = Mock()
 sys.modules["v4.callbacks.response_handlers"] = Mock(
-    agent_response_callback=Mock(), streaming_agent_response_callback=AsyncMock()
+    agent_response_callback=Mock(),
+    streaming_agent_response_callback=AsyncMock(),
+    # Source flushes buffered agent streams through clean_citations()
+    clean_citations=Mock(side_effect=lambda text: text),
 )
 
 # Mock v4.config.settings
@@ -357,6 +365,8 @@ mock_connection_config.send_status_update_async = AsyncMock()
 mock_orchestration_config = Mock()
 mock_orchestration_config.max_rounds = 10
 mock_orchestration_config.orchestrations = {}
+# Source stores/pops agent wrappers per user (cleanup on rebuild) — must be a real dict
+mock_orchestration_config.agent_wrappers = {}
 mock_orchestration_config.get_current_orchestration = Mock(return_value=None)
 mock_orchestration_config.set_approval_pending = Mock()
 
@@ -372,10 +382,14 @@ class MockWebsocketMessageType:
     """Mock WebsocketMessageType."""
 
     FINAL_RESULT_MESSAGE = "final_result_message"
+    AGENT_MESSAGE = "agent_message"
 
 
 sys.modules["v4.models"] = Mock()
-sys.modules["v4.models.messages"] = Mock(WebsocketMessageType=MockWebsocketMessageType)
+sys.modules["v4.models.messages"] = Mock(
+    WebsocketMessageType=MockWebsocketMessageType,
+    AgentMessage=Mock,
+)
 
 
 # Mock v4.orchestration.human_approval_manager
@@ -401,7 +415,9 @@ class MockMagenticAgentFactory:
     def __init__(self, team_service=None):
         self.team_service = team_service
 
-    async def get_agents(self, user_id, team_config_input, memory_store):
+    async def get_agents(
+        self, user_id, team_config_input, memory_store, user_access_token=None
+    ):
         # Create mock agents
         agent1 = Mock()
         agent1.agent_name = "TestAgent1"
@@ -415,13 +431,22 @@ class MockMagenticAgentFactory:
         return [agent1, agent2]
 
 
+class MockProxyAgent:
+    """Mock ProxyAgent class for isinstance checks in run_orchestration."""
+
+    pass
+
+
 sys.modules["v4.magentic_agents"] = Mock()
 sys.modules["v4.magentic_agents.magentic_agent_factory"] = Mock(
     MagenticAgentFactory=MockMagenticAgentFactory
 )
+sys.modules["v4.magentic_agents.proxy_agent"] = Mock(ProxyAgent=MockProxyAgent)
 
 # Now import the module under test
-from backend.v4.orchestration.orchestration_manager import OrchestrationManager
+from backend.v4.orchestration.orchestration_manager import (  # noqa: E402
+    OrchestrationManager,
+)
 
 # Get mocked references for tests
 connection_config = sys.modules["v4.config.settings"].connection_config
@@ -442,6 +467,7 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
         # Reset mocks — reset_mock() does NOT clear side_effect,
         # so we must do it explicitly to avoid cross-test pollution.
         orchestration_config.orchestrations.clear()
+        orchestration_config.agent_wrappers.clear()
         orchestration_config.get_current_orchestration.return_value = None
         orchestration_config.set_approval_pending.reset_mock()
         connection_config.send_status_update_async.reset_mock()
@@ -453,6 +479,7 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
         # Create test instance
         self.orchestration_manager = OrchestrationManager()
         self.test_user_id = "test_user_123"
+        self.test_session_id = "test_session_456"
         self.test_team_config = MockTeamConfiguration()
         self.test_team_service = MockTeamService()
 
@@ -603,10 +630,11 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
     async def test_get_current_or_new_orchestration_team_switched(self):
         """Test creating new orchestration when team is switched."""
-        # Set up existing orchestration with participants that need closing
+        # Set up existing orchestration; prior agent wrappers (tracked in
+        # orchestration_config.agent_wrappers) are what gets closed on rebuild.
         mock_existing_workflow = Mock()
         mock_agent = MockAgent(agent_name="TestAgent")
-        mock_existing_workflow._participants = {"agent1": mock_agent}
+        orchestration_config.agent_wrappers[self.test_user_id] = [mock_agent]
 
         orchestration_config.get_current_orchestration.return_value = (
             mock_existing_workflow
@@ -632,6 +660,10 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
                 orchestration_config.orchestrations[self.test_user_id],
                 mock_new_workflow,
             )
+            # New wrappers replace the closed ones
+            new_wrappers = orchestration_config.agent_wrappers[self.test_user_id]
+            self.assertNotIn(mock_agent, new_wrappers)
+            self.assertEqual(len(new_wrappers), 2)
 
     async def test_get_current_or_new_orchestration_agent_creation_failure(self):
         """Test handling agent creation failure."""
@@ -686,6 +718,15 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
         mock_orchestrator_event.type = "magentic_orchestrator"
         mock_orchestrator_event.data = MockChatMessage("Plan message")
 
+        # Request event opens the active-response window; streamed chunks
+        # outside a RequestSent→ResponseReceived window are discarded by source.
+        mock_request_data = MockGroupChatRequestSentEvent()
+        mock_request_data.participant_name = "agent_1"
+        mock_request_data.round_index = 1
+        mock_request_event = Mock()
+        mock_request_event.type = "group_chat"
+        mock_request_event.data = mock_request_data
+
         # Output event with AgentResponseUpdate data triggers streaming callback
         mock_agent_update_data = MockAgentRunUpdateEvent()
         mock_agent_update_data.text = "Agent streaming update"
@@ -710,6 +751,7 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         mock_events = [
             mock_orchestrator_event,
+            mock_request_event,
             mock_output_event,
             mock_response_event,
             mock_final_output,
@@ -722,13 +764,16 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         orchestration_config.get_current_orchestration.return_value = mock_workflow
 
-        # Mock input task
+        # Mock input task (context must be a real str — source seeds it into task_text)
         input_task = Mock()
         input_task.description = "Test task description"
+        input_task.context = ""
 
         # Execute orchestration
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Verify streaming callback was called (for AgentRunUpdateEvent)
@@ -743,10 +788,13 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         with self.assertRaises(ValueError) as context:
             await self.orchestration_manager.run_orchestration(
-                user_id=self.test_user_id, input_task=input_task
+                user_id=self.test_user_id,
+                session_id=self.test_session_id,
+                input_task=input_task,
             )
 
         self.assertIn("Orchestration not initialized", str(context.exception))
@@ -763,10 +811,13 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         with self.assertRaises(Exception):
             await self.orchestration_manager.run_orchestration(
-                user_id=self.test_user_id, input_task=input_task
+                user_id=self.test_user_id,
+                session_id=self.test_session_id,
+                input_task=input_task,
             )
 
         # Verify error status was sent
@@ -795,9 +846,12 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Verify histories were cleared
@@ -821,9 +875,12 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Verify clear method was called
@@ -845,10 +902,13 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         # Should not raise exception - clearing failures are handled gracefully
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Verify workflow still executed
@@ -869,10 +929,13 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         # Should not raise exception - event processing errors are handled
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Reset side effect for other tests
@@ -886,12 +949,15 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         # Run should fail due to no workflow, but we can test the setup
         with self.assertRaises(ValueError):
             asyncio.run(
                 self.orchestration_manager.run_orchestration(
-                    user_id=self.test_user_id, input_task=input_task
+                    user_id=self.test_user_id,
+                    session_id=self.test_session_id,
+                    input_task=input_task,
                 )
             )
 
@@ -910,7 +976,9 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
         input_task = "Simple string task"
 
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Verify workflow was called with the string
@@ -931,12 +999,15 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test task"
+        input_task.context = ""
 
         # The method should handle WebSocket errors gracefully by catching them
         # and trying to send error status, which will also fail, but shouldn't raise
         try:
             await self.orchestration_manager.run_orchestration(
-                user_id=self.test_user_id, input_task=input_task
+                user_id=self.test_user_id,
+                session_id=self.test_session_id,
+                input_task=input_task,
             )
         except Exception as e:
             # The method may still raise the original WebSocket error
@@ -982,11 +1053,13 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
         mock_executor_completed.type = "executor_completed"
         mock_executor_completed.executor_id = "agent_1"
 
-        # Create all possible event types
+        # Create all possible event types.
+        # Request must precede the output chunk: source only forwards streamed
+        # chunks for agents inside a RequestSent→ResponseReceived window.
         events = [
             mock_orchestrator_event,
-            mock_output_event,
             mock_request_event,
+            mock_output_event,
             mock_response_event,
             mock_executor_completed,
             Mock(),  # Unknown event type - should be safely ignored
@@ -999,14 +1072,116 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test all events"
+        input_task.context = ""
 
         # Should process all events without errors
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Verify streaming callback was called (for output event with AgentResponseUpdate data)
         streaming_agent_response_callback.assert_called()
+
+    # ── Harvested from upstream dev-v4 (functional spec, anti-zombie plans) ──
+    # Adapted: session_id added (local signature requires it — mechanical drift)
+    # and DatabaseFactory patched on the module attribute instead of upstream's
+    # global sys.modules mock, which would poison the rest of the suite.
+
+    async def test_run_orchestration_marks_plan_failed_on_exception(self):
+        """When orchestration raises and plan_id is set, plan.overall_status must be
+        updated to FAILED via DatabaseFactory/get_plan_by_plan_id/update_plan."""
+        mock_workflow = Mock()
+        mock_workflow.executors = {}
+        mock_workflow.run = Mock(side_effect=Exception("Workflow execution failed"))
+        orchestration_config.get_current_orchestration.return_value = mock_workflow
+
+        mock_plan = Mock()
+        mock_plan.overall_status = "in_progress"
+        mock_memory_store = Mock()
+        mock_memory_store.get_plan_by_plan_id = AsyncMock(return_value=mock_plan)
+        mock_memory_store.update_plan = AsyncMock()
+
+        db_factory_mock = Mock()
+        db_factory_mock.get_database = AsyncMock(return_value=mock_memory_store)
+
+        input_task = Mock()
+        input_task.description = "Test task"
+        input_task.context = ""  # local seeding does len(context) — a bare Mock breaks it
+
+        with patch.dict(
+            sys.modules,
+            {"common.database.database_factory": Mock(DatabaseFactory=db_factory_mock)},
+        ):
+            with self.assertRaises(Exception):
+                await self.orchestration_manager.run_orchestration(
+                    user_id=self.test_user_id,
+                    session_id=self.test_session_id,
+                    input_task=input_task,
+                    plan_id="plan-123",
+                )
+
+        db_factory_mock.get_database.assert_awaited_with(user_id=self.test_user_id)
+        mock_memory_store.get_plan_by_plan_id.assert_awaited_with(plan_id="plan-123")
+        mock_memory_store.update_plan.assert_awaited_once()
+        self.assertEqual(mock_plan.overall_status, "failed")
+
+    async def test_run_orchestration_db_failure_does_not_mask_original_error(self):
+        """If the DB update itself fails, the original orchestration error must still
+        propagate (the DB error is logged and swallowed)."""
+        mock_workflow = Mock()
+        mock_workflow.executors = {}
+        original_error = RuntimeError("Workflow boom")
+        mock_workflow.run = Mock(side_effect=original_error)
+        orchestration_config.get_current_orchestration.return_value = mock_workflow
+
+        db_factory_mock = Mock()
+        db_factory_mock.get_database = AsyncMock(side_effect=Exception("DB unavailable"))
+
+        input_task = Mock()
+        input_task.description = "Test task"
+        input_task.context = ""  # local seeding does len(context) — a bare Mock breaks it
+
+        with patch.dict(
+            sys.modules,
+            {"common.database.database_factory": Mock(DatabaseFactory=db_factory_mock)},
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                await self.orchestration_manager.run_orchestration(
+                    user_id=self.test_user_id,
+                    session_id=self.test_session_id,
+                    input_task=input_task,
+                    plan_id="plan-123",
+                )
+        self.assertIn("Workflow boom", str(ctx.exception))
+
+    async def test_run_orchestration_skips_db_update_when_no_plan_id(self):
+        """When plan_id is not provided, the orchestration must not touch the DB on failure."""
+        mock_workflow = Mock()
+        mock_workflow.executors = {}
+        mock_workflow.run = Mock(side_effect=Exception("Workflow execution failed"))
+        orchestration_config.get_current_orchestration.return_value = mock_workflow
+
+        db_factory_mock = Mock()
+        db_factory_mock.get_database = AsyncMock()
+
+        input_task = Mock()
+        input_task.description = "Test task"
+        input_task.context = ""  # local seeding does len(context) — a bare Mock breaks it
+
+        with patch.dict(
+            sys.modules,
+            {"common.database.database_factory": Mock(DatabaseFactory=db_factory_mock)},
+        ):
+            with self.assertRaises(Exception):
+                await self.orchestration_manager.run_orchestration(
+                    user_id=self.test_user_id,
+                    session_id=self.test_session_id,
+                    input_task=input_task,
+                )
+
+        db_factory_mock.get_database.assert_not_awaited()
 
 
 class TestExtractResponseText(IsolatedAsyncioTestCase):
@@ -1142,6 +1317,7 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
         # Reset mocks — reset_mock() does NOT clear side_effect,
         # so we must do it explicitly to avoid cross-test pollution.
         orchestration_config.orchestrations.clear()
+        orchestration_config.agent_wrappers.clear()
         orchestration_config.get_current_orchestration.return_value = None
         connection_config.send_status_update_async.reset_mock()
         connection_config.send_status_update_async.side_effect = None
@@ -1151,6 +1327,7 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         self.orchestration_manager = OrchestrationManager()
         self.test_user_id = "test_user_123"
+        self.test_session_id = "test_session_456"
 
     async def test_workflow_output_with_list_of_chat_messages(self):
         """Test WorkflowOutputEvent with list of ChatMessage objects."""
@@ -1171,10 +1348,13 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test list output"
+        input_task.context = ""
 
         # Should process without raising an exception
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Should have sent status update for final result
@@ -1199,10 +1379,13 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test mixed list output"
+        input_task.context = ""
 
         # Should handle mixed list without error
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         connection_config.send_status_update_async.assert_called()
@@ -1223,9 +1406,12 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test object output"
+        input_task.context = ""
 
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         connection_config.send_status_update_async.assert_called()
@@ -1244,9 +1430,12 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test unknown type output"
+        input_task.context = ""
 
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         connection_config.send_status_update_async.assert_called()
@@ -1264,9 +1453,12 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Test empty list output"
+        input_task.context = ""
 
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Empty list should still result in a status update being sent
@@ -1287,7 +1479,7 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
         # Make the workflow raise the HITL cancellation exception
         async def _raise_cancel(*_a, **_kw):
             raise Exception("Plan execution cancelled by user")  # noqa: TRY002
-            yield  # noqa: unreachable – makes this an async generator  # type: ignore[misc]
+            yield  # noqa: unreachable – makes this an async generator
 
         mock_workflow.run = _raise_cancel
         mock_workflow.executors = {}
@@ -1296,17 +1488,23 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Requires approval"
+        input_task.context = ""
 
         # Should NOT raise
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Verify a cancellation message was sent
         connection_config.send_status_update_async.assert_called()
         last_call = connection_config.send_status_update_async.call_args
         payload = last_call[0][0] if last_call[0] else last_call[1].get("message", {})
-        self.assertEqual(payload["data"]["status"], "cancelled")
+        # Flat payload: send_status_update_async is the ONLY place that adds the
+        # {type, data} envelope. Senders used to pre-wrap, producing a double
+        # envelope on the wire ({type, data:{type, data:{...}}}).
+        self.assertEqual(payload["status"], "cancelled")
 
     async def test_run_orchestration_hitl_cancellation_send_failure(self):
         """Test HITL cancellation when the WebSocket send itself fails.
@@ -1318,7 +1516,7 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         async def _raise_cancel(*_a, **_kw):
             raise Exception("Plan execution cancelled by user")  # noqa: TRY002
-            yield  # type: ignore[misc]
+            yield
 
         mock_workflow.run = _raise_cancel
         mock_workflow.executors = {}
@@ -1330,10 +1528,13 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
 
         input_task = Mock()
         input_task.description = "Requires approval"
+        input_task.context = ""
 
         # Should still NOT raise despite send failure
         await self.orchestration_manager.run_orchestration(
-            user_id=self.test_user_id, input_task=input_task
+            user_id=self.test_user_id,
+            session_id=self.test_session_id,
+            input_task=input_task,
         )
 
         # Clean up side_effect so it doesn't leak to subsequent tests

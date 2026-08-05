@@ -1,5 +1,5 @@
 import logging
-from typing import Awaitable, Callable, Dict
+from typing import Awaitable, Callable, Dict, Optional
 
 from fastapi import Request
 from fastapi.encoders import jsonable_encoder
@@ -41,7 +41,7 @@ class HealthCheckMiddleware(BaseHTTPMiddleware):
         self,
         app,
         checks: Dict[str, Callable[..., Awaitable[HealthCheckResult]]],
-        password: str = None,
+        password: Optional[str] = None,
     ):
         super().__init__(app)
         self.checks = checks
@@ -52,7 +52,7 @@ class HealthCheckMiddleware(BaseHTTPMiddleware):
         results.AddDefault()
 
         for name, check in self.checks.items():
-            if not name or not check:
+            if not name or check is None:
                 continue
             try:
                 if not callable(check) or not hasattr(check, "__await__"):

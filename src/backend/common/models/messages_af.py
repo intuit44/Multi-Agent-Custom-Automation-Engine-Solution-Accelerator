@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-
 # ---------------------------------------------------------------------------
 # Enumerations
 # ---------------------------------------------------------------------------
@@ -225,7 +224,7 @@ class TeamConfiguration(BaseDataModel):
 
     team_id: str
     data_type: Literal[DataType.team_config] = DataType.team_config
-    session_id: str  # partition key
+    session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # partition key
     name: str
     status: str
     created: str
@@ -246,7 +245,7 @@ class PlanWithSteps(Plan):
     total_steps: int = 0
     planned: int = 0
     awaiting_feedback: int = 0
-    approved: int = 0
+    approved_steps: int = 0
     rejected: int = 0
     action_requested: int = 0
     completed: int = 0
@@ -269,7 +268,7 @@ class PlanWithSteps(Plan):
         self.total_steps = len(self.steps)
         self.planned = status_counts[StepStatus.planned]
         self.awaiting_feedback = status_counts[StepStatus.awaiting_feedback]
-        self.approved = status_counts[StepStatus.approved]
+        self.approved_steps = status_counts[StepStatus.approved]
         self.rejected = status_counts[StepStatus.rejected]
         self.action_requested = status_counts[StepStatus.action_requested]
         self.completed = status_counts[StepStatus.completed]
@@ -285,6 +284,10 @@ class InputTask(BaseModel):
 
     session_id: str
     description: str
+    # Optional grounding preamble (recovered session context). Seeded at the
+    # Plan boundary so the Magentic manager plans WITH prior context instead of
+    # from a bare task string. Empty when there is no prior context.
+    context: str = ""
 
 
 class UserLanguage(BaseModel):
@@ -315,6 +318,13 @@ class ChatMessageRequest(BaseModel):
     session_id: str = ""
     message: str
     model: Optional[str] = None  # Optional model selector
+    file_ids: list[str] = []  # Foundry file IDs attached by the user (code_interpreter)
+    # When set, message is in-plan: never create a new plan
+    plan_id: Optional[str] = None
+    # UI chat|plan selector. False = this message may NEVER create a plan (the
+    # run_plan capability is withheld from the router). Plan position in the UI
+    # does not use this flag — it calls /process_request explicitly instead.
+    allow_plan: bool = True
 
 
 class ChatMessageResponse(BaseModel):

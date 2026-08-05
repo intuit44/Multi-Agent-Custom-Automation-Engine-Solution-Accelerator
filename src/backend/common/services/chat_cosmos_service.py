@@ -55,7 +55,7 @@ class ChatCosmosService:
             return
 
         endpoint = config.COSMOSDB_ENDPOINT
-        credential = config.get_azure_credentials()
+        credential = config.get_azure_credential_async(config.AZURE_CLIENT_ID)
         db_name = config.COSMOSDB_DATABASE
 
         if not endpoint or not db_name:
@@ -120,6 +120,8 @@ class ChatCosmosService:
         }
 
         try:
+            if self._container is None:
+                return self._fallback_session(user_id, session_name)
             await self._container.upsert_item(doc)
             logger.info("Created chat session %s for user %s", session_id, user_id)
             return doc
@@ -137,6 +139,8 @@ class ChatCosmosService:
             return None
 
         try:
+            if self._container is None:
+                return None
             item = await self._container.read_item(
                 item=session_id,
                 partition_key=user_id,
@@ -158,6 +162,9 @@ class ChatCosmosService:
             return []
 
         try:
+            if self._container is None:
+                return []
+
             query = (
                 "SELECT c.id, c.user_id, c.session_name, c.message_count, "
                 "c.created_at, c.updated_at, c.last_message_at, c.is_active "
@@ -165,7 +172,7 @@ class ChatCosmosService:
                 "ORDER BY c.updated_at DESC "
                 "OFFSET 0 LIMIT @limit"
             )
-            params = [
+            params: List[Dict[str, object]] = [
                 {"name": "@user_id", "value": user_id},
                 {"name": "@limit", "value": limit},
             ]
@@ -183,27 +190,29 @@ class ChatCosmosService:
             logger.error("Error listing sessions for user %s: %s", user_id, e)
             return []
 
-    async def delete_session(
-        self,
-        session_id: str,
-        user_id: str,
-    ) -> bool:
-        """Delete a chat session."""
-        if not await self._ensure():
-            return False
+    # async def delete_session(
+    #     self,
+    #     session_id: str,
+    #     user_id: str,
+    # ) -> bool:
+    #     """Delete a chat session."""
+    #     if not await self._ensure():
+    #         return False
+    #     try:
+    #         if self._container is None:
+    #             return False
 
-        try:
-            await self._container.delete_item(
-                item=session_id,
-                partition_key=user_id,
-            )
-            logger.info("Deleted chat session %s", session_id)
-            return True
-        except exceptions.CosmosResourceNotFoundError:
-            return False
-        except Exception as e:
-            logger.error("Error deleting session %s: %s", session_id, e)
-            return False
+    #         await self._container.delete_item(
+    #             item=session_id,
+    #             partition_key=user_id,
+    #         )
+    #         logger.info("Deleted chat session %s", session_id)
+    #         return True
+    #     except exceptions.CosmosResourceNotFoundError:
+    #         return False
+    #     except Exception as e:
+    #         logger.error("Error deleting session %s: %s", session_id, e)
+    #         return False
 
     # ── Messages ─────────────────────────────────────────────────
 
@@ -220,6 +229,9 @@ class ChatCosmosService:
         Pattern: read → append → upsert (same as customer-chatbot).
         """
         if not await self._ensure():
+            return None
+
+        if self._container is None:
             return None
 
         try:
@@ -284,6 +296,7 @@ class ChatCosmosService:
 
             try:
                 import asyncio
+
                 from common.services.search_index_service import (
                     get_search_index_service,
                 )
@@ -300,18 +313,18 @@ class ChatCosmosService:
                     """Index with up to 3 attempts and exponential back-off.
 
                     Fire-and-forget: errors are logged but never raised to the
-                    caller so chat persistence is never blocked by search failures.
+                    caller so chat persistence is    blocked by search failures.
                     """
                     for attempt in range(3):
                         try:
                             await search_svc.index_chat_message(
-                                message_id=_msg_id,
+                                message_id=str(_msg_id),
                                 session_id=session_id,
                                 user_id=user_id,
                                 role=role,
                                 content=content,
                                 intent=_intent,
-                                timestamp=_timestamp,
+                                timestamp=str(_timestamp),
                                 session_name=_session_name,
                             )
                             return  # success
@@ -336,6 +349,74 @@ class ChatCosmosService:
         except Exception as e:
             logger.error("Error adding message to session %s: %s", session_id, e)
             return None
+
+    # ── Foundry conversation continuity ─────────────────────────
+
+    # async def clear_foundry_conversation_id(
+    #     self,
+    #     session_id: str,
+    #     user_id: str,
+    # ) -> None:
+    #     """Invalidate the persisted Foundry conversation_id.
+
+    #     Call this when the user re-authenticates (new OBO token) so the next
+    #     agent.invoke starts a fresh Foundry thread instead of trying to resume
+    #     a thread that is no longer accessible with the new credential.
+    #     """
+    #     if not await self._ensure() or self._container is None:
+    #         return
+    #     try:
+    #         session = await self.get_session(session_id, user_id)
+    #         if session and session.get("foundry_conversation_id"):
+    #             session["foundry_conversation_id"] = None
+    #             session["updated_at"] = _utc_now_iso()
+    #             await self._container.upsert_item(session)
+    #             logger.info(
+    #                 "Cleared foundry_conversation_id for session %s (re-auth)",
+    #                 session_id,
+    #             )
+    #     except Exception as e:
+    #         logger.warning(
+    #             "Could not clear foundry_conversation_id for session %s: %s",
+    #             session_id,
+    #             e,
+    #         )
+
+    async def get_foundry_conversation_id(
+        self,
+        session_id: str,
+        user_id: str,
+    ) -> Optional[str]:
+        """Return the Foundry conversation_id persisted for this session, if any."""
+        session = await self.get_session(session_id, user_id)
+        if session:
+            return session.get("foundry_conversation_id")
+        return None
+
+    async def set_foundry_conversation_id(
+        self,
+        session_id: str,
+        user_id: str,
+        conversation_id: str,
+    ) -> None:
+        """Persist the Foundry conversation_id so the next turn can resume the thread."""
+        if not await self._ensure() or self._container is None:
+            return
+        try:
+            session = await self.get_session(session_id, user_id)
+            if not session:
+                return
+            if session.get("foundry_conversation_id") == conversation_id:
+                return  # already up-to-date, skip write
+            session["foundry_conversation_id"] = conversation_id
+            session["updated_at"] = _utc_now_iso()
+            await self._container.upsert_item(session)
+        except Exception as e:
+            logger.warning(
+                "Could not persist foundry_conversation_id for session %s: %s",
+                session_id,
+                e,
+            )
 
     # ── Helpers ───────────────────────────────────────────────────
 

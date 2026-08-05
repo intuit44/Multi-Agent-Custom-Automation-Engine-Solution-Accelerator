@@ -6,7 +6,8 @@ Handles Azure OpenAI, MCP, and environment setup (agent_framework version).
 import asyncio
 import json
 import logging
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Dict, List, Optional
 
 from agent_framework import ChatOptions
 from agent_framework.azure import AzureOpenAIChatClient
@@ -48,8 +49,8 @@ class AzureConfig:
         )
         return AzureOpenAIChatClient(
             endpoint=self.endpoint,
-            model_deployment_name=model_name,
-            azure_ad_token_provider=self.ad_token_provider,  # function returning token string
+            deployment_name=model_name,
+            credential=self.ad_token_provider,  # function returning token string
         )
 
     def create_execution_settings(self) -> ChatOptions:
@@ -57,9 +58,9 @@ class AzureConfig:
         Create ChatOptions analogous to previous OpenAIChatPromptExecutionSettings.
         """
         return ChatOptions(
-            max_output_tokens=4000,
-            temperature=0.1,
-        )  # type: ignore[call-overload]
+            max_tokens=4000,
+            temperature=0.3,
+        )
 
 
 class MCPConfig:
@@ -88,6 +89,9 @@ class OrchestrationConfig:
     def __init__(self):
         # Previously Dict[str, MagenticOrchestration]; now generic workflow objects from MagenticBuilder.build()
         self.orchestrations: Dict[str, Any] = {}  # user_id -> workflow instance
+        self.agent_wrappers: Dict[
+            str, List[Any]
+        ] = {}  # user_id -> list of lifecycle-managed agent wrappers (for proper close)
         self.plans: Dict[str, MPlan] = {}  # plan_id -> plan details
         self.approvals: Dict[
             str, Optional[bool]
@@ -95,15 +99,43 @@ class OrchestrationConfig:
         self.sockets: Dict[str, WebSocket] = {}  # user_id -> WebSocket
         self.clarifications: Dict[
             str, Optional[str]
-        ] = {}  # m_plan_id -> clarification response (None pending)
-        self.max_rounds: int = 20  # Maximum replanning rounds
+        ] = {}  # request_id -> clarification response (None pending)
+        self.clarification_contexts: Dict[
+            str, Dict[str, str]
+        ] = {}  # request_id -> session/user context for routing answers
+        self.max_rounds: int = 3  # Maximum replanning rounds
 
         # Event-driven notification system for approvals and clarifications
         self._approval_events: Dict[str, asyncio.Event] = {}
         self._clarification_events: Dict[str, asyncio.Event] = {}
 
         # Default timeout (seconds) for waiting operations
-        self.default_timeout: float = 300.0
+        self.default_timeout: float = 1800.0
+
+        # Human-scale windows: approval and clarification block on a HUMAN
+        # reading and typing — 200s kills plans before anyone can answer
+        # (forensic: clarifications timed out silently at ~200s). Machine
+        # operations keep default_timeout.
+        self.approval_timeout: float = 1800.0
+        self.clarification_timeout: float = 1800.0
+
+        # Sessions with an orchestration run currently in flight (created /
+        # awaiting approval / executing). Makes resume_plan idempotent: a plan
+        # just created by process_request is not re-triggered into a duplicate run.
+        self.active_runs: set[str] = set()
+
+    def mark_run_active(self, session_id: str) -> None:
+        """Mark a session as having an orchestration run in flight."""
+        if session_id:
+            self.active_runs.add(session_id)
+
+    def clear_run_active(self, session_id: str) -> None:
+        """Clear the in-flight flag when a run finishes or fails."""
+        self.active_runs.discard(session_id)
+
+    def is_run_active(self, session_id: str) -> bool:
+        """True if an orchestration run is already in flight for this session."""
+        return bool(session_id) and session_id in self.active_runs
 
     def get_current_orchestration(self, user_id: str) -> Any:
         """Get existing orchestration workflow instance for user_id."""
@@ -131,7 +163,7 @@ class OrchestrationConfig:
 
         Args:
             plan_id: The plan ID to wait for
-            timeout: Timeout in seconds (defaults to default_timeout)
+            timeout: Timeout in seconds (defaults to approval_timeout)
 
         Returns:
             The approval decision (True/False)
@@ -142,7 +174,7 @@ class OrchestrationConfig:
         """
         logger.info(f"Waiting for approval: {plan_id}")
         if timeout is None:
-            timeout = self.default_timeout
+            timeout = self.approval_timeout
 
         if plan_id not in self.approvals:
             raise KeyError(f"Plan ID {plan_id} not found in approvals")
@@ -156,6 +188,9 @@ class OrchestrationConfig:
             self._approval_events[plan_id] = asyncio.Event()
 
         try:
+            # wait_for enforces the resolved timeout — a bare event.wait()
+            # blocks the orchestration BackgroundTask forever when no approval
+            # ever arrives (docstring and callers expect TimeoutError).
             await asyncio.wait_for(
                 self._approval_events[plan_id].wait(), timeout=timeout
             )
@@ -167,9 +202,9 @@ class OrchestrationConfig:
             )
             return result
         except asyncio.TimeoutError:
-            # Clean up on timeout
-            logger.warning(f"Approval timeout: {plan_id}")
-            self.cleanup_approval(plan_id)
+            logger.warning(
+                "Approval wait for %s timed out after %ss", plan_id, timeout
+            )
             raise
         except asyncio.CancelledError:
             logger.debug("Approval request %s was cancelled", plan_id)
@@ -181,13 +216,37 @@ class OrchestrationConfig:
             if plan_id in self.approvals and self.approvals[plan_id] is None:
                 self.cleanup_approval(plan_id)
 
-    def set_clarification_pending(self, request_id: str) -> None:
+    def set_clarification_pending(
+        self,
+        request_id: str,
+        session_id: str = "",
+        user_id: str = "",
+    ) -> None:
         """Mark clarification pending and create/reset its event."""
         self.clarifications[request_id] = None
+        self.clarification_contexts[request_id] = {
+            "session_id": session_id or "",
+            "user_id": user_id or "",
+        }
         if request_id not in self._clarification_events:
             self._clarification_events[request_id] = asyncio.Event()
         else:
             self._clarification_events[request_id].clear()
+
+    def get_pending_clarification_for_session(
+        self, session_id: str, user_id: str = ""
+    ) -> Optional[str]:
+        """Return the pending clarification request for this chat session."""
+        for request_id, answer in self.clarifications.items():
+            if answer is not None:
+                continue
+            context = self.clarification_contexts.get(request_id, {})
+            if context.get("session_id") != session_id:
+                continue
+            if user_id and context.get("user_id") not in ("", user_id):
+                continue
+            return request_id
+        return None
 
     def set_clarification_result(self, request_id: str, answer: str) -> None:
         """Set clarification answer and trigger event."""
@@ -200,7 +259,7 @@ class OrchestrationConfig:
     ) -> str:
         """Wait for clarification response with timeout."""
         if timeout is None:
-            timeout = self.default_timeout
+            timeout = self.clarification_timeout
 
         if request_id not in self.clarifications:
             raise KeyError(f"Request ID {request_id} not found in clarifications")
@@ -248,15 +307,42 @@ class OrchestrationConfig:
     def cleanup_clarification(self, request_id: str) -> None:
         """Remove clarification tracking data and event."""
         self.clarifications.pop(request_id, None)
+        self.clarification_contexts.pop(request_id, None)
         self._clarification_events.pop(request_id, None)
 
 
 class ConnectionConfig:
-    """Connection manager for WebSocket connections."""
+    """Connection manager for WebSocket connections.
+
+    Includes a short-lived pending buffer to handle the race condition where
+    orchestration emits status updates before the frontend WebSocket connects.
+    Messages are buffered per user_id and flushed on add_connection.
+    """
+
+    # Buffer config — kept conservative to avoid memory bloat
+    PENDING_TTL_SECONDS = 60  # drop messages older than this
+    PENDING_MAX_PER_USER = 100  # cap per-user buffer to prevent runaway
 
     def __init__(self):
         self.connections: Dict[str, WebSocket] = {}
         self.user_to_process: Dict[str, str] = {}
+        # Race-condition buffer: messages emitted while WS isn't connected yet.
+        # Schema: user_id -> list[(timestamp_float, message, message_type)]
+        self.pending_messages: Dict[str, list] = {}
+
+    def _prune_pending(self, user_id: str) -> None:
+        """Drop expired buffered messages for a single user (TTL-based)."""
+        bucket = self.pending_messages.get(user_id)
+        if not bucket:
+            return
+        now = time.time()
+        fresh = [
+            (ts, m, mt) for ts, m, mt in bucket if now - ts < self.PENDING_TTL_SECONDS
+        ]
+        if fresh:
+            self.pending_messages[user_id] = fresh
+        else:
+            self.pending_messages.pop(user_id, None)
 
     def add_connection(
         self, process_id: str, connection: WebSocket, user_id: Optional[str] = None
@@ -299,6 +385,21 @@ class ConnectionConfig:
                 process_id,
                 user_id,
             )
+
+            # Flush any pending messages buffered before WS connected
+            # (race-condition fix: orchestration emits before frontend connects)
+            self._prune_pending(user_id)
+            pending = self.pending_messages.pop(user_id, [])
+            if pending:
+                logger.info(
+                    "Flushing %d pending message(s) for user %s on WS connect",
+                    len(pending),
+                    user_id,
+                )
+                for _ts, msg, mtype in pending:
+                    asyncio.create_task(
+                        self.send_status_update_async(msg, user_id, mtype)
+                    )
         else:
             logger.info("WebSocket connection added for process: %s", process_id)
 
@@ -344,9 +445,17 @@ class ConnectionConfig:
 
         process_id = self.user_to_process.get(user_id)
         if not process_id:
-            logger.warning("No active WebSocket process found for user ID: %s", user_id)
+            # WS not connected yet — buffer instead of dropping.
+            # Will be flushed on next add_connection for this user_id.
+            self._prune_pending(user_id)
+            bucket = self.pending_messages.setdefault(user_id, [])
+            if len(bucket) >= self.PENDING_MAX_PER_USER:
+                bucket.pop(0)  # drop oldest, keep window size
+            bucket.append((time.time(), message, message_type))
             logger.debug(
-                "Available user mappings: %s", list(self.user_to_process.keys())
+                "Buffered WS message for user %s (no active WS yet, %d pending)",
+                user_id,
+                len(bucket),
             )
             return
 

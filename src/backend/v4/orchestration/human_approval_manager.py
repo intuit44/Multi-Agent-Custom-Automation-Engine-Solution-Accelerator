@@ -9,16 +9,16 @@ from typing import Any, Optional
 
 from agent_framework import AgentResponse, Message
 from agent_framework_orchestrations._magentic import (
-    MagenticContext,
-    StandardMagenticManager,
     ORCHESTRATOR_FINAL_ANSWER_PROMPT,
     ORCHESTRATOR_TASK_LEDGER_PLAN_PROMPT,
     ORCHESTRATOR_TASK_LEDGER_PLAN_UPDATE_PROMPT,
+    MagenticContext,
+    StandardMagenticManager,
 )
 
+import v4.models.messages as messages
 from v4.config.settings import connection_config, orchestration_config
 from v4.models.models import MPlan
-import v4.models.messages as messages
 from v4.orchestration.helper.plan_to_mplan_converter import PlanToMPlanConverter
 
 logger = logging.getLogger(__name__)
@@ -215,7 +215,9 @@ DO NOT EVER OFFER TO HELP FURTHER IN THE FINAL ANSWER! Just provide the final an
             )
             raise Exception("Plan execution cancelled by user")
 
-    async def replan(self, magentic_context: MagenticContext) -> Any:
+    async def replan(
+        self, magentic_context: MagenticContext, feedback: Optional[str] = None
+    ) -> Any:
         """
         Override to add websocket messages for replanning events.
         """
@@ -271,40 +273,49 @@ DO NOT EVER OFFER TO HELP FURTHER IN THE FINAL ANSWER! Just provide the final an
         # Delegate to base for normal progress ledger creation
         ledger = await super().create_progress_ledger(magentic_context)
 
+        # NOTE: there is deliberately NO ProxyAgent redirect here. A local
+        # "loop guard" used to veto ProxyAgent whenever business agents were
+        # uncalled — it does not exist upstream, and it suppressed the plan's
+        # own clarification steps (the manager then looped the same business
+        # agent instead of asking the user). Upstream arbitration is the
+        # prompt, not a runtime veto.
+        uncalled = self._get_uncalled_agents(magentic_context)
+
         # --- Premature satisfaction guard ---
         # If the LLM says the request is satisfied, verify that all planned
         # (non-proxy, non-manager) agents have actually responded before allowing
         # the workflow to terminate.  This addresses the bug where the orchestrator
         # marks satisfied=True after a single comprehensive agent response.
-        if ledger.is_request_satisfied.answer:
-            uncalled = self._get_uncalled_agents(magentic_context)
-            if uncalled:
-                next_agent = uncalled[0]
-                logger.info(
-                    "Progress ledger marked satisfied but %d agent(s) have not responded yet: %s. "
-                    "Overriding to continue with '%s'.",
-                    len(uncalled),
-                    uncalled,
-                    next_agent,
-                )
-                ledger.is_request_satisfied.answer = False
-                ledger.is_request_satisfied.reason = f"Not all agents have responded yet. Waiting for: {', '.join(uncalled)}"
-                ledger.is_progress_being_made.answer = True
-                ledger.is_progress_being_made.reason = (
-                    "Continuing to consult remaining agents"
-                )
-                ledger.next_speaker.answer = next_agent
-                ledger.next_speaker.reason = f"{next_agent} has not yet been consulted"
-                # Always override instruction with task-relevant prompt so that
-                # data agents (Azure AI Search, RAG) execute meaningful queries
-                # instead of receiving a stale finalization instruction.
-                task_text = getattr(
-                    magentic_context.task, "text", str(magentic_context.task)
-                )
-                ledger.instruction_or_question.answer = f"Using your available tools and data sources, provide your response for the following task: {task_text}"
-                ledger.instruction_or_question.reason = (
-                    f"Routing to {next_agent} who has not yet contributed"
-                )
+        if ledger.is_request_satisfied.answer and uncalled:
+            next_agent = uncalled[0]
+            logger.info(
+                "Progress ledger marked satisfied but %d agent(s) have not responded yet: %s. "
+                "Overriding to continue with '%s'.",
+                len(uncalled),
+                uncalled,
+                next_agent,
+            )
+            task_text = getattr(
+                magentic_context.task, "text", str(magentic_context.task)
+            )
+            ledger.is_request_satisfied.answer = False
+            ledger.is_request_satisfied.reason = f"Not all agents have responded yet. Waiting for: {', '.join(uncalled)}"
+            ledger.is_progress_being_made.answer = True
+            ledger.is_progress_being_made.reason = (
+                "Continuing to consult remaining agents"
+            )
+            ledger.next_speaker.answer = next_agent
+            ledger.next_speaker.reason = f"{next_agent} has not yet been consulted"
+            # Always override instruction with task-relevant prompt so that
+            # data agents (Azure AI Search, RAG) execute meaningful queries
+            # instead of receiving a stale finalization instruction.
+            ledger.instruction_or_question.answer = (
+                f"Using your available tools and data sources, provide your response "
+                f"for the following task: {task_text}"
+            )
+            ledger.instruction_or_question.reason = (
+                f"Routing to {next_agent} who has not yet contributed"
+            )
 
         return ledger
 
@@ -360,7 +371,7 @@ DO NOT EVER OFFER TO HELP FURTHER IN THE FINAL ANSWER! Just provide the final an
             timeout_message = messages.TimeoutNotification(
                 timeout_type="approval",
                 request_id=m_plan_id,
-                message=f"Plan approval request timed out after {orchestration_config.default_timeout} seconds. Please try again.",
+                message=f"Plan approval request timed out after {orchestration_config.approval_timeout} seconds. Please try again.",
                 timestamp=asyncio.get_event_loop().time(),
                 timeout_duration=orchestration_config.default_timeout,
             )

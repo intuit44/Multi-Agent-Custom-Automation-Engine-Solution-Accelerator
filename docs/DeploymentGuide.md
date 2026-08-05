@@ -26,17 +26,17 @@ Ensure you have access to an [Azure subscription](https://azure.microsoft.com/fr
 3. Click on your target subscription
 4. In the left menu, click **Access control (IAM)**
 5. Scroll down to see the table with your assigned roles - you should see:
-   - **Contributor** 
+   - **Contributor**
    - **User Access Administrator**
    - **Role Based Access Control Administrator** (or similar RBAC role)
 
 **For App Registration permissions:**
 1. Go to **Microsoft Entra ID** → **Manage** → **App registrations**
-2. Try clicking **New registration** 
+2. Try clicking **New registration**
 3. If you can access this page, you have the required permissions
 4. Cancel without creating an app registration
 
-📖 **Detailed Setup:** Follow [Azure Account Set Up](./AzureAccountSetUp.md) for complete configuration.
+📖 **Detailed Setup:** Follow [Azure Account Set Up](./DeploymentGuide.md#prerequisites) for complete configuration.
 
 ### 1.2 Check Service Availability & Quota
 
@@ -72,7 +72,7 @@ Ensure you have access to an [Azure subscription](https://azure.microsoft.com/fr
 
 > **Note:** When you run `azd up`, the deployment will automatically show you regions with available quota, so this pre-check is optional but helpful for planning purposes. You can customize these settings later in [Step 3.3: Advanced Configuration](#33-advanced-configuration-optional).
 
-📖 **Adjust Quota:** Follow [Azure AI Model Quota Settings](./AzureGPTQuotaSettings.md) if needed.
+📖 **Adjust Quota:** Follow [Azure AI Model Quota Settings](https://github.com/microsoft/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator/blob/main/docs/AzureGPTQuotaSettings.md) if needed.
 
 ## Step 2: Choose Your Deployment Environment
 
@@ -134,7 +134,7 @@ Select one of the following options to deploy the Multi Agent Custom Automation 
 5. When prompted in the VS Code Web terminal, choose one of the available options shown below:
 
    ![VS Code Initial Prompt](./images/vscodeweb_intialize.png)
-   
+
 6. **Authenticate with Azure** (VS Code Web requires device code authentication):
    ```shell
    az login --use-device-code
@@ -149,7 +149,7 @@ Select one of the following options to deploy the Multi Agent Custom Automation 
 <summary><b>Option D: Local Environment</b></summary>
 
 **Required Tools:**
-- [PowerShell 7.0+](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell) 
+- [PowerShell 7.0+](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell)
 - [Azure Developer CLI (azd) 1.18.0+](https://aka.ms/install-azd)
 - [Python 3.9+](https://www.python.org/downloads/)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
@@ -245,7 +245,7 @@ You can customize various deployment settings before running `azd up`, including
 
 By default, the **GPT model capacity** in deployment is set to **150k tokens**.
 
-To adjust quota settings, follow these [steps](./AzureGPTQuotaSettings.md).
+To adjust quota settings, follow these [steps](https://github.com/microsoft/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator/blob/main/docs/AzureGPTQuotaSettings.md).
 
 **⚠️ Warning:** Insufficient quota can cause deployment errors. Please ensure you have the recommended capacity or request additional capacity before deploying this solution.
 
@@ -354,7 +354,7 @@ After successful deployment:
 
 ### 5.2 Configure Authentication (Optional)
 
-1. Follow [App Authentication Configuration](./azure_app_service_auth_setup.md)
+1. Follow [App Authentication Configuration](https://github.com/microsoft/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator/blob/main/docs/azure_app_service_auth_setup.md)
 2. Wait up to 10 minutes for authentication changes to take effect
 
 ### 5.3 Verify Deployment
@@ -390,7 +390,7 @@ azd down
 
 ### Manual Cleanup (if needed)
 If deployment fails or you need to clean up manually:
-- Follow [Delete Resource Group Guide](./DeleteResourceGroup.md)
+- Follow [Delete Resource Group Guide](https://github.com/microsoft/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator/blob/main/docs/DeleteResourceGroup.md)
 
 ## Managing Multiple Environments
 
@@ -497,7 +497,7 @@ Now that your deployment is complete and tested, explore these resources to enha
 - [Sample Questions](./SampleQuestions.md) - Explore sample questions and workflows
 - [MCP Server Documentation](./mcp_server.md) - Learn about Model Context Protocol server integration
 - [Customizing Parameters](./CustomizingAzdParameters.md) - Advanced configuration options
-- [Azure Account Setup](./AzureAccountSetUp.md) - Detailed Azure subscription configuration
+- [Azure Account Setup](./DeploymentGuide.md#prerequisites) - Detailed Azure subscription configuration
 
 ## Need Help?
 

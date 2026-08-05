@@ -69,11 +69,26 @@ def format_success_response(
 
     Args:
         action: The action that was performed
-        details: Details about the action
-        summary: Optional custom summary
+        details: Details about the action (full payload, not just a 'result' key)
+        summary: Optional human-readable summary of what was done
 
     Returns:
-        Formatted success response - returns the actual result directly
+        JSON string with the full payload so LLM clients can reason over it.
     """
-    # Return the actual result directly, not fancy markdown
-    return details.get("result", f"Action completed successfully: {action}")
+    import json
+
+    # Backwards compatibility: tools that return a single 'result' string
+    # (e.g., show_tables, data_provider) keep their existing behavior.
+    if isinstance(details, dict) and set(details.keys()) == {"result"}:
+        return str(details["result"])
+
+    payload: Dict[str, Any] = {
+        "status": "success",
+        "action": action,
+    }
+    if summary:
+        payload["summary"] = summary
+    if details:
+        payload["details"] = details
+
+    return json.dumps(payload, indent=2, default=str, ensure_ascii=False)

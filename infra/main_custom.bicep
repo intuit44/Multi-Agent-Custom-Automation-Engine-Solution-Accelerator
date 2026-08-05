@@ -1175,7 +1175,7 @@ module containerAppEnvironment 'br/public:avm/res/app/managed-environment:0.11.2
 module containerRegistry 'br/public:avm/res/container-registry/registry:0.9.1' = {
   name: 'registryDeployment'
   params: {
-    name: 'cr${solutionSuffix}'
+    name: take('cr${solutionSuffix}00000', 50)
     acrAdminUserEnabled: false
     acrSku: 'Basic'
     azureADAuthenticationAsArmPolicyStatus: 'enabled'
@@ -1607,6 +1607,8 @@ param storageContainerNameRFPCompliance string = 'rfp-compliance-dataset'
 param storageContainerNameContractSummary string = 'contract-summary-dataset'
 param storageContainerNameContractRisk string = 'contract-risk-dataset'
 param storageContainerNameContractCompliance string = 'contract-compliance-dataset'
+param storageContainerNameHRKnowledge string = 'hr-knowledge-dataset'
+param storageContainerNameMarketingKnowledge string = 'marketing-knowledge-dataset'
 module avmStorageAccount 'br/public:avm/res/storage/storage-account:0.20.0' = {
   name: take('avm.res.storage.storage-account.${storageAccountName}', 64)
   params: {
@@ -1696,6 +1698,14 @@ module avmStorageAccount 'br/public:avm/res/storage/storage-account:0.20.0' = {
           name: storageContainerNameContractCompliance
           publicAccess: 'None'
         }
+        {
+          name: storageContainerNameHRKnowledge
+          publicAccess: 'None'
+        }
+        {
+          name: storageContainerNameMarketingKnowledge
+          publicAccess: 'None'
+        }
       ]
       deleteRetentionPolicyDays: 9
       deleteRetentionPolicyEnabled: true
@@ -1716,6 +1726,8 @@ var aiSearchIndexNameForRetailOrder = 'macae-retail-order-index'
 var aiSearchIndexNameForRFPSummary = 'macae-rfp-summary-index'
 var aiSearchIndexNameForRFPRisk = 'macae-rfp-risk-index'
 var aiSearchIndexNameForRFPCompliance = 'macae-rfp-compliance-index'
+var aiSearchIndexNameForHRKnowledge = 'macae-hr-knowledge-index'
+var aiSearchIndexNameForMarketingKnowledge = 'macae-marketing-knowledge-index'
 
 module searchService 'br/public:avm/res/search/search-service:0.11.1' = {
   name: take('avm.res.search.search-service.${solutionSuffix}', 64)
@@ -1752,6 +1764,11 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = {
       {
         principalId: aiFoundryAiProjectPrincipalId
         roleDefinitionIdOrName: 'Search Index Data Reader'
+        principalType: 'ServicePrincipal'
+      }
+      {
+        principalId: aiFoundryAiProjectPrincipalId
+        roleDefinitionIdOrName: 'Search Index Data Contributor'
         principalType: 'ServicePrincipal'
       }
       {
@@ -1886,7 +1903,7 @@ output AZURE_AI_AGENT_MODEL_DEPLOYMENT_NAME string = aiFoundryAiServicesModelDep
 // output AZURE_AI_AGENT_ENDPOINT string = aiFoundryAiProjectEndpoint
 output APP_ENV string = 'Prod'
 output AI_FOUNDRY_RESOURCE_ID string = !useExistingAiFoundryAiProject
-  ? aiFoundryAiServices.outputs.resourceId
+  ? aiFoundryAiServices!.outputs.resourceId
   : existingAiFoundryAiProjectResourceId
 output COSMOSDB_ACCOUNT_NAME string = cosmosDbResourceName
 output AZURE_SEARCH_ENDPOINT string = searchService.outputs.endpoint
@@ -1914,6 +1931,8 @@ output AZURE_STORAGE_CONTAINER_NAME_RFP_COMPLIANCE string = storageContainerName
 output AZURE_STORAGE_CONTAINER_NAME_CONTRACT_SUMMARY string = storageContainerNameContractSummary
 output AZURE_STORAGE_CONTAINER_NAME_CONTRACT_RISK string = storageContainerNameContractRisk
 output AZURE_STORAGE_CONTAINER_NAME_CONTRACT_COMPLIANCE string = storageContainerNameContractCompliance
+output AZURE_STORAGE_CONTAINER_NAME_HR_KNOWLEDGE string = storageContainerNameHRKnowledge
+output AZURE_STORAGE_CONTAINER_NAME_MARKETING_KNOWLEDGE string = storageContainerNameMarketingKnowledge
 output AZURE_AI_SEARCH_INDEX_NAME_RETAIL_CUSTOMER string = aiSearchIndexNameForRetailCustomer
 output AZURE_AI_SEARCH_INDEX_NAME_RETAIL_ORDER string = aiSearchIndexNameForRetailOrder
 output AZURE_AI_SEARCH_INDEX_NAME_RFP_SUMMARY string = aiSearchIndexNameForRFPSummary
@@ -1922,6 +1941,9 @@ output AZURE_AI_SEARCH_INDEX_NAME_RFP_COMPLIANCE string = aiSearchIndexNameForRF
 output AZURE_AI_SEARCH_INDEX_NAME_CONTRACT_SUMMARY string = aiSearchIndexNameForContractSummary
 output AZURE_AI_SEARCH_INDEX_NAME_CONTRACT_RISK string = aiSearchIndexNameForContractRisk
 output AZURE_AI_SEARCH_INDEX_NAME_CONTRACT_COMPLIANCE string = aiSearchIndexNameForContractCompliance
+output AZURE_AI_SEARCH_INDEX_NAME_HR_KNOWLEDGE string = aiSearchIndexNameForHRKnowledge
+output AZURE_AI_SEARCH_INDEX_NAME_MARKETING_KNOWLEDGE string = aiSearchIndexNameForMarketingKnowledge
+
 
 // Container Registry Outputs
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = containerRegistry.outputs.loginServer

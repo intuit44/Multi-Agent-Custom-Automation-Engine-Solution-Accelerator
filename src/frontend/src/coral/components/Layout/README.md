@@ -31,9 +31,9 @@ You can customize it with:
 Example with styling:
 
 ```jsx
-<CoralShellColumn 
-  style={{ 
-    maxWidth: '1400px', 
+<CoralShellColumn
+  style={{
+    maxWidth: '1400px',
     margin: '0 auto',
     minHeight: '100vh'
   }}
@@ -58,11 +58,11 @@ The `CoralShellRow` component creates a horizontal row layout, typically used to
 Customization options:
 
 ```jsx
-<CoralShellRow 
-  style={{ 
+<CoralShellRow
+  style={{
     flex: 1,
-    gap: '16px', 
-    padding: '8px' 
+    gap: '16px',
+    padding: '8px'
   }}
   className="main-content-row"
 >
@@ -82,7 +82,7 @@ The typical arrangement of components:
       <PanelRightToggles />
     </HeaderTools>
   </Header>
-  
+
   {/* Main Section */}
   <CoralShellRow>
     {/* Left Navigation */}
@@ -90,13 +90,13 @@ The typical arrangement of components:
       <PanelLeftToolbar />
       {/* Panel content */}
     </PanelLeft>
-    
+
     {/* Center Content */}
     <Content>
       <ContentToolbar />
       {/* Main application content */}
     </Content>
-    
+
     {/* Right Panels */}
     <PanelRightFirst />
     <PanelRightSecond />
@@ -121,7 +121,7 @@ Example of responsive customization:
   .panel-left {
     display: none;
   }
-  
+
   .content-area {
     padding: 8px;
   }
@@ -154,4 +154,4 @@ This component primarily acts as a container and accepts standard React props li
 2. **Flex Properties**: Use flex properties for fine-tuning the layout
 3. **Accessibility**: Ensure your layout is accessible by maintaining proper landmark regions
 4. **Consistent Spacing**: Use consistent spacing between layout elements
-5. **Responsive Design**: Test your layout on various screen sizes 
+5. **Responsive Design**: Test your layout on various screen sizes

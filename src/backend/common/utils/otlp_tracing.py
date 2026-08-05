@@ -1,3 +1,5 @@
+from typing import Optional
+
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
@@ -5,7 +7,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 
-def configure_oltp_tracing(endpoint: str = None) -> trace.TracerProvider:
+def configure_oltp_tracing(endpoint: Optional[str] = None) -> trace.TracerProvider:
     # Configure Tracing
     tracer_provider = TracerProvider(resource=Resource({"service.name": "macwe"}))
     processor = BatchSpanProcessor(OTLPSpanExporter())

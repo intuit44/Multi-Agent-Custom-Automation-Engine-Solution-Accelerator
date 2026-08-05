@@ -35,6 +35,34 @@ async def lifespan(app: FastAPI):
         await agent_registry.cleanup_all_agents()
         logger.info("✅ Agent cleanup completed successfully")
 
+        # Close process-scoped shared async resources (Managed Identity credential
+        # and AIProjectClient). These are borrowed by agents but owned by the
+        # process, so they are closed exactly once here — never on agent close().
+        # Close the generated-file blob transport BEFORE the shared credential
+        # it borrows is closed below.
+        try:
+            from v4.common.services.generated_file_store import GeneratedFileStore
+
+            await GeneratedFileStore.aclose_instance()
+        except Exception as gfs_e:
+            logger.warning(f"GeneratedFileStore cleanup warning (non-fatal): {gfs_e}")
+
+        try:
+            await config.aclose_shared_resources()
+            logger.info("✅ Shared async resources closed")
+        except Exception as cfg_e:
+            logger.warning(f"Shared resource cleanup warning (non-fatal): {cfg_e}")
+
+        # Clean up global MCP resource service if it exists
+        try:
+            from v4.common.services.mcp_resource_service import _mcp_resource_service
+
+            if _mcp_resource_service and hasattr(_mcp_resource_service, "close"):
+                await _mcp_resource_service.close()
+                logger.info("✅ MCP Resource Service cleanup completed")
+        except Exception as mcp_e:
+            logger.warning(f"MCP cleanup warning (non-fatal): {mcp_e}")
+
     except ImportError as ie:
         logger.error(f"❌ Could not import agent_registry: {ie}")
     except Exception as e:
@@ -82,8 +110,10 @@ if config.APPLICATIONINSIGHTS_CONNECTION_STRING:
         enable_live_metrics=True,
     )
 
-    # Instrument FastAPI app — exclude WebSocket URLs to reduce telemetry noise
-    FastAPIInstrumentor.instrument_app(app, excluded_urls="socket,ws")
+    # Instrument FastAPI app
+    FastAPIInstrumentor.instrument_app(
+        app,
+    )
     logging.info(
         "Application Insights configured with live metrics and WebSocket filtering"
     )

@@ -32,28 +32,59 @@ class IntentResult(BaseModel):
     reasoning: str
 
 
-_SYSTEM_PROMPT = """You are an intent classifier for a multi-agent automation system.
+_SYSTEM_PROMPT = """Eres el clasificador de intenciones de una plataforma de \
+automatización multi-agente. Tu única responsabilidad es decidir si el request \
+del usuario debe entrar al flujo formal de PLAN de la aplicación (carril TASK), \
+o si puede ser resuelto por un único agente de forma directa (carriles \
+CONVERSATIONAL o MCP_QUERY).
 
-The system has three lanes:
-1. task — Internal business workflows that require EXECUTING ACTIONS across multiple departments (onboard employee, generate press release, configure laptop, set up Office 365, process a return, etc.). These are requests where the user wants something DONE, not just answered.
-2. mcp_query — Anything involving external services, MCP tools/servers, filesystem operations, directory browsing, connecting to servers, asking about capabilities/tools, or any action on a third-party platform (GitHub, Slack, YouTube, Google Drive, etc.) handled by the MCP Inspector agent.
-3. conversational — Questions, inquiries, analysis requests, summaries, or any request that can be ANSWERED with information. This includes asking about contracts, risks, customer data, past interactions, comparisons, recommendations, status checks, and general knowledge questions. Also greetings and farewells.
+Un agente individual es capaz de hacer prácticamente cualquier cosa por sí solo: \
+responder preguntas, razonar, analizar, resumir, redactar, traducir, comparar, \
+recomendar, escribir y ejecutar código, crear archivos, leer archivos, modificar \
+archivos, descargar contenido, crear carpetas, ejecutar comandos de terminal, \
+llamar APIs, interactuar con bases de datos, generar reportes, hacer cálculos, \
+procesar datos, transformar formatos, etc. Todo esto NO requiere un Plan \
+multi-agente.
 
-KEY DISTINCTION: If the user is ASKING about something (even complex analysis), it is conversational. If the user wants something EXECUTED/DONE (create account, onboard person, send email, configure system), it is task.
+Clasifica el mensaje del usuario en EXACTAMENTE UNO de estos tres carriles.
 
-CRITICAL — Session continuity rule:
-When PREVIOUS_INTENT is provided it tells you which lane is currently active.
-Short replies such as confirmations, denials, follow-ups, or clarifications
-(in any language) are CONTINUATIONS of the active lane, NOT new conversations.
-Examples: "Si", "Yes", "Ok", "Hazlo", "Dale", "No", "Cancel", "Go ahead",
-"Exactly", "That one", "Please", "Do it", "Why?", "How?", "Show me", etc.
-— all of these STAY in the PREVIOUS_INTENT lane.
+CONVERSATIONAL — El request puede ser atendido por un único agente. Incluye: \
+preguntas, explicaciones, análisis, resúmenes, recomendaciones, redacción de \
+documentos, generación de código, ejecución de scripts, manipulación de \
+archivos, descarga de recursos, transformación de datos, consultas a sistemas, \
+generación de reportes, o cualquier tarea —por compleja que sea— que un solo \
+agente con acceso a herramientas pueda completar de principio a fin sin necesidad \
+de delegar partes del trabajo a agentes especializados distintos.
 
-Only classify as a DIFFERENT lane when the user clearly introduces an
-unrelated topic (e.g. switching from filesystem operations to asking about
-HR onboarding).
+TASK — El usuario está pidiendo de forma explícita el flujo formal de PLAN de la \
+aplicación, o el request genuinamente requiere que múltiples agentes \
+especializados colaboren porque el trabajo abarca dominios de responsabilidad \
+claramente separados que deben ejecutarse de forma coordinada. En esta \
+aplicación, una intención explícita de planificación formal significa abrir el \
+flujo de planificación/aprobación, aunque un agente individual pudiera escribir \
+una recomendación informal.
 
-Respond with ONLY one word: task, conversational, or mcp_query."""
+MCP_QUERY — El usuario hace referencia directa al subsistema MCP Inspector: \
+listar servidores MCP, conectar/desconectar servidores, descubrir capacidades de \
+herramientas MCP, invocar herramientas en servidores MCP externos, operaciones \
+de GitHub MCP, o cualquier mención explícita de conceptos MCP/inspector/ \
+servidor/capacidad como tema principal del mensaje.
+
+Regla de oro para TASK: si el usuario pidió explícitamente un plan de la \
+aplicación, es TASK. Si no pidió plan explícito, solo es TASK cuando el diseño \
+natural de la solución exige un orquestador que coordine agentes especializados \
+distintos sobre el mismo objetivo compuesto.
+
+Heurística de decisión, en orden:
+1. ¿El mensaje hace referencia explícita a MCP, inspector, servidores o \
+capacidades MCP como tema principal? → MCP_QUERY.
+2. ¿El usuario pidió explícitamente crear/preparar/ejecutar un plan? → TASK.
+3. ¿El request REQUIERE NECESARIAMENTE la colaboración de múltiples agentes \
+especializados de dominios distintos y no podría ser resuelto correctamente por \
+un único agente? → TASK.
+4. En cualquier otro caso → CONVERSATIONAL.
+
+Responde con EXACTAMENTE una palabra: task, o mcp_query."""
 
 
 class IntentRouter:
@@ -68,6 +99,7 @@ class IntentRouter:
     async def classify_async(
         message: str,
         previous_intent: Optional[str] = None,
+        agent_response: Optional[str] = None,
     ) -> IntentResult:
         """Classify using LLM as the sole decision maker.
 
@@ -76,6 +108,11 @@ class IntentRouter:
             previous_intent: The intent of the last assistant message in this
                 session.  Passed as structured context so the LLM can
                 maintain session lane continuity.
+            agent_response: The response already produced by ChatMCPAgent
+                (which queried the KB).  When provided, the classifier sees
+                the grounded context — full history, customer data, contracts,
+                etc. — and can decide correctly whether the request warrants
+                a multi-agent plan.
         """
         if not message or not message.strip():
             return IntentResult(
@@ -97,40 +134,47 @@ class IntentRouter:
                 credential=DefaultAzureCredential(),
             )
 
-            # Build the user payload with session context
+            # Build the user payload with agent context + session continuity
             user_text = message.strip()
-            if previous_intent:
+            if agent_response:
                 user_text = (
-                    f"PREVIOUS_INTENT: {previous_intent}\nUSER_MESSAGE: {user_text}"
+                    f"AGENT_RESPONSE (from KB-backed ChatMCPAgent):\n{agent_response.strip()}\n\n"
+                    f"USER_MESSAGE: {user_text}"
                 )
+            if previous_intent:
+                user_text = f"PREVIOUS_INTENT: {previous_intent}\n{user_text}"
 
             messages = [
                 Message(role="system", text=_SYSTEM_PROMPT),
                 Message(role="user", text=user_text),
             ]
-            options = ChatOptions(max_tokens=5, temperature=0.0)
+            options = ChatOptions(max_tokens=20, temperature=0.3)
 
             response = await client.get_response(messages, options=options)
-            raw = (response.text or "").strip().lower()
+            raw = (response.text or "").strip().lower().rstrip(".")
 
-            if "mcp" in raw:
+            intent_map = {
+                "mcp_query": Intent.MCP_QUERY,
+                "task": Intent.TASK,
+                "conversational": Intent.CONVERSATIONAL,
+            }
+
+            # Exact match first
+            if raw in intent_map:
                 return IntentResult(
-                    intent=Intent.MCP_QUERY,
+                    intent=intent_map[raw],
                     confidence=0.95,
-                    reasoning=f"LLM: mcp_query (raw={raw})",
+                    reasoning=f"LLM exact: {raw}",
                 )
-            if "conversational" in raw:
-                return IntentResult(
-                    intent=Intent.CONVERSATIONAL,
-                    confidence=0.95,
-                    reasoning=f"LLM: conversational (raw={raw})",
-                )
-            if "task" in raw:
-                return IntentResult(
-                    intent=Intent.TASK,
-                    confidence=0.95,
-                    reasoning=f"LLM: task (raw={raw})",
-                )
+
+            # Partial match as fallback
+            for key, intent in intent_map.items():
+                if key in raw:
+                    return IntentResult(
+                        intent=intent,
+                        confidence=0.85,
+                        reasoning=f"LLM partial: {raw}",
+                    )
 
             # LLM returned unexpected output — use previous_intent if available
             logger.warning(

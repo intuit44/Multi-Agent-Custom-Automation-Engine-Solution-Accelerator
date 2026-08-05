@@ -10,14 +10,15 @@ from pydantic import BaseModel
 from common.models.messages_af import AgentMessageType
 from v4.models.models import MPlan, PlanStatus
 
-
 # ---------------------------------------------------------------------------
 # Dataclass message payloads
 # ---------------------------------------------------------------------------
 
+
 @dataclass(slots=True)
 class AgentMessage:
     """Message from the backend to the frontend via WebSocket."""
+
     agent_name: str
     timestamp: str
     content: str
@@ -29,18 +30,21 @@ class AgentMessage:
 @dataclass(slots=True)
 class AgentStreamStart:
     """Start of a streaming message."""
+
     agent_name: str
 
 
 @dataclass(slots=True)
 class AgentStreamEnd:
     """End of a streaming message."""
+
     agent_name: str
 
 
 @dataclass(slots=True)
 class AgentMessageStreaming:
     """Streaming chunk from an agent."""
+
     agent_name: str
     content: str
     is_final: bool = False
@@ -52,6 +56,7 @@ class AgentMessageStreaming:
 @dataclass(slots=True)
 class AgentToolMessage:
     """Message representing that an agent produced one or more tool calls."""
+
     agent_name: str
     tool_calls: List["AgentToolCall"] = field(default_factory=list)
 
@@ -62,6 +67,7 @@ class AgentToolMessage:
 @dataclass(slots=True)
 class AgentToolCall:
     """A single tool invocation."""
+
     tool_name: str
     arguments: Dict[str, Any]
 
@@ -72,6 +78,7 @@ class AgentToolCall:
 @dataclass(slots=True)
 class PlanApprovalRequest:
     """Request for plan approval from the frontend."""
+
     plan: MPlan
     status: PlanStatus
     context: dict | None = None
@@ -80,6 +87,7 @@ class PlanApprovalRequest:
 @dataclass(slots=True)
 class PlanApprovalResponse:
     """Response for plan approval from the frontend."""
+
     m_plan_id: str
     approved: bool
     feedback: str | None = None
@@ -89,6 +97,7 @@ class PlanApprovalResponse:
 @dataclass(slots=True)
 class ReplanApprovalRequest:
     """Request for replan approval from the frontend."""
+
     new_plan: MPlan
     reason: str
     context: dict | None = None
@@ -97,6 +106,7 @@ class ReplanApprovalRequest:
 @dataclass(slots=True)
 class ReplanApprovalResponse:
     """Response for replan approval from the frontend."""
+
     plan_id: str
     approved: bool
     feedback: str | None = None
@@ -105,6 +115,7 @@ class ReplanApprovalResponse:
 @dataclass(slots=True)
 class UserClarificationRequest:
     """Request for user clarification from the frontend."""
+
     question: str
     request_id: str
 
@@ -112,6 +123,7 @@ class UserClarificationRequest:
 @dataclass(slots=True)
 class UserClarificationResponse:
     """Response for user clarification from the frontend."""
+
     request_id: str
     answer: str = ""
     plan_id: str = ""
@@ -121,6 +133,7 @@ class UserClarificationResponse:
 @dataclass(slots=True)
 class FinalResultMessage:
     """Final result message from the backend to the frontend."""
+
     content: str
     status: str = "completed"
     timestamp: Optional[float] = None
@@ -139,6 +152,7 @@ class FinalResultMessage:
 
 class ApprovalRequest(BaseModel):
     """Message sent to HumanAgent to request approval for a step."""
+
     step_id: str
     plan_id: str
     session_id: str
@@ -154,6 +168,7 @@ class ApprovalRequest(BaseModel):
 @dataclass(slots=True)
 class AgentMessageResponse:
     """Response message representing an agent's message (stream or final)."""
+
     plan_id: str
     agent: str
     content: str
@@ -166,11 +181,12 @@ class AgentMessageResponse:
 @dataclass(slots=True)
 class TimeoutNotification:
     """Notification about a timeout (approval or clarification)."""
-    timeout_type: str          # "approval" or "clarification"
-    request_id: str            # plan_id or request_id
-    message: str               # description
-    timestamp: float           # epoch time
-    timeout_duration: float    # seconds waited
+
+    timeout_type: str  # "approval" or "clarification"
+    request_id: str  # plan_id or request_id
+    message: str  # description
+    timestamp: float  # epoch time
+    timeout_duration: float  # seconds waited
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -178,12 +194,13 @@ class TimeoutNotification:
             "request_id": self.request_id,
             "message": self.message,
             "timestamp": self.timestamp,
-            "timeout_duration": self.timeout_duration
+            "timeout_duration": self.timeout_duration,
         }
 
 
 class WebsocketMessageType(str, Enum):
     """Types of WebSocket messages."""
+
     SYSTEM_MESSAGE = "system_message"
     AGENT_MESSAGE = "agent_message"
     AGENT_STREAM_START = "agent_stream_start"

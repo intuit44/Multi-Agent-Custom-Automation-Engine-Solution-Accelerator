@@ -228,7 +228,7 @@ class BIABPage(BasePage):
         try:
             self.page.wait_for_url("**/plan/**", timeout=60000)
             logger.info("✓ Redirected to plan page: %s", self.page.url)
-        except Exception as e:
+        except Exception:
             actual_url = self.page.url
             logger.error("❌ Expected /plan/ redirect but URL is: %s", actual_url)
             if "/chat/" in actual_url:

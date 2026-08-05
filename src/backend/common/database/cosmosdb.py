@@ -2,11 +2,12 @@
 
 import datetime
 import logging
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, ClassVar, Dict, List, Optional, Type, TypeVar
+
+from azure.cosmos.aio import ContainerProxy, CosmosClient
+from azure.cosmos.aio._database import DatabaseProxy
 
 import v4.models.messages as messages
-from azure.cosmos.aio import CosmosClient
-from azure.cosmos.aio._database import DatabaseProxy
 
 from ..models.messages_af import (
     AgentMessage,
@@ -21,11 +22,13 @@ from ..models.messages_af import (
 )
 from .database_base import DatabaseBase
 
+_T = TypeVar("_T", bound="BaseDataModel")
+
 
 class CosmosDBClient(DatabaseBase):
     """CosmosDB implementation of the database interface."""
 
-    MODEL_CLASS_MAPPING = {
+    MODEL_CLASS_MAPPING: ClassVar[Dict[str, Type["BaseDataModel"]]] = {
         DataType.plan: Plan,
         DataType.step: Step,
         DataType.agent_message: AgentMessage,
@@ -36,7 +39,7 @@ class CosmosDBClient(DatabaseBase):
     def __init__(
         self,
         endpoint: str,
-        credential: any,
+        credential: Any,
         database_name: str,
         container_name: str,
         session_id: str = "",
@@ -52,9 +55,9 @@ class CosmosDBClient(DatabaseBase):
         self.tenant_id = tenant_id
 
         self.logger = logging.getLogger(__name__)
-        self.client = None
-        self.database = None
-        self.container = None
+        self.client: Optional[CosmosClient] = None
+        self.database: Optional[DatabaseProxy] = None
+        self.container: Optional[ContainerProxy] = None
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -86,7 +89,7 @@ class CosmosDBClient(DatabaseBase):
             return database.get_container_client(container_name)
 
         except Exception as e:
-            self.logger.error("Failed to Get cosmosdb container", error=str(e))
+            self.logger.error("Failed to Get cosmosdb container: %s", str(e))
             raise
 
     async def close(self) -> None:
@@ -99,6 +102,7 @@ class CosmosDBClient(DatabaseBase):
     async def add_item(self, item: BaseDataModel) -> None:
         """Add an item to CosmosDB."""
         await self._ensure_initialized()
+        assert self.container is not None
 
         try:
             # Convert to dictionary and handle datetime serialization
@@ -116,6 +120,7 @@ class CosmosDBClient(DatabaseBase):
     async def update_item(self, item: BaseDataModel) -> None:
         """Update an item in CosmosDB."""
         await self._ensure_initialized()
+        assert self.container is not None
 
         try:
             # Convert to dictionary and handle datetime serialization
@@ -129,10 +134,11 @@ class CosmosDBClient(DatabaseBase):
             raise
 
     async def get_item_by_id(
-        self, item_id: str, partition_key: str, model_class: Type[BaseDataModel]
-    ) -> Optional[BaseDataModel]:
+        self, item_id: str, partition_key: str, model_class: Type[_T]
+    ) -> Optional[_T]:
         """Retrieve an item by its ID and partition key."""
         await self._ensure_initialized()
+        assert self.container is not None
 
         try:
             item = await self.container.read_item(
@@ -147,10 +153,11 @@ class CosmosDBClient(DatabaseBase):
         self,
         query: str,
         parameters: List[Dict[str, Any]],
-        model_class: Type[BaseDataModel],
-    ) -> List[BaseDataModel]:
+        model_class: Type[_T],
+    ) -> List[_T]:
         """Query items from CosmosDB and return a list of model instances."""
         await self._ensure_initialized()
+        assert self.container is not None
 
         try:
             items = self.container.query_items(query=query, parameters=parameters)
@@ -172,6 +179,7 @@ class CosmosDBClient(DatabaseBase):
     async def delete_item(self, item_id: str, partition_key: str) -> None:
         """Delete an item from CosmosDB."""
         await self._ensure_initialized()
+        assert self.container is not None
 
         try:
             await self.container.delete_item(item=item_id, partition_key=partition_key)
@@ -354,11 +362,12 @@ class CosmosDBClient(DatabaseBase):
     async def get_all_items(self) -> List[Dict[str, Any]]:
         """Retrieve all items as dictionaries."""
         query = "SELECT * FROM c WHERE c.user_id=@user_id"
-        parameters = [
+        parameters: List[Dict[str, object]] = [
             {"name": "@user_id", "value": self.user_id},
         ]
 
         await self._ensure_initialized()
+        assert self.container is not None
         items = self.container.query_items(query=query, parameters=parameters)
         results = []
         async for item in items:
@@ -406,9 +415,11 @@ class CosmosDBClient(DatabaseBase):
 
     async def delete_current_team(self, user_id: str) -> bool:
         """Delete the current team for a user."""
+        await self._ensure_initialized()
+        assert self.container is not None
         query = "SELECT c.id, c.session_id FROM c WHERE c.user_id=@user_id AND c.data_type=@data_type"
 
-        params = [
+        params: List[Dict[str, object]] = [
             {"name": "@user_id", "value": user_id},
             {"name": "@data_type", "value": DataType.user_current_team},
         ]
@@ -439,9 +450,11 @@ class CosmosDBClient(DatabaseBase):
 
     async def delete_plan_by_plan_id(self, plan_id: str) -> bool:
         """Delete a plan by its ID."""
+        await self._ensure_initialized()
+        assert self.container is not None
         query = "SELECT c.id, c.session_id FROM c WHERE c.id=@plan_id "
 
-        params = [
+        params: List[Dict[str, object]] = [
             {"name": "@plan_id", "value": plan_id},
         ]
         items = self.container.query_items(query=query, parameters=params)
@@ -460,22 +473,32 @@ class CosmosDBClient(DatabaseBase):
         return True
 
     async def add_mplan(self, mplan: messages.MPlan) -> None:
-        """Add a team configuration to the database."""
-        await self.add_item(mplan)
+        """Add an mplan to the database directly (MPlan is not a BaseDataModel)."""
+        await self._ensure_initialized()
+        assert self.container is not None
+        document = mplan.model_dump()
+        await self.container.create_item(body=document)
 
     async def update_mplan(self, mplan: messages.MPlan) -> None:
-        """Update a team configuration in the database."""
-        await self.update_item(mplan)
+        """Update an mplan in the database directly (MPlan is not a BaseDataModel)."""
+        await self._ensure_initialized()
+        assert self.container is not None
+        document = mplan.model_dump()
+        await self.container.upsert_item(body=document)
 
     async def get_mplan(self, plan_id: str) -> Optional[messages.MPlan]:
         """Retrieve a mplan configuration by mplan_id."""
+        await self._ensure_initialized()
+        assert self.container is not None
         query = "SELECT * FROM c WHERE c.plan_id=@plan_id AND c.data_type=@data_type"
-        parameters = [
+        parameters: List[Dict[str, object]] = [
             {"name": "@plan_id", "value": plan_id},
             {"name": "@data_type", "value": DataType.m_plan},
         ]
-        results = await self.query_items(query, parameters, messages.MPlan)
-        return results[0] if results else None
+        items_iter = self.container.query_items(query=query, parameters=parameters)
+        async for raw in items_iter:
+            return messages.MPlan.model_validate(raw)
+        return None
 
     async def add_agent_message(self, message: AgentMessageData) -> None:
         """Add an agent message to the database."""
@@ -502,9 +525,11 @@ class CosmosDBClient(DatabaseBase):
 
     async def delete_team_agent(self, team_id: str, agent_name: str) -> None:
         """Delete the current team for a user."""
+        await self._ensure_initialized()
+        assert self.container is not None
         query = "SELECT c.id, c.session_id FROM c WHERE c.team_id=@team_id AND c.data_type=@data_type AND c.agent_name=@agent_name"
 
-        params = [
+        params: List[Dict[str, object]] = [
             {"name": "@team_id", "value": team_id},
             {"name": "@agent_name", "value": agent_name},
             {"name": "@data_type", "value": DataType.current_team_agent},
@@ -521,8 +546,6 @@ class CosmosDBClient(DatabaseBase):
                     self.logger.warning(
                         "Failed deleting current team doc %s: %s", doc.get("id"), e
                     )
-
-        return True
 
     async def get_team_agent(
         self, team_id: str, agent_name: str

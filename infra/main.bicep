@@ -406,10 +406,10 @@ module userAssignedIdentity 'br/public:avm/res/managed-identity/user-assigned-id
 // WAF best practices for virtual networks: https://learn.microsoft.com/en-us/azure/well-architected/service-guides/virtual-network
 // WAF recommendations for networking and connectivity: https://learn.microsoft.com/en-us/azure/well-architected/security/networking
 var virtualNetworkResourceName = 'vnet-${solutionSuffix}'
-module virtualNetwork 'modules/virtualNetwork.bicep' = if (enablePrivateNetworking) {
+module virtualNetwork 'modules/virtualnetwork.bicep' = if (enablePrivateNetworking) {
   name: take('module.virtualNetwork.${solutionSuffix}', 64)
   params: {
-    name: 'vnet-${solutionSuffix}'
+    name: virtualNetworkResourceName
     location: location
     tags: tags
     enableTelemetry: enableTelemetry
@@ -1563,7 +1563,7 @@ module webSite 'modules/web-sites.bicep' = {
           WEBSITES_PORT: '3000'
           WEBSITES_CONTAINER_START_TIME_LIMIT: '1800' // 30 minutes, adjust as needed
           BACKEND_API_URL: 'https://${containerApp.outputs.fqdn}'
-          AUTH_ENABLED: 'false'
+          AUTH_ENABLED: 'true'
         }
         // WAF aligned configuration for Monitoring
         applicationInsightResourceId: enableMonitoring ? applicationInsights!.outputs.resourceId : null
@@ -1590,6 +1590,8 @@ param storageContainerNameRFPCompliance string = 'rfp-compliance-dataset'
 param storageContainerNameContractSummary string = 'contract-summary-dataset'
 param storageContainerNameContractRisk string = 'contract-risk-dataset'
 param storageContainerNameContractCompliance string = 'contract-compliance-dataset'
+param storageContainerNameHRKnowledge string = 'hr-knowledge-dataset'
+param storageContainerNameMarketingKnowledge string = 'marketing-knowledge-dataset'
 module avmStorageAccount 'br/public:avm/res/storage/storage-account:0.20.0' = {
   name: take('avm.res.storage.storage-account.${storageAccountName}', 64)
   params: {
@@ -1679,6 +1681,14 @@ module avmStorageAccount 'br/public:avm/res/storage/storage-account:0.20.0' = {
           name: storageContainerNameContractCompliance
           publicAccess: 'None'
         }
+        {
+          name: storageContainerNameHRKnowledge
+          publicAccess: 'None'
+        }
+        {
+          name: storageContainerNameMarketingKnowledge
+          publicAccess: 'None'
+        }
       ]
       deleteRetentionPolicyDays: 9
       deleteRetentionPolicyEnabled: true
@@ -1747,12 +1757,16 @@ module searchServiceUpdate 'br/public:avm/res/search/search-service:0.11.1' = {
       }
       {
         principalId: aiFoundryAiProjectPrincipalId
+        roleDefinitionIdOrName: 'Search Index Data Contributor'
+        principalType: 'ServicePrincipal'
+      }
+      {
+        principalId: aiFoundryAiProjectPrincipalId
         roleDefinitionIdOrName: 'Search Service Contributor'
         principalType: 'ServicePrincipal'
       }
     ]
 
-    //Removing the Private endpoints as we are facing the issue with connecting to search service while comminicating with agents
 
     privateEndpoints: []
     // privateEndpoints: enablePrivateNetworking
@@ -1904,6 +1918,8 @@ output AZURE_STORAGE_CONTAINER_NAME_RFP_COMPLIANCE string = storageContainerName
 output AZURE_STORAGE_CONTAINER_NAME_CONTRACT_SUMMARY string = storageContainerNameContractSummary
 output AZURE_STORAGE_CONTAINER_NAME_CONTRACT_RISK string = storageContainerNameContractRisk
 output AZURE_STORAGE_CONTAINER_NAME_CONTRACT_COMPLIANCE string = storageContainerNameContractCompliance
+output AZURE_STORAGE_CONTAINER_NAME_HR_KNOWLEDGE string = storageContainerNameHRKnowledge
+output AZURE_STORAGE_CONTAINER_NAME_MARKETING_KNOWLEDGE string = storageContainerNameMarketingKnowledge
 output AZURE_AI_SEARCH_INDEX_NAME_RETAIL_CUSTOMER string = aiSearchIndexNameForRetailCustomer
 output AZURE_AI_SEARCH_INDEX_NAME_RETAIL_ORDER string = aiSearchIndexNameForRetailOrder
 output AZURE_AI_SEARCH_INDEX_NAME_RFP_SUMMARY string = aiSearchIndexNameForRFPSummary

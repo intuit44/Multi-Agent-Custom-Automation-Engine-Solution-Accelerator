@@ -10,11 +10,11 @@ This prevents content filter issues and improves security by not exposing
 real PII to the model.
 """
 
-import re
 import logging
-from typing import Dict, List, Tuple
+import re
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Dict, List, Tuple
 
 
 class PIIType(Enum):

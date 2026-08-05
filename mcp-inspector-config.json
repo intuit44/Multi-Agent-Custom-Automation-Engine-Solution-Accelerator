@@ -12,7 +12,10 @@
     },
     "github": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
       "env": {
         "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
       },
@@ -20,13 +23,47 @@
     },
     "everything": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-everything"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-everything"
+      ],
       "note": "MCP reference server — echo, sum, images, resources — great for testing"
     },
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspaces/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/workspaces/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator"
+      ],
       "note": "Filesystem MCP server — restricted to workspace directory only"
+    },
+    "elevenlabs": {
+      "command": "uvx",
+      "args": [
+        "elevenlabs-mcp"
+      ],
+      "env": {
+        "ELEVENLABS_API_KEY": "${ELEVENLABS_API_KEY}"
+      },
+      "note": "JARVIS voice (TTS) — ElevenLabs official MCP server. Key loaded from .env"
+    },
+    "desktop-commander": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@wonderwhy-er/desktop-commander"
+      ],
+      "note": "Full system control — shell, files, processes, apps"
+    },
+    "github.com/microsoft/playwright-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest",
+        "--headless"
+      ],
+      "note": "Playwright MCP (canonical name) — web automation, YouTube, social media. Official Microsoft."
     }
   }
 }

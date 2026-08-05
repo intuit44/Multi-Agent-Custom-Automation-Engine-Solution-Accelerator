@@ -23,10 +23,10 @@ Credential flow:
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional
+from typing import ClassVar, Dict, List, Optional
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, field_validator
-
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Enumerations
@@ -48,6 +48,26 @@ class MCPAuthType(str, Enum):
     API_KEY = "api_key"
     OAUTH2 = "oauth2"
     BEARER_TOKEN = "bearer_token"
+    MANAGED_IDENTITY = "managed_identity"
+
+
+class MCPCredentialSource(str, Enum):
+    """How the platform OBTAINS a valid token for the server.
+
+    Distinct from ``auth_type`` (what the target server sees on the wire — almost
+    always a Bearer). This says HOW we produce that token:
+
+    - ``static_secret``     — a fixed token stored in Key Vault. Expires; dev/fallback only.
+    - ``oauth_refresh``     — OAuth2 with a stored refresh_token; the resolver refreshes
+                              the access_token on expiry and writes the rotation back to
+                              Key Vault (Claude/Codex-style, for user-connected servers).
+    - ``managed_identity``  — mint a fresh AAD token per call from the platform's Managed
+                              Identity for ``audience``. Azure-only, operator-configured;
+                              nothing is stored.
+    """
+
+    STATIC_SECRET = "static_secret"
+    OAUTH_REFRESH = "oauth_refresh"
     MANAGED_IDENTITY = "managed_identity"
 
 
@@ -97,6 +117,17 @@ class MCPServerEntry(BaseModel):
 
     # Auth metadata (NO secrets — just what type and what fields are needed)
     auth_type: MCPAuthType = MCPAuthType.NONE
+
+    # How the platform OBTAINS the token (independent of auth_type, which is what
+    # the wire looks like). See MCPCredentialSource. The resolver dispatches on this.
+    credential_source: MCPCredentialSource = MCPCredentialSource.STATIC_SECRET
+    audience: Optional[str] = Field(
+        default=None,
+        description=(
+            "AAD audience/scope to mint a token for when credential_source is "
+            "managed_identity, e.g. 'ce34e7e5-485f-4d76-964f-b3d2b16d1e4f/.default'."
+        ),
+    )
     auth_fields: List[str] = Field(
         default_factory=list,
         description="Credential field names required, e.g. ['api_key'] or ['client_id','client_secret']",
@@ -104,6 +135,24 @@ class MCPServerEntry(BaseModel):
     oauth_scopes: List[str] = Field(
         default_factory=list,
         description="OAuth2 scopes if auth_type is oauth2",
+    )
+
+    # OAuth2 provider endpoints (only used when auth_type == oauth2)
+    oauth_authorize_url: Optional[str] = Field(
+        default=None,
+        description="OAuth2 authorization endpoint, e.g. 'https://github.com/login/oauth/authorize'",
+    )
+    oauth_token_url: Optional[str] = Field(
+        default=None,
+        description="OAuth2 token exchange endpoint, e.g. 'https://github.com/login/oauth/access_token'",
+    )
+    oauth_client_id_env: Optional[str] = Field(
+        default=None,
+        description="Env var name holding the OAuth client_id (e.g. 'GITHUB_CLIENT_ID')",
+    )
+    oauth_client_secret_env: Optional[str] = Field(
+        default=None,
+        description="Env var name holding the OAuth client_secret (e.g. 'GITHUB_CLIENT_SECRET')",
     )
 
     # Capabilities discovered on last connect (cached)
@@ -131,6 +180,69 @@ class MCPServerEntry(BaseModel):
     def _normalize_added_by(cls, value):
         """Accept legacy/null catalog rows and coerce them to an empty string."""
         return value or ""
+
+    # Azure first-party data planes: an endpoint on one of these hosts is
+    # token-authenticated by AAD, so the platform mints the token itself
+    # (managed identity) — there is no durable static token a user could paste
+    # (an az-cli/portal token expires within the hour). Suffixes starting with
+    # "." match subdomains; bare hosts match exactly. Audience = what the
+    # resolver mints for. Extend here when a new Azure data plane is proven.
+    _AZURE_HOST_AUDIENCES: ClassVar[Dict[str, str]] = {
+        ".search.windows.net": "https://search.azure.com/.default",
+        ".grafana.azure.com": "ce34e7e5-485f-4d76-964f-b3d2b16d1e4f/.default",
+        ".services.ai.azure.com": "https://ai.azure.com/.default",
+        "management.azure.com": "https://management.azure.com/.default",
+    }
+
+    @classmethod
+    def _azure_audience_for(cls, endpoint: Optional[str]) -> Optional[str]:
+        """Audience to mint for ``endpoint`` if it lives on a known Azure data
+        plane, else None."""
+        host = (urlparse(endpoint or "").hostname or "").lower()
+        if not host:
+            return None
+        for suffix, audience in cls._AZURE_HOST_AUDIENCES.items():
+            bare = suffix.lstrip(".")
+            if host == bare or host.endswith("." + bare):
+                return audience
+        return None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_credential_source(cls, data):
+        """Infer credential_source from auth_type + endpoint when not explicit.
+
+        Keeps the App UI free of infra concepts: a user only picks an auth_type
+        (OAuth / API Key / Bearer) and the durable token strategy is derived —
+        oauth2 → oauth_refresh (refresh + write-back), api_key → static_secret,
+        and an endpoint on a known Azure data plane (Search knowledge bases,
+        Managed Grafana, Foundry, ARM) → managed_identity + the right audience,
+        minted per call by the platform MI. Without that last rule an Azure
+        endpoint registered as "none"/bearer goes out with NO Authorization
+        header and 401s (foundry-iq-kb, 2026-07-24) — the registration endpoint
+        must produce a working entry by itself, not rely on an operator PUT.
+        An EXPLICIT credential_source (operator PUT, or a row already stored
+        with one) is always respected and never overwritten.
+        """
+        if isinstance(data, dict) and not data.get("credential_source"):
+            auth_type = data.get("auth_type")
+            auth_type = getattr(auth_type, "value", auth_type)  # accept enum or str
+            azure_audience = cls._azure_audience_for(data.get("endpoint"))
+            if auth_type == MCPAuthType.OAUTH2.value:
+                data["credential_source"] = MCPCredentialSource.OAUTH_REFRESH.value
+            elif auth_type == MCPAuthType.API_KEY.value:
+                # An explicit API key is a deliberate choice — keep it.
+                data["credential_source"] = MCPCredentialSource.STATIC_SECRET.value
+            elif azure_audience:
+                # none / bearer / absent on an Azure data plane → platform mints.
+                data["credential_source"] = MCPCredentialSource.MANAGED_IDENTITY.value
+                if not data.get("audience"):
+                    data["audience"] = azure_audience
+                # Wire format is a standard Bearer regardless of how it's minted.
+                data["auth_type"] = MCPAuthType.BEARER_TOKEN.value
+            elif auth_type == MCPAuthType.BEARER_TOKEN.value:
+                data["credential_source"] = MCPCredentialSource.STATIC_SECRET.value
+        return data
 
 
 class MCPUserConnection(BaseModel):

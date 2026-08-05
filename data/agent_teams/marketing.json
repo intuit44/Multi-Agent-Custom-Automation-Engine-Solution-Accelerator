@@ -48,13 +48,13 @@
       "icon": "",
       "system_message": "",
       "description": "",
-      "use_rag": false,
+      "use_rag": true,
       "use_mcp": false,
       "use_bing": false,
-      "use_reasoning": false,
+      "use_reasoning": true,
       "index_name": "",
       "index_foundry_name": "",
-      "coding_tools": false
+      "coding_tools": true
     }
   ],
   "protected": false,

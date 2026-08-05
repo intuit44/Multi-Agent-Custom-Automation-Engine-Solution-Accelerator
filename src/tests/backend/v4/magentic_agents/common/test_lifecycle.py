@@ -182,32 +182,35 @@ class TestMCPEnabledBase:
             with patch(
                 "backend.v4.magentic_agents.common.lifecycle.config"
             ) as mock_config:
-                mock_config.get_azure_credential_async.return_value = mock_creds
-                mock_config.AZURE_CLIENT_ID = "test-client-id"
-                with patch(
-                    "backend.v4.magentic_agents.common.lifecycle.AgentsClient",
-                    return_value=mock_client,
-                ):
+                # No user token → open() borrows the process-scoped shared
+                # credential (owned by config, NOT closed by this agent).
+                mock_config.get_shared_async_credential.return_value = mock_creds
+                with patch("aiohttp.TCPConnector", return_value=Mock()):
                     with patch(
-                        "backend.v4.magentic_agents.common.lifecycle.MCPStreamableHTTPTool",
-                        return_value=mock_mcp_tool,
+                        "backend.v4.magentic_agents.common.lifecycle.AgentsClient",
+                        return_value=mock_client,
                     ):
-                        with patch.object(
-                            base, "_after_open", new_callable=AsyncMock
-                        ) as mock_after_open:
-                            result = await base.open()
+                        with patch(
+                            "backend.v4.magentic_agents.common.lifecycle.MCPStreamableHTTPTool",
+                            return_value=mock_mcp_tool,
+                        ):
+                            with patch.object(
+                                base, "_after_open", new_callable=AsyncMock
+                            ) as mock_after_open:
+                                result = await base.open()
 
-                            assert result is base
-                            assert base._stack is mock_stack
-                            assert base.creds is mock_creds
-                            assert base.client is mock_client
-                            mock_config.get_azure_credential_async.assert_called_once_with(
-                                "test-client-id"
-                            )
-                            mock_after_open.assert_called_once()
-                            mock_agent_registry.register_agent.assert_called_once_with(
-                                base
-                            )
+                                assert result is base
+                                assert base._stack is mock_stack
+                                assert base.creds is mock_creds
+                                # Borrowed shared credential → not owned
+                                assert base._owns_creds is False
+                                assert base.client is mock_client
+                                assert base.mcp_tool is mock_mcp_tool
+                                mock_config.get_shared_async_credential.assert_called_once_with()
+                                mock_after_open.assert_called_once()
+                                mock_agent_registry.register_agent.assert_called_once_with(
+                                    base
+                                )
 
     @pytest.mark.asyncio
     async def test_open_method_already_open(self):
@@ -237,25 +240,26 @@ class TestMCPEnabledBase:
             with patch(
                 "backend.v4.magentic_agents.common.lifecycle.config"
             ) as mock_config:
-                mock_config.get_azure_credential_async.return_value = mock_creds
-                mock_config.AZURE_CLIENT_ID = "test-client-id"
-                with patch(
-                    "backend.v4.magentic_agents.common.lifecycle.AgentsClient",
-                    return_value=mock_client,
-                ):
-                    with patch.object(base, "_after_open", new_callable=AsyncMock):
-                        mock_agent_registry.register_agent.side_effect = Exception(
-                            "Registration failed"
-                        )
+                mock_config.get_shared_async_credential.return_value = mock_creds
+                with patch("aiohttp.TCPConnector", return_value=Mock()):
+                    with patch(
+                        "backend.v4.magentic_agents.common.lifecycle.AgentsClient",
+                        return_value=mock_client,
+                    ):
+                        with patch.object(base, "_after_open", new_callable=AsyncMock):
+                            mock_agent_registry.register_agent.side_effect = Exception(
+                                "Registration failed"
+                            )
 
-                        # Should not raise exception
-                        result = await base.open()
+                            try:
+                                # Registration is best-effort → must not raise
+                                result = await base.open()
+                            finally:
+                                mock_agent_registry.register_agent.side_effect = None
 
-                        assert result is base
-                        mock_config.get_azure_credential_async.assert_called_once_with(
-                            "test-client-id"
-                        )
-                        mock_agent_registry.register_agent.assert_called_once_with(base)
+                            assert result is base
+                            mock_config.get_shared_async_credential.assert_called_once_with()
+                            mock_agent_registry.register_agent.assert_called_once_with(base)
 
     @pytest.mark.asyncio
     async def test_close_method_success(self):
@@ -473,8 +477,12 @@ class TestMCPEnabledBase:
                 name=self.mock_mcp_config.name,
                 description=self.mock_mcp_config.description,
                 url=self.mock_mcp_config.url,
+                http_client=None,
             )
-            mock_stack.enter_async_context.assert_called_once_with(mock_mcp_tool)
+            # The tool is opened directly (NOT entered into the AsyncExitStack)
+            # to avoid anyio cross-task cancel-scope violations on close().
+            mock_mcp_tool.__aenter__.assert_awaited_once()
+            mock_stack.enter_async_context.assert_not_called()
             assert base.mcp_tool is mock_mcp_tool
 
     @pytest.mark.asyncio
