@@ -131,6 +131,11 @@ class AppConfig:
         self.AZURE_AI_PROJECT_NAME = self._get_required("AZURE_AI_PROJECT_NAME")
         self.AZURE_AI_AGENT_ENDPOINT = self._get_required("AZURE_AI_AGENT_ENDPOINT")
         self.AZURE_AI_PROJECT_ENDPOINT = self._get_optional("AZURE_AI_PROJECT_ENDPOINT")
+        # Blob endpoint of the solution's storage account (injected by infra;
+        # local dev sets it in .env). REQUIRED: generated-file persistence is a
+        # functional requirement — without it code-interpreter files die with
+        # their Foundry container (~20 min) and history images 404.
+        self.AZURE_STORAGE_BLOB_URL = self._get_required("AZURE_STORAGE_BLOB_URL")
 
         # Deployed Foundry Hosted Agent that answers all chat (ReAct + Toolbox,
         # server-side tools). The backend references it by name via

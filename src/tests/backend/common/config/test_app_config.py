@@ -32,6 +32,7 @@ os.environ.setdefault("AZURE_AI_SUBSCRIPTION_ID", "test-subscription-id")
 os.environ.setdefault("AZURE_AI_RESOURCE_GROUP", "test-resource-group")
 os.environ.setdefault("AZURE_AI_PROJECT_NAME", "test-project")
 os.environ.setdefault("AZURE_AI_AGENT_ENDPOINT", "https://test.ai.azure.com")
+os.environ.setdefault("AZURE_STORAGE_BLOB_URL", "https://test.blob.core.windows.net")
 
 # Import the class to test - using absolute import path that coverage can track
 from backend.common.config.app_config import AppConfig  # noqa: E402
@@ -55,6 +56,7 @@ class TestAppConfigInitialization:
             "AZURE_AI_RESOURCE_GROUP": "test-resource-group",
             "AZURE_AI_PROJECT_NAME": "test-project",
             "AZURE_AI_AGENT_ENDPOINT": "https://test.ai.azure.com",
+            "AZURE_STORAGE_BLOB_URL": "https://test.blob.core.windows.net",
         }
 
         with patch.dict(os.environ, test_env):
@@ -94,6 +96,7 @@ class TestAppConfigInitialization:
             "AZURE_AI_RESOURCE_GROUP": "custom-resource-group",
             "AZURE_AI_PROJECT_NAME": "custom-project",
             "AZURE_AI_AGENT_ENDPOINT": "https://custom.ai.azure.com",
+            "AZURE_STORAGE_BLOB_URL": "https://test.blob.core.windows.net",
             "FRONTEND_SITE_NAME": "https://custom.frontend.com",
             "MCP_SERVER_ENDPOINT": "http://custom.mcp.server:8000/mcp",
             "TEST_TEAM_JSON": "custom_team",
@@ -124,6 +127,7 @@ class TestAppConfigInitialization:
             "AZURE_AI_RESOURCE_GROUP": "test-resource-group",
             "AZURE_AI_PROJECT_NAME": "test-project",
             "AZURE_AI_AGENT_ENDPOINT": "https://test.ai.azure.com",
+            "AZURE_STORAGE_BLOB_URL": "https://test.blob.core.windows.net",
         }
 
         with patch.dict(os.environ, incomplete_env):
@@ -154,6 +158,7 @@ class TestAppConfigInitialization:
             "AZURE_AI_RESOURCE_GROUP": "test-resource-group",
             "AZURE_AI_PROJECT_NAME": "test-project",
             "AZURE_AI_AGENT_ENDPOINT": "https://test.ai.azure.com",
+            "AZURE_STORAGE_BLOB_URL": "https://test.blob.core.windows.net",
         }
 
 
@@ -178,6 +183,7 @@ class TestAppConfigPrivateMethods:
             "AZURE_AI_RESOURCE_GROUP": "test-resource-group",
             "AZURE_AI_PROJECT_NAME": "test-project",
             "AZURE_AI_AGENT_ENDPOINT": "https://test.ai.azure.com",
+            "AZURE_STORAGE_BLOB_URL": "https://test.blob.core.windows.net",
         }
 
     @patch.dict(os.environ, {"TEST_VAR": "test_value"})
@@ -258,6 +264,7 @@ class TestAppConfigCredentials:
             "AZURE_AI_RESOURCE_GROUP": "test-resource-group",
             "AZURE_AI_PROJECT_NAME": "test-project",
             "AZURE_AI_AGENT_ENDPOINT": "https://test.ai.azure.com",
+            "AZURE_STORAGE_BLOB_URL": "https://test.blob.core.windows.net",
         }
 
     @patch("backend.common.config.app_config.DefaultAzureCredential")
@@ -427,6 +434,7 @@ class TestAppConfigClientMethods:
             "AZURE_AI_RESOURCE_GROUP": "test-resource-group",
             "AZURE_AI_PROJECT_NAME": "test-project",
             "AZURE_AI_AGENT_ENDPOINT": "https://test.ai.azure.com",
+            "AZURE_STORAGE_BLOB_URL": "https://test.blob.core.windows.net",
             "COSMOSDB_ENDPOINT": "https://test.cosmosdb.azure.com",
             "COSMOSDB_DATABASE": "test-database",
         }
@@ -599,6 +607,7 @@ class TestAppConfigUtilityMethods:
             "AZURE_AI_RESOURCE_GROUP": "test-resource-group",
             "AZURE_AI_PROJECT_NAME": "test-project",
             "AZURE_AI_AGENT_ENDPOINT": "https://test.ai.azure.com",
+            "AZURE_STORAGE_BLOB_URL": "https://test.blob.core.windows.net",
         }
 
     @patch.dict(os.environ, {"USER_LOCAL_BROWSER_LANGUAGE": "fr-FR"})

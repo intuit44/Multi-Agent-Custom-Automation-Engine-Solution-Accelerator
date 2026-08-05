@@ -39,6 +39,7 @@ def _setup_environment_variables():
         'AZURE_COSMOS_DATABASE_NAME': 'test-db',
         'AZURE_COSMOS_CONTAINER_NAME': 'test-container',
         'FRONTEND_SITE_NAME': 'http://localhost:3000',
+        'AZURE_STORAGE_BLOB_URL': 'https://test.blob.core.windows.net',
         'APP_ENV': 'dev',
         'AZURE_OPENAI_RAI_DEPLOYMENT_NAME': 'test-rai-deployment',
     }

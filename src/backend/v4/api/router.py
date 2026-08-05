@@ -729,6 +729,52 @@ async def chat_upload_file(
         raise HTTPException(status_code=500, detail=f"File upload failed: {ex}")
 
 
+# ── Generated-file persistence plumbing ──────────────────────────────
+# Fire-and-forget with a strong reference (unreferenced tasks can be GC'd
+# mid-flight) and exception retrieval (else asyncio logs "exception was
+# never retrieved" at teardown).
+_BG_PERSIST_TASKS: set = set()
+
+
+def _spawn_bg_persist(coro, label: str) -> None:
+    task = asyncio.create_task(coro)
+    _BG_PERSIST_TASKS.add(task)
+
+    def _done(t) -> None:
+        _BG_PERSIST_TASKS.discard(t)
+        exc = None if t.cancelled() else t.exception()
+        if exc:
+            logger.error("Background persist %s failed: %s", label, exc)
+
+    task.add_done_callback(_done)
+
+
+def _file_response(data: bytes, filename: str):
+    """Bytes → streaming-friendly file Response with inferred content type."""
+    import mimetypes
+
+    from fastapi.responses import Response
+
+    mime, _ = mimetypes.guess_type(filename)
+    mime = mime or "application/octet-stream"
+    previewable_prefixes = ("image/", "text/")
+    previewable_mimes = {"application/pdf"}
+    disposition = (
+        "inline"
+        if mime in previewable_mimes or mime.startswith(previewable_prefixes)
+        else "attachment"
+    )
+    return Response(
+        content=data,
+        media_type=mime,
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{filename}"',
+            "Content-Length": str(len(data)),
+            "Cache-Control": "private, max-age=86400, immutable",
+        },
+    )
+
+
 @app_v4.get("/chat/download-file/{file_id}")
 async def chat_download_file(
     file_id: str,
@@ -747,6 +793,14 @@ async def chat_download_file(
       - Chat
     """
     from common.config.app_config import config as app_config
+    from v4.common.services.generated_file_store import GeneratedFileStore
+
+    # Blob first: files persisted at generation time outlive their Foundry
+    # container. A miss means the file predates the store → live-Foundry path.
+    stored = await GeneratedFileStore.get_instance().load(file_id)
+    if stored is not None:
+        data, filename = stored
+        return _file_response(data, filename)
 
     try:
         if file_id.startswith("cfile_"):
@@ -762,7 +816,7 @@ async def chat_download_file(
             # (get_openai_client) targets a different scope and 404s ("Container
             # not found"), and a user-scoped container is invisible to a
             # different identity — so mirror _RouterChatClient's OBO bearer.
-            from openai import AsyncOpenAI
+            from openai import AsyncOpenAI, NotFoundError
 
             access_token = None
             if request is not None:
@@ -806,6 +860,17 @@ async def chat_download_file(
                         container_id=container_id,
                     )
                     data = await content.aread()
+                except NotFoundError as nf:
+                    # Container recycled (~20 min) and the file was never
+                    # persisted (predates the store). Terminal state: the
+                    # bytes no longer exist anywhere.
+                    raise HTTPException(
+                        status_code=410,
+                        detail=(
+                            "Generated file expired with its Foundry container "
+                            "before persistence existed"
+                        ),
+                    ) from nf
                 finally:
                     await openai.close()
             finally:
@@ -831,31 +896,13 @@ async def chat_download_file(
                     chunks.append(bytes(chunk))
                 data = b"".join(chunks)
 
-        # Infer a reasonable content-type from the filename extension
-        import mimetypes
-
-        mime, _ = mimetypes.guess_type(filename)
-        mime = mime or "application/octet-stream"
-
-        from fastapi.responses import Response
-
-        previewable_prefixes = ("image/", "text/")
-        previewable_mimes = {"application/pdf"}
-        disposition = (
-            "inline"
-            if mime in previewable_mimes or mime.startswith(previewable_prefixes)
-            else "attachment"
+        # Backfill: a pre-store file just fetched from live Foundry gets
+        # persisted so the NEXT read outlives the container.
+        _spawn_bg_persist(
+            GeneratedFileStore.get_instance().save(file_id, filename, data),
+            f"backfill:{file_id}",
         )
-
-        return Response(
-            content=data,
-            media_type=mime,
-            headers={
-                "Content-Disposition": f'{disposition}; filename="{filename}"',
-                "Content-Length": str(len(data)),
-                "Cache-Control": "private, max-age=86400, immutable",
-            },
-        )
+        return _file_response(data, filename)
     except HTTPException:
         raise  # preserve the original status code (e.g. 400 for missing container_id)
     except Exception as ex:
@@ -2188,6 +2235,52 @@ class _RouterChatClient:
         finally:
             await router.close()
 
+    def _spawn_container_file_persist(
+        self,
+        file_id: Optional[str],
+        container_id: Optional[str],
+        filename: Optional[str],
+    ) -> None:
+        """Copy a code-interpreter output file to the persistent store the
+        moment it exists — its Foundry container expires minutes later.
+
+        Fetches with THIS client's bearer (OBO or shared): a user-scoped
+        container is invisible to any other identity (same rule as
+        /chat/download-file).
+        """
+        if not file_id or not container_id:
+            return
+
+        async def _run() -> None:
+            from openai import AsyncOpenAI
+
+            from v4.common.services.generated_file_store import GeneratedFileStore
+
+            bearer = await self._bearer()
+            client = AsyncOpenAI(
+                api_key=bearer,
+                base_url=self._openai_base_url,
+                default_query={"api-version": _DIRECT_RESPONSES_API_VERSION},
+                timeout=120,
+            )
+            try:
+                name = filename
+                if not name:
+                    info: Any = await client.containers.files.retrieve(
+                        file_id=file_id, container_id=container_id
+                    )
+                    path = getattr(info, "path", None) or file_id
+                    name = os.path.basename(path)
+                content = await client.containers.files.content.retrieve(
+                    file_id=file_id, container_id=container_id
+                )
+                data = await content.aread()
+            finally:
+                await client.close()
+            await GeneratedFileStore.get_instance().save(file_id, name or file_id, data)
+
+        _spawn_bg_persist(_run(), f"codeinterp:{file_id}")
+
     async def _execute_image_generation(self, prompt: str):
         """Generate an image with the configured gpt-image deployment and
         surface it through the EXISTING generated_file channel: the bytes are
@@ -2271,6 +2364,13 @@ class _RouterChatClient:
             uploaded.id,
             filename,
             len(image_bytes),
+        )
+        # Persist at generation time — the bytes are already in hand.
+        from v4.common.services.generated_file_store import GeneratedFileStore
+
+        _spawn_bg_persist(
+            GeneratedFileStore.get_instance().save(uploaded.id, filename, image_bytes),
+            f"imagegen:{uploaded.id}",
         )
         # hosted_file → the SSE handler emits the generated_file event with the
         # download_url and persists it in the assistant message metadata — the
@@ -2674,6 +2774,12 @@ class _RouterChatClient:
                             hf = _build_hosted_file_from_annotation(ann)
                             if hf is not None:
                                 yield _HostedUpdate([hf])
+                            _ap = ann.get("additional_properties") or {}
+                            self._spawn_container_file_persist(
+                                ann.get("file_id"),
+                                _ap.get("container_id"),
+                                _ap.get("filename"),
+                            )
 
                         # Backward-compatible generic function_result emission.
                         payload = _extract_function_result_payload(item)
@@ -2748,6 +2854,12 @@ class _RouterChatClient:
                                 hf = _build_hosted_file_from_annotation(ann)
                                 if hf is not None:
                                     yield _HostedUpdate([hf])
+                                _ap = ann.get("additional_properties") or {}
+                                self._spawn_container_file_persist(
+                                    ann.get("file_id"),
+                                    _ap.get("container_id"),
+                                    _ap.get("filename"),
+                                )
 
                         if status in {"error", "failed", "failure"}:
                             exception_payload = payload
@@ -2846,6 +2958,11 @@ class _RouterChatClient:
                                 )
                                 if hf is not None:
                                     yield _HostedUpdate([hf])
+                                self._spawn_container_file_persist(
+                                    _fid,
+                                    _ad.get("container_id"),
+                                    _ad.get("filename") or _ad.get("name"),
+                                )
                 elif etype in ("response.created", "response.completed"):
                     resp = getattr(evt, "response", None)
                     rid = getattr(resp, "id", None)

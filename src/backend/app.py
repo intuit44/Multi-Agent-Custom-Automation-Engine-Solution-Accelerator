@@ -38,6 +38,15 @@ async def lifespan(app: FastAPI):
         # Close process-scoped shared async resources (Managed Identity credential
         # and AIProjectClient). These are borrowed by agents but owned by the
         # process, so they are closed exactly once here — never on agent close().
+        # Close the generated-file blob transport BEFORE the shared credential
+        # it borrows is closed below.
+        try:
+            from v4.common.services.generated_file_store import GeneratedFileStore
+
+            await GeneratedFileStore.aclose_instance()
+        except Exception as gfs_e:
+            logger.warning(f"GeneratedFileStore cleanup warning (non-fatal): {gfs_e}")
+
         try:
             await config.aclose_shared_resources()
             logger.info("✅ Shared async resources closed")
