@@ -473,3 +473,6 @@ azure_env_variables.txt
 azure_ml_report.txt
 ml_workspace_config.json
 blackbox_mcp_settings.json
+
+# Test diagnostic output
+src/frontend/tests/diag_output/
