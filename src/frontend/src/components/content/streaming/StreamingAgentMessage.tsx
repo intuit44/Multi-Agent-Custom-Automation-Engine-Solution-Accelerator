@@ -184,12 +184,17 @@ const GeneratedImage = ({ alt, src, ...props }: any) => {
 
   const download = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    const blob = await (await fetch(url)).blob();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    try {
+      const blob = await (await fetch(url)).blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+    } catch {
+      // ignore (network/permission errors)
+    }
   };
   const copy = async (e: React.MouseEvent) => {
     e.stopPropagation();
