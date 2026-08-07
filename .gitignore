@@ -17,6 +17,10 @@ downloads/
 eggs/
 .eggs/
 lib/
+# `lib/` (template Python para venvs) se tragaba código FUENTE del frontend:
+# src/frontend/src/lib/ (types.ts, textParsers.ts) nunca llegó al repo y el
+# build de CI moría con TS2307 mientras el local pasaba. Re-incluir explícito.
+!src/frontend/src/lib/
 lib64/
 parts/
 sdist/
@@ -458,7 +462,6 @@ __pycache__/
 
 *.whl
 .azure
-.github/copilot-instructions.md
 # Ignore sample code folder
 data/sample_code/
 # Bicep local files
