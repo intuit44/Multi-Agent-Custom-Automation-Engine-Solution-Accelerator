@@ -65,8 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 2        # necesita el commit anterior para el diff
-
+          fetch-depth: 0  # asegurar que github.event.before exista (push multi-commit) para que el diff no falle
       - name: Calcular rutas modificadas
         id: filter
         run: |
