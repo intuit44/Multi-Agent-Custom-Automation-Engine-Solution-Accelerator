@@ -538,7 +538,7 @@ dev = [
     { name = "pytest", specifier = ">=8.4.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "pytest-cov", specifier = ">=5.0.0" },
-    { name = "ruff", specifier = ">=0.15.7" },
+    { name = "ruff", specifier = ">=0.15.7,<0.16" },
     { name = "types-python-dateutil" },
     { name = "types-regex" },
     { name = "types-requests" },

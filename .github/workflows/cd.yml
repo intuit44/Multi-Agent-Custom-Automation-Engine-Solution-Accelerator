@@ -1,0 +1,207 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Continuous Deployment — push a main
+#
+# Infraestructura existente (sin crear recursos):
+#   ACR  : boatrentalacr.azurecr.io
+#   Apps : ca-pslc25991vme66zmins   (backend)
+#          ca-mcp-pslc25991vme66zmins (mcp)
+#          app-pslc25991vme66zmins   (frontend — Web App for Containers)
+#   RG   : arg-macaev4-8d1cceac
+#
+# Auth OIDC: federated credential
+#   subject = repo:macae-labs/…:ref:refs/heads/main
+#   (sin environment — el subject coincide con el que emite push a main)
+#
+# Cada job sólo corre si cambió su componente.
+# La imagen se tagea con el SHA exacto del commit de squash.
+# ──────────────────────────────────────────────────────────────────────────────
+name: CD
+
+on:
+  push:
+    branches: [main]
+  # Palanca manual: re-deploy de componentes concretos (catch-up de algo que
+  # entró a main antes de que existiera el CD, o emergencia). Reemplaza los
+  # deploys de consola.
+  workflow_dispatch:
+    inputs:
+      backend:
+        type: boolean
+        default: false
+        description: 'Deploy backend'
+      mcp:
+        type: boolean
+        default: false
+        description: 'Deploy mcp'
+      frontend:
+        type: boolean
+        default: false
+        description: 'Deploy frontend'
+
+# Un deploy a la vez y en orden — dos merges seguidos no compiten por
+# cuál imagen queda viva al final.
+concurrency:
+  group: cd-main
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # OIDC → azure/login
+  contents: read
+
+env:
+  ACR: boatrentalacr.azurecr.io
+  RG: arg-macaev4-8d1cceac
+
+jobs:
+  # ── Detectar qué componentes cambiaron ────────────────────────────────────
+  # git diff sobre el rango del push: sin acción de terceros, sin extras.
+  changes:
+    name: Detectar cambios
+    runs-on: ubuntu-latest
+    outputs:
+      backend:  ${{ steps.filter.outputs.backend }}
+      mcp:      ${{ steps.filter.outputs.mcp }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2        # necesita el commit anterior para el diff
+
+      - name: Calcular rutas modificadas
+        id: filter
+        run: |
+          # Dispatch manual: los componentes vienen de los inputs, no del diff.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "backend=${{ inputs.backend }}"   >> "$GITHUB_OUTPUT"
+            echo "mcp=${{ inputs.mcp }}"           >> "$GITHUB_OUTPUT"
+            echo "frontend=${{ inputs.frontend }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BASE=${{ github.event.before }}
+          HEAD=${{ github.sha }}
+          # Si es el primer push (before = 000...) comparar con el árbol vacío
+          if [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            DIFF=$(git diff-tree --no-commit-id -r --name-only "$HEAD")
+          else
+            DIFF=$(git diff --name-only "$BASE" "$HEAD")
+          fi
+          echo "$DIFF"
+          echo "backend=$(echo "$DIFF"  | grep -q '^src/backend/'  && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "mcp=$(echo "$DIFF"      | grep -q '^src/mcp_server/' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "frontend=$(echo "$DIFF" | grep -q '^src/frontend/'  && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+  # ── Backend ────────────────────────────────────────────────────────────────
+  deploy-backend:
+    name: Backend — build, push, update CA
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login ACR
+        run: az acr login --name boatrentalacr
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: src/backend
+          file: src/backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ACR }}/macaebackend:sha-${{ github.sha }}
+            ${{ env.ACR }}/macaebackend:latest
+
+      - name: Update Container App
+        run: |
+          az containerapp update \
+            --name ca-pslc25991vme66zmins \
+            --resource-group ${{ env.RG }} \
+            --image ${{ env.ACR }}/macaebackend:sha-${{ github.sha }}
+
+  # ── MCP server ─────────────────────────────────────────────────────────────
+  deploy-mcp:
+    name: MCP server — build, push, update CA
+    needs: changes
+    if: needs.changes.outputs.mcp == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login ACR
+        run: az acr login --name boatrentalacr
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: src/mcp_server
+          file: src/mcp_server/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ACR }}/macaemcp:sha-${{ github.sha }}
+            ${{ env.ACR }}/macaemcp:latest
+
+      - name: Update Container App
+        run: |
+          az containerapp update \
+            --name ca-mcp-pslc25991vme66zmins \
+            --resource-group ${{ env.RG }} \
+            --image ${{ env.ACR }}/macaemcp:sha-${{ github.sha }}
+
+  # ── Frontend ────────────────────────────────────────────────────────────────
+  deploy-frontend:
+    name: Frontend — build, push, update Web App
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login ACR
+        run: az acr login --name boatrentalacr
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: src/frontend
+          file: src/frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ACR }}/macaefrontend:sha-${{ github.sha }}
+            ${{ env.ACR }}/macaefrontend:latest
+
+      # Sin esto el push es decorativo: el Web App está anclado a un tag fijo
+      # (linuxFxVersion DOCKER|...) y seguiría corriendo la imagen vieja.
+      - name: Update Web App
+        run: |
+          az webapp config container set \
+            --name app-pslc25991vme66zmins \
+            --resource-group ${{ env.RG }} \
+            --container-image-name ${{ env.ACR }}/macaefrontend:sha-${{ github.sha }}

@@ -71,7 +71,12 @@ class MCPInspectorBridge:
         """Read session token from Inspector log file (background mode)."""
         log_path = os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
-            "..", "..", "..", "..", "..", ".inspector.log"
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            ".inspector.log",
         )
         try:
             log_path = os.path.normpath(log_path)
@@ -101,6 +106,7 @@ class MCPInspectorBridge:
                 params.append(f"transportType={transport}")
             if server_url:
                 from urllib.parse import quote
+
                 params.append(f"url={quote(server_url, safe='')}")
 
         if auth_token:

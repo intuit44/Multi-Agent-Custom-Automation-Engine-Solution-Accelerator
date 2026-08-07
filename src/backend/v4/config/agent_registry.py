@@ -143,8 +143,10 @@ class AgentRegistry:
     def get_registry_status(self) -> Dict[str, Any]:
         """Get current status of the agent registry for debugging and monitoring."""
         with self._lock:
-            status: Dict[str, Any] = {"total_agents": len(
-                self._all_agents), "agent_types": {}}
+            status: Dict[str, Any] = {
+                "total_agents": len(self._all_agents),
+                "agent_types": {},
+            }
 
             # Count agents by type
             for agent in self._all_agents:

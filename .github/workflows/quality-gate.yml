@@ -1,44 +1,78 @@
 name: Quality Gate
 
+# Sin filtro de paths: estos jobs serán required checks de la protección de
+# main — un check requerido cuyo workflow no corre deja el PR colgado en
+# "Expected" para siempre (p. ej. un PR solo de docs).
 on:
   pull_request:
-    branches: [main, dev]
-    paths:
-      - 'src/**'
-      - '.flake8'
-      - 'src/backend/requirements.txt'
-      - 'src/frontend/package.json'
-      - 'src/frontend/package-lock.json'
-      - '.github/workflows/quality-gate.yml'
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
-  backend-lint:
+  # ── Backend: ruff + mypy (via uv, no pip resolution) ──────────────────────
+  backend-quality:
+    name: Backend (ruff + mypy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: '3.11'
+          enable-cache: true
+          cache-dependency-glob: src/backend/uv.lock
 
-      # ruff/flake8 are static analyzers — the app's dependencies are not
-      # needed to lint, and installing them here re-runs pip resolution for
-      # no benefit (deps are exercised with the exact uv.lock in test.yml).
-      - name: Install linters
-        run: |
-          python -m pip install --upgrade pip
-          pip install ruff flake8
+      - name: Install (exact lock)
+        run: uv sync --frozen
+        working-directory: src/backend
 
-      - name: Ruff (unused imports + critical errors)
-        run: ruff check src/backend --select F401,E9,F63,F7,F82
+      # Rutas relativas al working-directory: `.` es src/backend.
+      # (src/tests queda FUERA del gate: 847 errores de lint heredados,
+      # pendiente de la reorganización de tests.)
+      - name: Ruff — lint
+        run: uv run ruff check .
+        working-directory: src/backend
 
-      - name: Flake8
-        run: flake8 --config=.flake8 --exclude=tests src/backend
+      - name: Ruff — format check
+        run: uv run ruff format --check .
+        working-directory: src/backend
 
-  frontend-lint:
+      - name: mypy
+        run: uv run mypy .
+        working-directory: src/backend
+
+  # ── MCP server: ruff ─────────────────────────────────────────────────────
+  mcp-quality:
+    name: MCP server (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: src/mcp_server/uv.lock
+
+      # --extra dev: en mcp_server las herramientas viven en
+      # [project.optional-dependencies].dev — un sync pelado no las instala
+      # y `uv run ruff` caería al PATH del runner (donde no hay ruff).
+      - name: Install (exact lock)
+        run: uv sync --frozen --extra dev
+        working-directory: src/mcp_server
+
+      # --no-sync: sin él, uv run re-sincroniza SIN extras y desinstala ruff.
+      - name: Ruff — lint
+        run: uv run --no-sync ruff check .
+        working-directory: src/mcp_server
+
+      - name: Ruff — format check
+        run: uv run --no-sync ruff format --check .
+        working-directory: src/mcp_server
+
+  # ── Frontend: ESLint + tsc build ─────────────────────────────────────────
+  frontend-quality:
+    name: Frontend (ESLint + build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,10 +83,14 @@ jobs:
           cache: 'npm'
           cache-dependency-path: src/frontend/package-lock.json
 
-      - name: Install dependencies
+      - name: Install
         run: npm ci
         working-directory: src/frontend
 
       - name: ESLint
         run: npm run lint
+        working-directory: src/frontend
+
+      - name: TypeScript build
+        run: npm run build
         working-directory: src/frontend

@@ -88,12 +88,18 @@ def infobip_webhook(req: func.HttpRequest) -> func.HttpResponse:
     results = payload.get("results") if isinstance(payload, dict) else None
     if results:
         for result in results:
-            if result.get("status"):                      # delivery report (DLR)
-                logging.info("Infobip DLR: messageId=%s status=%s",
-                             result.get("messageId"), result["status"].get("name"))
-            elif result.get("message") or result.get("from"):   # mensaje entrante (MO)
-                logging.info("Infobip inbound: from=%s message=%s",
-                             result.get("from"), result.get("message"))
+            if result.get("status"):  # delivery report (DLR)
+                logging.info(
+                    "Infobip DLR: messageId=%s status=%s",
+                    result.get("messageId"),
+                    result["status"].get("name"),
+                )
+            elif result.get("message") or result.get("from"):  # mensaje entrante (MO)
+                logging.info(
+                    "Infobip inbound: from=%s message=%s",
+                    result.get("from"),
+                    result.get("message"),
+                )
     else:
         logging.info("Infobip inbound message received")
 

@@ -103,6 +103,7 @@ class MCPEnabledBase:
         # The default aiohttp ssl_shutdown_timeout is 5s which is too short
         # when the server closes the connection after a long response.
         import aiohttp
+
         _connector = aiohttp.TCPConnector(
             ssl_shutdown_timeout=30.0,
             enable_cleanup_closed=True,
@@ -170,9 +171,13 @@ class MCPEnabledBase:
                 try:
                     await self.mcp_tool.__aexit__(None, None, None)
                 except RuntimeError as exc:
-                    if "cancel scope" in str(exc).lower() or "different task" in str(exc).lower():
+                    if (
+                        "cancel scope" in str(exc).lower()
+                        or "different task" in str(exc).lower()
+                    ):
                         self.logger.debug(
-                            "MCP tool cross-task teardown (expected on force-rebuild): %s", exc
+                            "MCP tool cross-task teardown (expected on force-rebuild): %s",
+                            exc,
                         )
                     else:
                         self.logger.warning("MCP tool close error: %s", exc)

@@ -16,6 +16,8 @@ on:
       - 'src/backend/requirements.txt'
       - 'src/backend/uv.lock'
       - '.github/workflows/test.yml'
+  # Sin filtro de paths en PR: "test" será required check de la protección
+  # de main — si el workflow no corre, el PR queda colgado en "Expected".
   pull_request:
     types:
       - opened
@@ -26,16 +28,6 @@ on:
       - main
       - demo-v4
       - dev-v4
-    paths:
-      - 'src/backend/**/*.py'
-      - 'src/tests/**/*.py'
-      - 'src/mcp_server/**/*.py'
-      - 'pytest.ini'
-      - 'conftest.py'
-      - 'src/backend/requirements.txt'
-      - 'src/backend/uv.lock'
-      - 'src/**/pyproject.toml'
-      - '.github/workflows/test.yml'
 
 jobs:
   test:

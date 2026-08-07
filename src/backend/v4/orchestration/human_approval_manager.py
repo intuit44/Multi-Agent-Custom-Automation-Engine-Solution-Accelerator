@@ -299,7 +299,9 @@ DO NOT EVER OFFER TO HELP FURTHER IN THE FINAL ANSWER! Just provide the final an
                 magentic_context.task, "text", str(magentic_context.task)
             )
             ledger.is_request_satisfied.answer = False
-            ledger.is_request_satisfied.reason = f"Not all agents have responded yet. Waiting for: {', '.join(uncalled)}"
+            ledger.is_request_satisfied.reason = (
+                f"Not all agents have responded yet. Waiting for: {', '.join(uncalled)}"
+            )
             ledger.is_progress_being_made.answer = True
             ledger.is_progress_being_made.reason = (
                 "Continuing to consult remaining agents"

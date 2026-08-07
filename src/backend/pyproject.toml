@@ -78,7 +78,9 @@ dev = [
     # gate error::ResourceWarning en pytest.ini)
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=5.0.0",
-    "ruff>=0.15.7",
+    # <0.16: la 0.16 amplió el set de reglas por defecto (+178 hallazgos);
+    # se adopta vía PR de dependabot evaluando esos hallazgos, no de contrabando
+    "ruff>=0.15.7,<0.16",
     "types-regex",
     "types-python-dateutil",
     "types-requests",

@@ -150,7 +150,11 @@ class PlanService:
                         return False
                     plan = await memory_store.get_plan(plan_id_val)
                     mplan.plan_id = plan_id_val
-                    mplan.team_id = plan.team_id if plan is not None and plan.team_id is not None else ""
+                    mplan.team_id = (
+                        plan.team_id
+                        if plan is not None and plan.team_id is not None
+                        else ""
+                    )
                     mplan.overall_status = V4PlanStatus.APPROVED
                     orchestration_config.plans[human_feedback.m_plan_id] = mplan
                     if plan is not None:
@@ -165,7 +169,9 @@ class PlanService:
                         return False
                 else:  # reject plan
                     if human_feedback.plan_id is not None:
-                        await memory_store.delete_plan_by_plan_id(human_feedback.plan_id)
+                        await memory_store.delete_plan_by_plan_id(
+                            human_feedback.plan_id
+                        )
 
         except Exception as e:
             print(f"Error processing plan approval: {e}")

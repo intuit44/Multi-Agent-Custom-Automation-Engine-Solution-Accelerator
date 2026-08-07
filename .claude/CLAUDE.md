@@ -22,14 +22,17 @@ The backend reaches the MCP server via the `MCP_SERVER_ENDPOINT` env var (e.g. `
 # Backend (uv-managed: pyproject.toml + uv.lock)
 cd src/backend && uv run uvicorn app:app --port 8000 --reload
 
-# Tests (pytest.ini at repo root; testpaths = src/tests/backend, src/tests/agents)
-uv run pytest                                   # all
-uv run pytest -m "not integration"              # skip tests needing live Azure
-uv run pytest src/tests/backend/test_x.py::test_y -v   # single test
+# Tests — SIEMPRE con el contrato del backend (--project). Un `uv run pytest`
+# pelado desde la raíz cae en un venv obsoleto (PATH-fallback silencioso).
+uv run --project src/backend pytest -m "not integration"   # canónico (885 tests)
+uv run --project src/backend pytest src/tests/backend/test_x.py::test_y -v
 # markers: unit, integration (live Azure), e2e (Playwright, needs running frontend)
+# pytest.ini convierte ResourceWarning/PytestUnraisableExceptionWarning en errores
+# (gate de fugas async) — no silenciarlos, cerrar la fuga.
 
-# Lint/format (backend): ruff, line-length 88, Python 3.11
-cd src/backend && ruff check . && ruff format .
+# Lint/format/types — POR COMPONENTE (venvs distintos; ruff cap <0.16 en ambos)
+cd src/backend && uv run ruff check . && uv run ruff format --check . && uv run mypy .
+cd src/mcp_server && uv run --no-sync ruff check .   # (tras uv sync --extra dev)
 
 # Frontend
 cd src/frontend && npm run dev      # vite :3001
@@ -98,6 +101,33 @@ The catalog separates two concepts (`src/backend/v4/common/models/mcp_connection
 - **`aiohttp` must be a `src/mcp_server` dependency.** `azure.*.aio` (the `ManagedIdentityCredential` token mint AND Key Vault reads in `credential_resolver`) uses `aiohttp` as its async transport; if it's absent azure-core raises `"aiohttp package is not installed"`, the token is never obtained, and the upstream request goes out with **no `Authorization` header → 401** (silent — the failure is only in the ca-mcp log, not the HTTP error).
 - **`update_mcp_server` must apply body via `existing.model_copy(update=...)`, not a `setattr` loop.** Pydantic v2 does not coerce on plain `setattr` (no `validate_assignment`), so a str like `"managed_identity"` set onto an enum field serializes back as `None` in `model_dump` — the update silently drops `credential_source`/`audience`. `model_copy(update=...)` runs it through model construction and keeps the enum. (It does NOT re-run validators, so it won't re-derive `credential_source` on an `auth_type`-only edit — fine for explicit PUTs.)
 
+## CI/CD (GitHub Actions, desde 2026-08)
+
+- **Flujo**: push a `stable/v4-baseline` → PR a `main` → required checks
+  (`test`, `Backend (ruff + mypy)`, `MCP server (ruff)`, `Frontend (ESLint + build)`;
+  `main` protegida) → **squash-merge** → `cd.yml` construye SOLO los componentes
+  cambiados, tag `sha-<commit>`, y actualiza las apps EXISTENTES (backend/mcp:
+  `az containerapp update`; frontend: `az webapp config container set`).
+  Palanca manual: workflow_dispatch de CD con checkboxes por componente.
+  **Los deploys jamás crean recursos** (nada de azd provision — incidente de
+  costos histórico). Identidad: SP `copiloto-cli-sp` por OIDC federado.
+- **Ritual post-squash-merge** (obligatorio antes del siguiente commit):
+  `git fetch origin && git reset --hard origin/main && git push --force-with-lease origin stable/v4-baseline`.
+  Sin esto la divergencia de historia renace en cada ciclo (los commits de la
+  rama nunca entran a la historia de main con squash).
+- **Dependabot**: mensual agrupado; ecosistema `uv` para backend/mcp (NUNCA
+  `pip`: editaría requirements.txt sin tocar uv.lock), `npm` frontend,
+  `github-actions`. Etiqueta `auto-merge` + workflow que arma el auto-merge
+  nativo con guardia fail-closed (aborta si main no tiene required checks).
+  Merges hechos por GITHUB_TOKEN NO disparan cd.yml (guard anti-bucles de
+  GitHub) — esas dependencias llegan a prod con el siguiente merge humano.
+- Workflows quality-gate y test corren sin filtro de paths en PR: un required
+  check cuyo workflow no corre deja el PR colgado en "Expected" para siempre.
+
 ## Stale references to ignore (pre-Agent-Framework)
 
-`QUICK_START_LOCAL.md` and `.github/copilot-instructions.md` predate the Agent Framework migration.  `app:app`), "Semantic Kernel"/"Planner Agent" (it's Agent Framework Magentic), and MCP on `:8001` (it's `MCP_SERVER_ENDPOINT`, dev `:9000`).
+Anything mentioning "Semantic Kernel"/"Planner Agent" (it's Agent Framework
+Magentic), `app_kernel:app` (it's `app:app`), or MCP on `:8001` (it's
+`MCP_SERVER_ENDPOINT`, dev `:9000`) predates the migration — treat as stale.
+(`.github/copilot-instructions.md` fue actualizado al mundo v4 y ya ES
+confiable; `QUICK_START_LOCAL.md` ya no existe.)
