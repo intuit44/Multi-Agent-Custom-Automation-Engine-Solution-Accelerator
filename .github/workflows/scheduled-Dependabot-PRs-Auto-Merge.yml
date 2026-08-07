@@ -23,7 +23,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
-
+  administration: read
 jobs:
   enable-auto-merge:
     if: >-
