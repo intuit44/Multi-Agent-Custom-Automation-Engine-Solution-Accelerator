@@ -260,10 +260,10 @@ const GeneratedImage = ({ alt, src, ...props }: any) => {
           gap: '4px',
           // Siempre en DOM; visibilidad animada por CSS (fade + deslizamiento).
           opacity: hover ? 1 : 0,
+          visibility: hover ? 'visible' : 'hidden',
           transform: hover ? 'translateY(0)' : 'translateY(-4px)',
           pointerEvents: hover ? 'auto' : 'none',
           transition: 'opacity 150ms ease, transform 150ms ease',
-        }}
       >
         <button
           type="button"
