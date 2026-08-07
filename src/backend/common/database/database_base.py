@@ -1,4 +1,3 @@
-
 """Database base class for managing database operations."""
 
 from abc import ABC, abstractmethod

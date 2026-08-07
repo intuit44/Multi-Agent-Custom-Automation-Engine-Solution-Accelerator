@@ -67,6 +67,11 @@ The solution leverages Azure OpenAI Service, Azure Container Apps, Azure Cosmos 
 Quick deploy
 </h2>
 
+> **Este fork:** el ciclo commit → validación → merge → deploy está automatizado
+> con GitHub Actions — ver [DEPLOY_BACKEND_GUIDE.md](./DEPLOY_BACKEND_GUIDE.md).
+> La guía azd de abajo es el método del accelerator **upstream** para
+> instalaciones nuevas; en este fork no se usa (los deploys nunca crean recursos).
+
 ### How to install or deploy
 Follow the quick deploy steps on the deployment guide to deploy this solution to your own Azure subscription.
 
@@ -187,6 +192,9 @@ You may want to consider additional security measures, such as:
 
 | Topic | Description |
 |---|---|
+| [Local development setup](./docs/LocalDevelopmentSetup.md) | Running the three services locally (backend :8000, frontend :3001, MCP server :9000) — prerequisites, env vars, commands. |
+| [CI/CD & deploy](./DEPLOY_BACKEND_GUIDE.md) | The automated pipeline: PR quality gates → squash merge → `cd.yml` builds changed components and updates the existing Azure apps by commit SHA. Includes the manual dispatch lever and rollback. |
+| [Architecture overview (AI-assistant oriented)](./.github/copilot-instructions.md) | The v4 Agent Framework stack: request paths (SSE chat vs plan/WebSocket), orchestration, MCP wiring. |
 | [MCP Connectors — registry & credential flow](./docs/MCP_CONNECTORS.md) | How agents reach external MCP servers (Grafana, GitHub, …); `auth_type` vs `credential_source` (`static_secret` / `oauth_refresh` / `managed_identity`); registering servers, prerequisites, and troubleshooting 401s. |
 
 <br/>
