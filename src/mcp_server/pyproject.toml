@@ -18,7 +18,7 @@ dynamic = ["version"]
 dependencies = [
   "fastmcp>=3.1.0",
   "uvicorn[standard]==0.38.0",
-  "python-dotenv==1.1.1",
+  "python-dotenv==1.2.2",
   "azure-identity==1.19.0",
   "azure-keyvault-secrets==4.11.0",
   # Required async transport for azure.*.aio (ManagedIdentityCredential token
