@@ -379,7 +379,7 @@ pydantic-settings==2.14.2
     # via mcp
 pygments==2.19.2
     # via pytest
-pyjwt==2.10.1
+pyjwt==2.13.0
     # via
     #   azure-ai-evaluation
     #   mcp
