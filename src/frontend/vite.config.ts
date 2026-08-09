@@ -8,7 +8,7 @@ const srcPath = fileURLToPath(new URL('./src', import.meta.url))
 const chunkGroups: Record<string, string[]> = {
     vendor: ['react', 'react-dom'],
     fluentui: ['@fluentui/react-components', '@fluentui/react-icons'],
-    router: ['react-router', 'react-router-dom'],
+    router: ['react-router-dom', 'react-router'],
 }
 
 // https://vitejs.dev/config/
