@@ -403,7 +403,7 @@ pytest-cov==5.0.0
     # via backend
 python-dateutil==2.9.0.post0
     # via pandas
-python-dotenv==1.1.1
+python-dotenv==1.2.2
     # via
     #   agent-framework-core
     #   backend
