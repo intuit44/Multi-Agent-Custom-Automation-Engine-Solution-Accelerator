@@ -6,7 +6,7 @@ These tests exercise the COMPLETE production stack without any network mocks:
 
   Browser (Playwright)
     → React frontend
-      → /api/v4/chat/stream  (real FastAPI backend)
+      → /api/v4/chat/message/stream  (real FastAPI backend)
         → Azure AI Agent Service
           → code_interpreter tool
             → file generated
@@ -90,7 +90,7 @@ CODEGEN_PROMPT = os.getenv(
 AGENT_TIMEOUT_MS = int(os.getenv("E2E_AGENT_TIMEOUT_MS", "120000"))  # 2 min default
 
 # Session URL template — adjust if your frontend routing differs
-CHAT_SESSION_URL_TMPL = "{base}/chat/{session_id}"
+CHAT_SESSION_URL_TMPL = "{base}/session/{session_id}"
 
 # ── Skip guard ────────────────────────────────────────────────────────────────
 
@@ -166,12 +166,12 @@ def _wait_for_chip(page: Page, timeout_ms: int = AGENT_TIMEOUT_MS) -> str:
 
 
 def _current_session_id(page: Page) -> str:
-    """Extract session ID from the current URL (/chat/<session_id>)."""
-    m = re.search(r"/chat/([^/?#]+)", page.url)
+    """Extract session ID from the current URL (/session/<session_id>)."""
+    m = re.search(r"/session/([^/?#]+)", page.url)
     if not m:
         raise AssertionError(
             f"Cannot extract session_id from URL: {page.url}\n"
-            "Expected pattern: .../chat/<session_id>"
+            "Expected pattern: .../session/<session_id>"
         )
     return m.group(1)
 
@@ -274,7 +274,7 @@ def test_download_url_has_file_id_and_filename(fresh_page: Page):
 
 def test_sse_stream_emits_generated_file_event(fresh_page: Page):
     """
-    Intercepts the /api/v4/chat/stream SSE response and confirms the
+    Intercepts the /api/v4/chat/message/stream SSE response and confirms the
     backend emitted at least one 'generated_file' event.
 
     This is a network-level check — distinct from the DOM chip check.
@@ -290,7 +290,7 @@ def test_sse_stream_emits_generated_file_event(fresh_page: Page):
     sse_bodies: list[str] = []
 
     def _capture_sse(resp):
-        if "chat/stream" in resp.url and resp.status == 200:
+        if "chat/message/stream" in resp.url and resp.status == 200:
             try:
                 sse_bodies.append(resp.text())
             except Exception:
@@ -306,7 +306,7 @@ def test_sse_stream_emits_generated_file_event(fresh_page: Page):
         page.remove_listener("response", _capture_sse)
 
     assert sse_bodies, (
-        "No /api/v4/chat/stream response captured — was the prompt submitted?"
+        "No /api/v4/chat/message/stream response captured — was the prompt submitted?"
     )
 
     raw = "\n".join(sse_bodies)
