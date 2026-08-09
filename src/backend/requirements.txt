@@ -422,7 +422,7 @@ referencing==0.36.2
     #   jsonschema-specifications
 regex==2025.11.3
     # via nltk
-requests==2.32.5
+requests==2.33.0
     # via
     #   azure-core
     #   msal
