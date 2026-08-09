@@ -3,7 +3,8 @@
     "playwright-mqq4gzo8": {
       "type": "stdio",
       "command": "npx",
-      "args": ["@playwright/mcp@latest"]
+      "args": ["@playwright/mcp@latest", "--extension"],
+      "env": { "DISPLAY": ":99" }
     },
     "GitHub": {
       "type": "http",

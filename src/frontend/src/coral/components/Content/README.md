@@ -41,7 +41,7 @@ Customization options:
 The `ContentToolbar` component provides a header for the content area:
 
 ```jsx
-<ContentToolbar 
+<ContentToolbar
   panelTitle="Content Title"
   panelIcon={<DocumentIcon />}
 >
@@ -85,9 +85,9 @@ function MockChat() {
     { role: 'user', content: 'I need information about your services.' },
     { role: 'assistant', content: 'We offer a variety of services including...' },
   ];
-  
+
   const [messages, setMessages] = useState(initialHistory);
-  
+
   // Mock send message handler
   const handleSendMessage = async (input, history) => {
     // In a real app, this would call a service
@@ -95,14 +95,14 @@ function MockChat() {
     setMessages([...history, { role: 'user', content: input }, { role: 'assistant', content: response }]);
     return response;
   };
-  
+
   // Mock load history handler
   const handleLoadHistory = (userId) => {
     // In a real app, this would fetch from a service
     console.log(`Loading history for user ${userId}`);
     return Promise.resolve(initialHistory);
   };
-  
+
   // Mock clear history handler
   const handleClearHistory = (userId) => {
     // In a real app, this would call a service
@@ -110,13 +110,13 @@ function MockChat() {
     setMessages([]);
     return Promise.resolve();
   };
-  
+
   return (
     <Content>
       <ContentToolbar panelTitle="Mock Chat" panelIcon={<ChatIcon />}>
         <Button appearance="subtle" icon={<ClearIcon />} onClick={() => handleClearHistory('user123')} />
       </ContentToolbar>
-      
+
       <Chat
         userId="user123"
         onSendMessage={handleSendMessage}
@@ -134,12 +134,12 @@ function MockChat() {
 
 ```jsx
 import { useState } from 'react';
-import { 
-  Card, 
-  CardHeader, 
+import {
+  Card,
+  CardHeader,
   CardPreview,
   CardFooter,
-  Button, 
+  Button,
   Text
 } from '@fluentui/react-components';
 
@@ -150,11 +150,11 @@ function CustomContent() {
     { id: '2', title: 'Item Two', description: 'Description for item two', image: 'item2.jpg' },
     { id: '3', title: 'Item Three', description: 'Description for item three', image: 'item3.jpg' },
   ];
-  
+
   return (
     <Content>
       <ContentToolbar panelTitle="Custom Interface" panelIcon={<GridIcon />} />
-      
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '16px', padding: '16px' }}>
         {items.map(item => (
           <Card key={item.id}>
@@ -187,21 +187,21 @@ import { chatService } from '../../services/chatService';
 function ServiceConnectedChat() {
   const [userId] = useState('user123');
   const [messages, setMessages] = useState([]);
-  
+
   // Load initial history
   useEffect(() => {
     chatService.getUserHistory(userId)
       .then(history => setMessages(history))
       .catch(err => console.error('Failed to load chat history:', err));
   }, [userId]);
-  
+
   // Send message handler
   const handleSendMessage = async (input, history) => {
     try {
       // Get last conversation ID if available
       const lastAssistantMessage = history.filter(msg => msg.role === 'assistant').pop();
       const conversationId = lastAssistantMessage ? (lastAssistantMessage).conversation_id : undefined;
-      
+
       // Call the service
       const response = await chatService.sendMessage(userId, input, conversationId);
       return response.assistant_response;
@@ -210,7 +210,7 @@ function ServiceConnectedChat() {
       return "Sorry, there was an error processing your request.";
     }
   };
-  
+
   // Load history handler
   const handleLoadHistory = async (id) => {
     try {
@@ -220,7 +220,7 @@ function ServiceConnectedChat() {
       return [];
     }
   };
-  
+
   // Clear history handler
   const handleClearHistory = async (id) => {
     try {
@@ -230,11 +230,11 @@ function ServiceConnectedChat() {
       console.error('Error clearing history:', error);
     }
   };
-  
+
   return (
     <Content>
       <ContentToolbar panelTitle="Chat" panelIcon={<ChatIcon />} />
-      
+
       <Chat
         userId={userId}
         onSendMessage={handleSendMessage}
@@ -257,25 +257,25 @@ import eventBus from '../eventbus';
 
 function EventAwareContent() {
   const [selectedItem, setSelectedItem] = useState(null);
-  
+
   useEffect(() => {
     // Subscribe to item selection events
     const handleItemSelected = (item) => {
       setSelectedItem(item);
     };
-    
+
     eventBus.on('itemSelected', handleItemSelected);
-    
+
     // Cleanup
     return () => {
       eventBus.off('itemSelected', handleItemSelected);
     };
   }, []);
-  
+
   return (
     <Content>
       <ContentToolbar panelTitle="Item Details" panelIcon={<DetailsIcon />} />
-      
+
       {selectedItem ? (
         <div className="item-details">
           <h2>{selectedItem.name}</h2>
@@ -327,4 +327,4 @@ This component primarily acts as a container and accepts standard React props li
 3. **Loading States**: Show loading indicators when fetching data.
 4. **Error Handling**: Implement user-friendly error messages.
 5. **Accessibility**: Maintain proper heading hierarchy and ensure all interactive elements are accessible.
-6. **Performance**: For content with large data sets, implement pagination or virtualization. 
+6. **Performance**: For content with large data sets, implement pagination or virtualization.

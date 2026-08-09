@@ -9,22 +9,55 @@ DISPLAY_NUM=99
 VNC_PORT=5900
 NOVNC_PORT=6080
 PIDFILE=/tmp/.vnc_stack.pids
+APP_URL=${APP_URL:-http://localhost:3001}
 
 _stop() {
     echo "▶ Stopping virtual desktop..."
+
+    # 1) Los PIDs que arrancó este script.
     if [[ -f "$PIDFILE" ]]; then
         while read -r pid; do
             kill "$pid" 2>/dev/null
         done < "$PIDFILE"
         rm -f "$PIDFILE"
     fi
-    pkill -f "Xvfb :${DISPLAY_NUM}"   2>/dev/null
-    pkill -f "x11vnc.*display :${DISPLAY_NUM}" 2>/dev/null
-    pkill -f "websockify.*${NOVNC_PORT}" 2>/dev/null
-    pkill -f "fluxbox" 2>/dev/null
+
+    # 2) Restos de corridas anteriores, o procesos arrancados a mano que
+    #    nunca entraron al PIDFILE. Patrones anclados al binario: un
+    #    `pkill -f websockify` suelto también mata al shell que lo invoca
+    #    cuando su propia línea de comando menciona esa palabra.
+    pkill -f "^Xvfb :${DISPLAY_NUM}\b"     2>/dev/null
+    pkill -f "^x11vnc .*:${DISPLAY_NUM}\b" 2>/dev/null
+    pkill -x websockify                    2>/dev/null
+    pkill -x fluxbox                       2>/dev/null
     sleep 1
-    # Clean residual X socket if it exists
+
+    # 3) Escalada por PUERTO — lo único que no depende de la línea de comando.
+    #    x11vnc puede quedarse en bucle cerrado (STAT R, CPU al tope) sin
+    #    llegar a atender SIGTERM, y sigue ocupando el 5900. Entonces el
+    #    x11vnc nuevo no puede bindear y muere, mientras el zombi acepta la
+    #    conexión TCP sin servirla: noVNC se queda en "Connecting..." para
+    #    siempre. Visible en `ss -ltn` como Recv-Q creciendo en el 5900.
+    for port in "$VNC_PORT" "$NOVNC_PORT"; do
+        if fuser -s "${port}/tcp" 2>/dev/null; then
+            fuser -k -TERM "${port}/tcp" &>/dev/null
+            sleep 1
+            fuser -k -KILL "${port}/tcp" &>/dev/null
+        fi
+    done
+
     sudo rm -f "/tmp/.X11-unix/X${DISPLAY_NUM}" 2>/dev/null
+
+    # 4) Comprobar antes de afirmar. El "✅ Stopped." anterior salía siempre,
+    #    incluso con los puertos todavía tomados.
+    local busy=""
+    for port in "$VNC_PORT" "$NOVNC_PORT"; do
+        fuser -s "${port}/tcp" 2>/dev/null && busy+=" ${port}"
+    done
+    if [[ -n "$busy" ]]; then
+        echo "⚠️  Puertos aún ocupados:${busy} — revisa 'fuser -v ${VNC_PORT}/tcp'"
+        return 1
+    fi
     echo "✅ Stopped."
 }
 
@@ -61,6 +94,33 @@ _start() {
     websockify --web /usr/share/novnc ${NOVNC_PORT} localhost:${VNC_PORT} &>/tmp/novnc.log &
     echo $! >> "$PIDFILE"
     sleep 1
+
+    # Un escritorio recién creado no tiene nada encima y se ve gris, que es
+    # indistinguible de "noVNC no conecta". El navegador se abre aquí para que
+    # el script se baste solo. Su PID va al PIDFILE; además muere junto con
+    # Xvfb, así que `stop` lo limpia por las dos vías.
+    echo "▶ Starting Chrome on the desktop (${APP_URL})..."
+    env DISPLAY=:${DISPLAY_NUM} google-chrome \
+        --user-data-dir="$HOME/.config/google-chrome" \
+        --no-sandbox --no-first-run --no-default-browser-check \
+        --start-maximized "${APP_URL}" &>/tmp/chrome-vnc.log &
+    echo $! >> "$PIDFILE"
+    sleep 8
+
+    # No anunciar "ready" sin comprobarlo: el ✅ salía aunque x11vnc no
+    # hubiera podido bindear su puerto, y el síntoma aparecía mucho después
+    # como un noVNC que carga la página y se queda en "Connecting...".
+    local failed=""
+    pgrep -f "^Xvfb :${DISPLAY_NUM}\b" >/dev/null 2>&1 || failed+=" Xvfb"
+    fuser -s "${VNC_PORT}/tcp"   2>/dev/null || failed+=" x11vnc(:${VNC_PORT})"
+    fuser -s "${NOVNC_PORT}/tcp" 2>/dev/null || failed+=" noVNC(:${NOVNC_PORT})"
+    pgrep -f "google-chrome .*--start-maximized" >/dev/null 2>&1 || failed+=" Chrome"
+    if [[ -n "$failed" ]]; then
+        echo ""
+        echo "❌ No arrancó:${failed}"
+        echo "   Logs: /tmp/x11vnc.log  /tmp/novnc.log  /tmp/fluxbox.log"
+        return 1
+    fi
 
     echo ""
     echo "✅ Virtual desktop ready."
