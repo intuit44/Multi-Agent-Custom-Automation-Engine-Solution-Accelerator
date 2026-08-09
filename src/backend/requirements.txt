@@ -377,7 +377,7 @@ pydantic-core==2.33.2
     # via pydantic
 pydantic-settings==2.14.2
     # via mcp
-pygments==2.19.2
+pygments==2.20.0
     # via pytest
 pyjwt==2.13.0
     # via
