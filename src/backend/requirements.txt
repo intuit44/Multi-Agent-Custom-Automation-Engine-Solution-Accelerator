@@ -375,7 +375,7 @@ pydantic==2.11.10
     #   pylint-pydantic
 pydantic-core==2.33.2
     # via pydantic
-pydantic-settings==2.12.0
+pydantic-settings==2.14.2
     # via mcp
 pygments==2.19.2
     # via pytest
