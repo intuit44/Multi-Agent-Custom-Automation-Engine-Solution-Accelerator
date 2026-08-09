@@ -208,7 +208,7 @@ multidict==6.7.0
     # via
     #   aiohttp
     #   yarl
-nltk==3.9.3
+nltk==3.10.0
     # via
     #   azure-ai-evaluation
     #   backend
