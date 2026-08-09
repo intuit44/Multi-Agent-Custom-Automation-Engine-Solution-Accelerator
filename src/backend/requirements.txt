@@ -502,7 +502,7 @@ uvicorn==0.35.0
     # via
     #   backend
     #   mcp
-werkzeug==3.1.5
+werkzeug==3.1.6
     # via backend
 wrapt==1.17.3
     # via
