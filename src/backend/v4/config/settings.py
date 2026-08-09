@@ -202,9 +202,7 @@ class OrchestrationConfig:
             )
             return result
         except asyncio.TimeoutError:
-            logger.warning(
-                "Approval wait for %s timed out after %ss", plan_id, timeout
-            )
+            logger.warning("Approval wait for %s timed out after %ss", plan_id, timeout)
             raise
         except asyncio.CancelledError:
             logger.debug("Approval request %s was cancelled", plan_id)

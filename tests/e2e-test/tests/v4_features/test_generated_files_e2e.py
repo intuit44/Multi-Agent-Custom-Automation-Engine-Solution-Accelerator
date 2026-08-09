@@ -93,7 +93,7 @@ MOCK_SESSION_ID = "sess_e2e_test_001"
 PROMPT_TEXT = "Generate a sales report as a CSV file"
 
 # SSE stream URL pattern
-SSE_PATH_PATTERN = "**/api/v4/chat/stream"
+SSE_PATH_PATTERN = "**/api/v4/chat/message/stream"
 DOWNLOAD_PATH_PATTERN = "**/api/v4/chat/download-file**"
 SESSIONS_PATH_PATTERN = "**/api/v4/chat/sessions**"
 SESSION_MESSAGES_PATTERN = f"**/api/v4/chat/sessions/{MOCK_SESSION_ID}/messages**"
@@ -112,9 +112,16 @@ GENERATED_FILES_LABEL = "text=📥 Generated files"
 
 
 def _sse_event(event_type: str, data: dict) -> bytes:
-    """Format one SSE event as bytes."""
-    payload = json.dumps(data)
-    return f"event: {event_type}\ndata: {payload}\n\n".encode()
+    """Format one SSE event as bytes, con el formato REAL del backend.
+
+    El backend emite solo `data: {...}` con el tipo DENTRO del JSON
+    (router.py `_sse`), y el frontend hace `switch (data.type)` ignorando
+    cualquier línea `event:` (apiService.tsx). Un mock con `event: token` y
+    sin `type` en el payload no dispara ningún caso del switch: la capa
+    entera se iba a timeout sin pintar nada.
+    """
+    payload = json.dumps({"type": event_type, **data})
+    return f"data: {payload}\n\n".encode()
 
 
 def _build_sse_stream(with_file: bool = True) -> bytes:
@@ -613,7 +620,9 @@ def test_session_reload_restores_chips(chat_page_with_history: Page, fresh_page:
     page = chat_page_with_history
 
     # Navigate directly to the chat page for the mock session
-    chat_url = f"{(URL or 'http://localhost:3001').rstrip('/')}/chat/{MOCK_SESSION_ID}"
+    chat_url = (
+        f"{(URL or 'http://localhost:3001').rstrip('/')}/session/{MOCK_SESSION_ID}"
+    )
     logger.info("Navigating to session URL: %s", chat_url)
     page.goto(chat_url, wait_until="domcontentloaded")
     page.wait_for_timeout(6_000)  # let React load session data

@@ -49,7 +49,9 @@ class SelfHealToolMiddleware(FunctionMiddleware):
                 # Hand the model an actionable result instead of crashing the turn.
                 # Returning normally (no MiddlewareTermination) lets the agent loop
                 # continue so the model can re-call the tool with a corrected payload.
-                context.result = f"[tool_error:{err.category.value}] {err.message_for_model}"
+                context.result = (
+                    f"[tool_error:{err.category.value}] {err.message_for_model}"
+                )
                 return
             logger.error(
                 "Tool '%s' failed unrecoverably (%s, status=%s) — propagating.",

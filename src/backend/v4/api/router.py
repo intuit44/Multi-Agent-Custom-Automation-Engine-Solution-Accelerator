@@ -2314,7 +2314,10 @@ class _RouterChatClient:
                     json={
                         "prompt": prompt,
                         "n": 1,
-                        "size": "1024x1024",
+                        # 3:2 nativo — el mismo ratio de la tarjeta del chat:
+                        # la imagen llena la caja sin recorte ni bandas.
+                        # Validado en el playground sobre este deployment.
+                        "size": "1536x1024",
                     },
                 )
         except Exception as ex:
@@ -2325,8 +2328,7 @@ class _RouterChatClient:
             # Surface the FULL error — an empty/summarized failure here is how
             # models end up narrating images they never generated.
             err = (
-                f"Image generation failed: HTTP {resp.status_code} — "
-                f"{resp.text[:300]}"
+                f"Image generation failed: HTTP {resp.status_code} — {resp.text[:300]}"
             )
             logger.error(err)
             yield _HostedUpdate([_HostedTextContent(err)])
@@ -2337,8 +2339,7 @@ class _RouterChatClient:
             yield _HostedUpdate(
                 [
                     _HostedTextContent(
-                        "Image generation returned no image data: "
-                        + str(payload)[:200]
+                        "Image generation returned no image data: " + str(payload)[:200]
                     )
                 ]
             )
@@ -5471,7 +5472,9 @@ async def get_plan_by_id(
             team = None
             if plan.team_id:
                 team = await memory_store.get_team_by_id(team_id=plan.team_id)
-            agent_messages: Any = await memory_store.get_agent_messages(plan_id=plan.plan_id)
+            agent_messages: Any = await memory_store.get_agent_messages(
+                plan_id=plan.plan_id
+            )
 
             # Merge session chat history (pre-plan conversation) into agent_messages
             if plan.session_id:
@@ -5936,7 +5939,8 @@ async def connect_user_to_mcp_server(server_name: str, request: Request):
             body = await request.json()
         except (json.JSONDecodeError, ValueError):
             logger.debug(
-                "connect_user_to_mcp_server: request body missing or not valid JSON; proceeding with empty body")
+                "connect_user_to_mcp_server: request body missing or not valid JSON; proceeding with empty body"
+            )
 
         credentials = body.get("credentials")
 
@@ -6050,7 +6054,8 @@ async def activate_user_mcp_connection(server_name: str, request: Request):
             body = await request.json()
         except (json.JSONDecodeError, ValueError):
             logger.debug(
-                "activate_user_mcp_connection: request body missing or not valid JSON; proceeding with empty body")
+                "activate_user_mcp_connection: request body missing or not valid JSON; proceeding with empty body"
+            )
 
         svc = await MCPConnectionsService.get_instance()
         result = await svc.mark_connection_active(

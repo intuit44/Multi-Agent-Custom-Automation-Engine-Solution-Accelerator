@@ -23,7 +23,6 @@ Typical flow:
      agent framework can trigger reconnection on next call.
 """
 
-import asyncio
 import logging
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -99,7 +98,10 @@ class TenantConnectionRegistry:
             _last_used[key] = time.monotonic()
             logger.debug(
                 "TenantRegistry: cache HIT tenant=%s user=%s server=%s (pool=%d)",
-                tenant_id[:8], user_id[:8], server_name, len(_pool),
+                tenant_id[:8],
+                user_id[:8],
+                server_name,
+                len(_pool),
             )
         return session
 
@@ -138,7 +140,11 @@ class TenantConnectionRegistry:
         logger.info(
             "TenantRegistry: registered session tenant=%s user=%s server=%s "
             "transport=%s (pool=%d)",
-            tenant_id[:8], user_id[:8], server_name, transport, len(_pool),
+            tenant_id[:8],
+            user_id[:8],
+            server_name,
+            transport,
+            len(_pool),
         )
 
     @staticmethod
@@ -155,14 +161,14 @@ class TenantConnectionRegistry:
         if session is not None:
             logger.info(
                 "TenantRegistry: explicitly evicted tenant=%s user=%s server=%s",
-                tenant_id[:8], user_id[:8], server_name,
+                tenant_id[:8],
+                user_id[:8],
+                server_name,
             )
         return session
 
     @staticmethod
-    def list_sessions(
-        tenant_id: str = "", user_id: str = ""
-    ) -> List[Dict[str, Any]]:
+    def list_sessions(tenant_id: str = "", user_id: str = "") -> List[Dict[str, Any]]:
         """Return metadata for all matching sessions.
 
         If tenant_id / user_id are empty they are treated as wildcards.
@@ -225,7 +231,8 @@ class TenantConnectionRegistry:
             await cosmos_container.upsert_item(body=doc)
             logger.debug(
                 "TenantRegistry.persist: wrote metadata for tenant=%s server=%s",
-                tenant_id[:8], server_name,
+                tenant_id[:8],
+                server_name,
             )
         except Exception as e:
             logger.warning(
@@ -265,17 +272,20 @@ class TenantConnectionRegistry:
                 parameters=params,
                 partition_key=pk,
             ):
-                results.append({
-                    "tenant_id": item.get("tenant_id", ""),
-                    "user_id": item.get("user_id", ""),
-                    "server_name": item.get("server_name", ""),
-                    "server_url": item.get("server_url", ""),
-                    "transport": item.get("transport", "streamable-http"),
-                    "registered_at": item.get("registered_at"),
-                })
+                results.append(
+                    {
+                        "tenant_id": item.get("tenant_id", ""),
+                        "user_id": item.get("user_id", ""),
+                        "server_name": item.get("server_name", ""),
+                        "server_url": item.get("server_url", ""),
+                        "transport": item.get("transport", "streamable-http"),
+                        "registered_at": item.get("registered_at"),
+                    }
+                )
             logger.info(
                 "TenantRegistry.recover_sessions: found %d session(s) for tenant=%s",
-                len(results), tenant_id[:8],
+                len(results),
+                tenant_id[:8],
             )
         except Exception as e:
             logger.warning(

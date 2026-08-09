@@ -1,15 +1,15 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from 'react';
 import {
   CheckmarkCircle20Regular,
   Info20Regular,
   Warning20Regular,
   DismissCircle20Regular,
   Dismiss20Regular,
-} from "@fluentui/react-icons";
-import { Body1, Button, Spinner } from "@fluentui/react-components";
+} from '@fluentui/react-icons';
+import { Body1, Button, Spinner } from '@fluentui/react-components';
 
 // Toast type
-export type ToastIntent = "info" | "success" | "warning" | "error" | "progress";
+export type ToastIntent = 'info' | 'success' | 'warning' | 'error' | 'progress';
 
 type Toast = {
   id: number;
@@ -24,14 +24,14 @@ let _setToasts: React.Dispatch<React.SetStateAction<Toast[]>> | null = null;
 export const useInlineToaster = () => {
   const showToast = (
     content: React.ReactNode,
-    intent: ToastIntent = "info",
+    intent: ToastIntent = 'info',
     options?: {
       dismissible?: boolean;
       timeoutMs?: number | null;
     }
   ) => {
     const id = Date.now();
-    const timeout = options?.timeoutMs ?? (intent === "progress" ? null : 3000);
+    const timeout = options?.timeoutMs ?? (intent === 'progress' ? null : 3000);
 
     if (_setToasts) {
       _setToasts((prev) => [
@@ -81,15 +81,15 @@ export const useInlineToaster = () => {
 
 const getIconForIntent = (intent: ToastIntent) => {
   switch (intent) {
-    case "success":
+    case 'success':
       return <CheckmarkCircle20Regular />;
-    case "info":
+    case 'info':
       return <Info20Regular />;
-    case "warning":
+    case 'warning':
       return <Warning20Regular />;
-    case "error":
+    case 'error':
       return <DismissCircle20Regular />;
-    case "progress":
+    case 'progress':
       return <Spinner size="tiny" />;
     default:
       return null;
@@ -109,82 +109,81 @@ const InlineToaster: React.FC = () => {
   return (
     <div
       style={{
-        position: "absolute",
+        position: 'absolute',
         bottom: 24,
-        left: "50%",
-        transform: "translateX(-50%)",
-        display: "flex",
-        flexDirection: "column-reverse",
+        left: '50%',
+        transform: 'translateX(-50%)',
+        display: 'flex',
+        flexDirection: 'column-reverse',
         gap: 8,
         zIndex: 1000,
-        pointerEvents: "none",
-                alignContent:'center'
+        pointerEvents: 'none',
+        alignContent: 'center',
       }}
     >
       {toasts.map((toast) => (
         <div
           key={toast.id}
           style={{
-            background: "var(--colorNeutralBackground3)",
-            border: "1px solid var(--colorNeutralStroke1)",
-            padding: "12px 16px",
+            background: 'var(--colorNeutralBackground3)',
+            border: '1px solid var(--colorNeutralStroke1)',
+            padding: '12px 16px',
             borderRadius: 9999,
-            color: "var(--colorNeutralForeground1)",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-            display: "flex",
-            alignItems: "center",
+            color: 'var(--colorNeutralForeground1)',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+            display: 'flex',
+            alignItems: 'center',
             fontSize: 14,
             gap: 8,
             opacity: toast.visible ? 1 : 0,
-            transform: toast.visible ? "translateY(0px)" : "translateY(20px)",
-            transition: "opacity 0.3s ease, transform 0.3s ease",
-            pointerEvents: "auto",
-            maxWidth: "calc(100vw - 48px)",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            justifyContent:'center',
-        alignContent:'center',
-        height:'54px',
-        boxSizing:'border-box'
+            transform: toast.visible ? 'translateY(0px)' : 'translateY(20px)',
+            transition: 'opacity 0.3s ease, transform 0.3s ease',
+            pointerEvents: 'auto',
+            maxWidth: 'calc(100vw - 48px)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            justifyContent: 'center',
+            alignContent: 'center',
+            height: '54px',
+            boxSizing: 'border-box',
           }}
         >
-          <span style={{ flexShrink: 0 }}>{getIconForIntent(toast.intent)}</span>
+          <span style={{ flexShrink: 0 }}>
+            {getIconForIntent(toast.intent)}
+          </span>
 
           <Body1
             style={{
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
               flexGrow: 1,
             }}
           >
             {toast.content}
           </Body1>
 
-          {(toast.dismissible || toast.intent === "progress") && (
+          {(toast.dismissible || toast.intent === 'progress') && (
             <Button
               onClick={() =>
                 _setToasts?.((prev) => prev.filter((t) => t.id !== toast.id))
               }
               style={{
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                color: "var(--colorNeutralForeground1)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--colorNeutralForeground1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 flexShrink: 0,
               }}
               aria-label="Dismiss"
               icon={<Dismiss20Regular />}
               appearance="subtle"
               shape="circular"
-            >
-              
-              
-            </Button>
+            ></Button>
           )}
         </div>
       ))}

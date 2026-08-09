@@ -1,45 +1,74 @@
-# Dependabot configuration file
-# For more details, refer to: https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
-
+# Dependabot configuration
+# All PRs target main. The "auto-merge" label triggers the auto-merge workflow
+# after all checks pass.
 version: 2
 updates:
-  # GitHub Actions dependencies (grouped)
+  # GitHub Actions — monthly, grouped
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "monthly"
     commit-message:
-      prefix: "build"
-    target-branch: "dependabotchanges"
-    open-pull-requests-limit: 10
+      prefix: "build(deps)"
+    target-branch: "main"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "auto-merge"
     groups:
       all-actions:
         patterns:
           - "*"
 
-  # Python pip dependencies (grouped)
-  - package-ecosystem: "pip"
-    directory: "/src/backend"
-    schedule:
-      interval: "monthly"
-    commit-message:
-      prefix: "build"
-    target-branch: "dependabotchanges"
-    open-pull-requests-limit: 10
-    groups:
-      python-deps:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "pip"
+  # npm frontend — monthly, grouped
+  - package-ecosystem: "npm"
     directory: "/src/frontend"
     schedule:
       interval: "monthly"
     commit-message:
-      prefix: "build"
-    target-branch: "dependabotchanges"
-    open-pull-requests-limit: 10
+      prefix: "build(deps)"
+    target-branch: "main"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "auto-merge"
     groups:
-      python-deps:
+      npm-frontend:
+        patterns:
+          - "*"
+
+  # Python backend — monthly, grouped
+  # "uv", no "pip": el contrato es pyproject+uv.lock; el ecosistema pip
+  # editaría requirements.txt (artefacto exportado) sin tocar el lock.
+  - package-ecosystem: "uv"
+    directory: "/src/backend"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "build(deps)"
+    target-branch: "main"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "auto-merge"
+    groups:
+      python-backend:
+        patterns:
+          - "*"
+
+  # Python MCP server — monthly, grouped
+  - package-ecosystem: "uv"
+    directory: "/src/mcp_server"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "build(deps)"
+    target-branch: "main"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "auto-merge"
+    groups:
+      python-mcp:
         patterns:
           - "*"

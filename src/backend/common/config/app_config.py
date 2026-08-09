@@ -187,8 +187,7 @@ class AppConfig:
         # is usually localhost (unreachable by Azure), so point this at the deployed
         # ca-mcp URL. Falls back to MCP_SERVER_ENDPOINT when unset.
         self.MACAE_MCP_PUBLIC_ENDPOINT = (
-            self._get_optional("MACAE_MCP_PUBLIC_ENDPOINT")
-            or self.MCP_SERVER_ENDPOINT
+            self._get_optional("MACAE_MCP_PUBLIC_ENDPOINT") or self.MCP_SERVER_ENDPOINT
         )
         # Foundry MCP Server (preview) — a NATIVE Foundry MCP (agents, models,
         # evaluations, datasets, prompts, sessions, connections). Attached DIRECTLY

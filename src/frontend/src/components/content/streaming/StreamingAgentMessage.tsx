@@ -5,7 +5,12 @@ import remarkGfm from 'remark-gfm';
 import rehypePrism from 'rehype-prism';
 import { Body1, Tag, makeStyles, tokens } from '@fluentui/react-components';
 import { TaskService } from '@/services';
-import { PersonRegular } from '@fluentui/react-icons';
+import {
+  ArrowDownloadRegular,
+  CopyRegular,
+  PersonRegular,
+  ShareRegular,
+} from '@fluentui/react-icons';
 import { getAgentIcon, getAgentDisplayName } from '@/utils/agentIconUtils';
 import { resolveApiUrl } from '@/api/config';
 
@@ -117,6 +122,32 @@ const useStyles = makeStyles({
     fontSize: '11px',
     opacity: 0.7,
   },
+  // Botón del overlay de imagen (patrón Gemini): base transparente — el
+  // feedback es el hover-state animado, no un chip sólido. :hover no existe
+  // en estilos inline; por eso vive aquí.
+  imageOverlayButton: {
+    width: '32px',
+    height: '32px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: 'none',
+    borderRadius: '8px',
+    backgroundColor: 'rgba(0, 0, 0, 0)',
+    color: '#fff',
+    cursor: 'pointer',
+    padding: '0',
+    // Legibilidad del icono blanco sobre zonas claras de la imagen.
+    filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6))',
+    transitionProperty: 'background-color, transform',
+    transitionDuration: '120ms',
+    ':hover': {
+      backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    },
+    ':active': {
+      transform: 'scale(0.92)',
+    },
+  },
 });
 
 // Check if message is a clarification request
@@ -134,6 +165,136 @@ const isClarificationMessage = (content: string): boolean => {
   const lowerContent = content.toLowerCase();
   return clarificationKeywords.some((keyword) =>
     lowerContent.includes(keyword)
+  );
+};
+
+// Acciones SOBRE la imagen (patrón Gemini): share / copy / download viven en
+// un overlay al hover de la imagen generada — la imagen es el artefacto y sus
+// acciones van con ella, no en una ristra de chips aparte. El click en la
+// imagen sigue abriendo el archivo completo.
+//
+// Los botones están SIEMPRE en el DOM (como en Gemini) y se ocultan/revelan
+// por CSS: montarlos solo en hover los hacía in-inspeccionables (mouseleave
+// los desmontaba antes de que el picker de DevTools llegara) y no animables.
+const GeneratedImage = ({ alt, src, ...props }: any) => {
+  const styles = useStyles();
+  const url = resolveApiUrl(src);
+  const filename = alt || 'generated.png';
+  const [hover, setHover] = React.useState(false);
+
+  const download = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const blob = await (await fetch(url)).blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+    } catch {
+      // ignore (network/permission errors)
+    }
+  };
+  const copy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const blob = await (await fetch(url)).blob();
+      await navigator.clipboard.write([
+        new ClipboardItem({ [blob.type]: blob }),
+      ]);
+    } catch {
+      // Safari no permite ClipboardItem con fetch async / permiso denegado:
+      // al menos queda el enlace en el portapapeles.
+      await navigator.clipboard.writeText(url);
+    }
+  };
+  const share = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: filename, url });
+      } else {
+        await navigator.clipboard.writeText(url);
+      }
+    } catch {
+      // usuario cerró el share sheet — no es un error
+    }
+  };
+
+  return (
+    // span (no div): el markdown envuelve la imagen en un <p>; un div ahí es
+    // HTML inválido y React lo advierte. display:block conserva el layout
+    // exacto que tenía la imagen sola.
+    <span
+      style={{ position: 'relative', display: 'block', margin: '8px 0' }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onFocus={() => setHover(true)}
+      onBlur={() => setHover(false)}
+    >
+      <img
+        alt={alt ?? ''}
+        src={url}
+        {...props}
+        style={{
+          // Rectangular card, visually paired with the chat input: full column
+          // width, 12px radius, 3:2 (the generator now produces 1536×1024 —
+          // the same ratio — so the image fills the card with nothing to crop).
+          width: '100%',
+          aspectRatio: '3 / 2',
+          objectFit: 'cover',
+          maxHeight: '480px',
+          display: 'block',
+          borderRadius: '12px',
+          cursor: 'zoom-in',
+        }}
+        onClick={() => window.open(url, '_blank', 'noopener')}
+      />
+      <span
+        style={{
+          position: 'absolute',
+          top: '8px',
+          right: '8px',
+          display: 'flex',
+          gap: '4px',
+          // Siempre en DOM; visibilidad animada por CSS (fade + deslizamiento).
+          opacity: hover ? 1 : 0,
+          visibility: hover ? 'visible' : 'hidden',
+          transform: hover ? 'translateY(0)' : 'translateY(-4px)',
+          pointerEvents: hover ? 'auto' : 'none',
+          transition: 'opacity 150ms ease, transform 150ms ease',
+        }}
+      >
+        <button
+          type="button"
+          title="Compartir"
+          aria-label="Compartir imagen"
+          className={styles.imageOverlayButton}
+          onClick={share}
+        >
+          <ShareRegular fontSize={16} />
+        </button>
+        <button
+          type="button"
+          title="Copiar imagen"
+          aria-label="Copiar imagen"
+          className={styles.imageOverlayButton}
+          onClick={copy}
+        >
+          <CopyRegular fontSize={16} />
+        </button>
+        <button
+          type="button"
+          title="Descargar"
+          aria-label="Descargar imagen"
+          className={styles.imageOverlayButton}
+          onClick={download}
+        >
+          <ArrowDownloadRegular fontSize={16} />
+        </button>
+      </span>
+    </span>
   );
 };
 
@@ -157,28 +318,7 @@ export const markdownComponents = {
       }}
     />
   ),
-  img: ({ node, alt, src, ...props }: any) => (
-    <img
-      alt={alt ?? ''}
-      src={resolveApiUrl(src)}
-      {...props}
-      style={{
-        // Rectangular card, visually paired with the chat input: full column
-        // width, 12px radius, 3:2 crop (Gemini card proportions). Without a
-        // cap a 1024px-square generated image fills the viewport and reads as
-        // a backdrop, not a message. Click opens the uncropped file.
-        width: '100%',
-        aspectRatio: '3 / 2',
-        objectFit: 'cover',
-        maxHeight: '480px',
-        display: 'block',
-        borderRadius: '12px',
-        margin: '8px 0',
-        cursor: 'zoom-in',
-      }}
-      onClick={() => window.open(resolveApiUrl(src), '_blank', 'noopener')}
-    />
-  ),
+  img: ({ node, ...props }: any) => <GeneratedImage {...props} />,
   a: ({ node, children, href, ...props }: any) => (
     <a
       href={resolveApiUrl(href)}

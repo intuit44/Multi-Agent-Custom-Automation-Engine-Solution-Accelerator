@@ -822,9 +822,7 @@ class OrchestrationManager:
                     if plan:
                         plan.overall_status = PlanStatus.failed
                         await memory_store.update_plan(plan)
-                        self.logger.info(
-                            "Plan '%s' status updated to FAILED", plan_id
-                        )
+                        self.logger.info("Plan '%s' status updated to FAILED", plan_id)
             except Exception as db_error:
                 self.logger.error(
                     "Failed to update plan status to FAILED: %s", db_error

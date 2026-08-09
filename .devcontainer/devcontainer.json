@@ -99,7 +99,7 @@
       ]
     }
   },
-  "forwardPorts": [3001, 8000, 9000, 16274, 16277],
+  "forwardPorts": [3001, 8000, 9000, 16274, 16277, 6080],
   "portsAttributes": {
     "3001": { "label": "Frontend", "onAutoForward": "notify" },
     "8000": { "label": "Backend API", "onAutoForward": "notify" },
