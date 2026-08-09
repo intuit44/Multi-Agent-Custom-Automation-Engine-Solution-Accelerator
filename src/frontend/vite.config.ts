@@ -1,6 +1,15 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
+import { fileURLToPath } from 'url'
+
+const srcPath = fileURLToPath(new URL('./src', import.meta.url))
+
+const chunkGroups: Record<string, string[]> = {
+    vendor: ['react', 'react-dom'],
+    fluentui: ['@fluentui/react-components', '@fluentui/react-icons'],
+    router: ['react-router', 'react-router-dom'],
+}
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -9,7 +18,7 @@ export default defineConfig({
     // Define path aliases (similar to Create React App)
     resolve: {
         alias: {
-            '@': resolve(__dirname, 'src'),
+            '@': resolve(srcPath),
         },
     },
 
@@ -48,11 +57,19 @@ export default defineConfig({
         // Optimize dependencies
         rollupOptions: {
             output: {
-                manualChunks: {
-                    vendor: ['react', 'react-dom'],
-                    fluentui: ['@fluentui/react-components', '@fluentui/react-icons'],
-                    router: ['react-router-dom'],
-                }
+                manualChunks(id) {
+                    if (!id.includes('node_modules')) {
+                        return undefined
+                    }
+
+                    for (const [chunkName, packages] of Object.entries(chunkGroups)) {
+                        if (packages.some((packageName) => id.includes(`/node_modules/${packageName}/`))) {
+                            return chunkName
+                        }
+                    }
+
+                    return undefined
+                },
             }
         }
     },
