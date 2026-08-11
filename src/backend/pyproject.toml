@@ -84,7 +84,10 @@ dev = [
     "types-regex",
     "types-python-dateutil",
     "types-requests",
+    # API/schema contract testing (OpenAPI/GraphQL)
     "schemathesis>=4.24.3",
+    # Record/replay HTTP interactions in tests
     "pytest-recording>=0.13.4",
+    # Mock httpx requests in unit tests
     "respx>=0.23.1",
 ]
