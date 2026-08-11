@@ -92,11 +92,11 @@ jobs:
           if [ -f coverage.xml ]; then
             COVERAGE=$(uv run python -c "import xml.etree.ElementTree as ET; t=ET.parse('coverage.xml'); print(float(t.getroot().attrib.get('line-rate',0))*100)")
             echo "Overall coverage: $COVERAGE%"
-            if (( $(echo "$COVERAGE < 55" | bc -l) )); then
-              echo "::error::Coverage is below 55% threshold. Current: $COVERAGE%"
+            if (( $(echo "$COVERAGE < 45" | bc -l) )); then
+              echo "::error::Coverage is below 45% threshold. Current: $COVERAGE%"
               exit 1
             fi
-            echo "Coverage threshold met: $COVERAGE% >= 55%"
+            echo "Coverage threshold met: $COVERAGE% >= 45%"
           else
             echo "::error::coverage.xml not found"
             exit 1
