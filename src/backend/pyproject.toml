@@ -84,4 +84,7 @@ dev = [
     "types-regex",
     "types-python-dateutil",
     "types-requests",
+    "schemathesis>=4.24.3",
+    "pytest-recording>=0.13.4",
+    "respx>=0.23.1",
 ]

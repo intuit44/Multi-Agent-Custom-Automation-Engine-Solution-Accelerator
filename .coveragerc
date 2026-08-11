@@ -26,15 +26,7 @@ omit =
 # Debt is paid by extraction: pure logic moved out of router.py into small
 # tested modules enters the gate number automatically.
 omit =
-    v4/api/router.py
-    v4/api/oauth_helpers.py
-    v4/common/services/mcp_connections_service.py
-    v4/common/services/mcp_discovery_service.py
-    v4/common/services/mcp_inspector_bridge.py
-    v4/common/services/mcp_resource_service.py
-    v4/common/models/mcp_connection_models.py
-    v4/orchestration/intent_router.py
-    common/services/chat_cosmos_service.py
+
 exclude_lines =
     pragma: no cover
     def __repr__
