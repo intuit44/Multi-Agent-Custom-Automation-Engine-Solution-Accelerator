@@ -6,6 +6,7 @@ import uuid
 from contextlib import AsyncExitStack
 from typing import Any, Optional, cast
 
+from azure.core.exceptions import ResourceNotFoundError
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -690,12 +691,10 @@ async def chat_upload_file(
     contents = await file.read()
     filename = file.filename or "upload"
 
-    if not contents:
-        raise HTTPException(
-            status_code=400,
-            detail="The uploaded file is empty. Please select a file with content.",
-        )
-
+    # No size judgement here: this endpoint is transport. Whether the file has
+    # 0 bytes or 3000 is content, and reading content is the code interpreter's
+    # job — rejecting an empty upload also denied the model the chance to say
+    # "this file is empty", which is an answer the user asked for.
     logger.info(
         "Uploading file to Foundry: name=%s size=%d bytes content_type=%s",
         filename,
@@ -905,6 +904,15 @@ async def chat_download_file(
         return _file_response(data, filename)
     except HTTPException:
         raise  # preserve the original status code (e.g. 400 for missing container_id)
+    except ResourceNotFoundError as nf:
+        # The AgentsClient branch above raises azure-core's ResourceNotFoundError,
+        # not openai's NotFoundError, so it never hit the 410 handler and fell
+        # through to the generic 500 below — a missing file reported as a server
+        # fault. 404 is the truth here, and the schema already declares it.
+        logger.info("Generated file not found in Foundry: file_id=%s", file_id)
+        raise HTTPException(
+            status_code=404, detail=f"Generated file '{file_id}' not found"
+        ) from nf
     except Exception as ex:
         logger.error(
             "File download from Foundry failed: file_id=%s error=%s", file_id, ex
@@ -1956,6 +1964,7 @@ class _RouterChatClient:
         prompt: str,
         history: Optional[list] = None,
         allow_plan: bool = True,
+        file_ids: Optional[list[str]] = None,
         **_ignored,
     ):
         """Entry point: the Model Router picks a CAPABILITY, the backend runs it.
@@ -2391,6 +2400,7 @@ class _RouterChatClient:
         self,
         prompt: str,
         history: Optional[list] = None,
+        file_ids: Optional[list[str]] = None,
         *,
         use_code_interpreter: bool = False,
         use_toolbox: bool = False,
@@ -3103,7 +3113,14 @@ async def _close_direct_response_agents(agents: list[Any]) -> None:
                 )
 
 
-@app_v4.post("/chat/message/stream")
+@app_v4.post(
+    "/chat/message/stream",
+    # The route returns SSE, but FastAPI infers application/json from the
+    # handler, so the published contract described a body this route never
+    # sends — a generated client would parse the stream as JSON and fail.
+    response_class=StreamingResponse,
+    responses={200: {"content": {"text/event-stream": {}}}},
+)
 async def chat_message_stream(
     background_tasks: BackgroundTasks,
     chat_request: ChatMessageRequest,
@@ -3599,9 +3616,9 @@ async def chat_message_stream(
                         server_name = getattr(content, "server_name", None) or "unknown"
                         last_mcp_tool_call = (tool_name, server_name)
                         _ledger_pending_args = str(content.arguments or "")[:300]
-                        _key = ("calling", tool_name, server_name)
-                        if _key != _last_tool_activity_key:
-                            _last_tool_activity_key = _key
+                        _mcp_call_key = ("calling", tool_name, server_name)
+                        if _mcp_call_key != _last_tool_activity_key:
+                            _last_tool_activity_key = _mcp_call_key
                             yield _sse_event(
                                 {
                                     "type": "tool_activity",
@@ -3627,9 +3644,9 @@ async def chat_message_stream(
                                 f" -> {str(content_preview)[:180]}"
                             )
                         _ledger_pending_args = ""
-                        _key = ("result", tool_name, server_name)
-                        if _key != _last_tool_activity_key:
-                            _last_tool_activity_key = _key
+                        _mcp_result_key = ("result", tool_name, server_name)
+                        if _mcp_result_key != _last_tool_activity_key:
+                            _last_tool_activity_key = _mcp_result_key
                             yield _sse_event(
                                 {
                                     "type": "tool_activity",
@@ -4246,7 +4263,7 @@ async def notify_session_reauth(session_id: str, request: Request):
     """
     user_id, tenant_id = _extract_auth(request)
     chat_svc = await get_chat_cosmos_service()
-    await chat_svc.clear_foundry_conversation_id(session_id, user_id)  # type: ignore
+    await chat_svc.clear_foundry_conversation_id(session_id, user_id)
     logger.info(
         "Re-auth notified: cleared foundry_conversation_id for session=%s user=%s",
         session_id,

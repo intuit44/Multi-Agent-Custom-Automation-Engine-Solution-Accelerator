@@ -352,35 +352,35 @@ class ChatCosmosService:
 
     # ── Foundry conversation continuity ─────────────────────────
 
-    # async def clear_foundry_conversation_id(
-    #     self,
-    #     session_id: str,
-    #     user_id: str,
-    # ) -> None:
-    #     """Invalidate the persisted Foundry conversation_id.
+    async def clear_foundry_conversation_id(
+        self,
+        session_id: str,
+        user_id: str,
+    ) -> None:
+        """Invalidate the persisted Foundry conversation_id.
 
-    #     Call this when the user re-authenticates (new OBO token) so the next
-    #     agent.invoke starts a fresh Foundry thread instead of trying to resume
-    #     a thread that is no longer accessible with the new credential.
-    #     """
-    #     if not await self._ensure() or self._container is None:
-    #         return
-    #     try:
-    #         session = await self.get_session(session_id, user_id)
-    #         if session and session.get("foundry_conversation_id"):
-    #             session["foundry_conversation_id"] = None
-    #             session["updated_at"] = _utc_now_iso()
-    #             await self._container.upsert_item(session)
-    #             logger.info(
-    #                 "Cleared foundry_conversation_id for session %s (re-auth)",
-    #                 session_id,
-    #             )
-    #     except Exception as e:
-    #         logger.warning(
-    #             "Could not clear foundry_conversation_id for session %s: %s",
-    #             session_id,
-    #             e,
-    #         )
+        Call this when the user re-authenticates (new OBO token) so the next
+        agent.invoke starts a fresh Foundry thread instead of trying to resume
+        a thread that is no longer accessible with the new credential.
+        """
+        if not await self._ensure() or self._container is None:
+            return
+        try:
+            session = await self.get_session(session_id, user_id)
+            if session and session.get("foundry_conversation_id"):
+                session["foundry_conversation_id"] = None
+                session["updated_at"] = _utc_now_iso()
+                await self._container.upsert_item(session)
+                logger.info(
+                    "Cleared foundry_conversation_id for session %s (re-auth)",
+                    session_id,
+                )
+        except Exception as e:
+            logger.warning(
+                "Could not clear foundry_conversation_id for session %s: %s",
+                session_id,
+                e,
+            )
 
     async def get_foundry_conversation_id(
         self,

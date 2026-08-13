@@ -165,3 +165,4 @@ archive/
 report/
 screenshots/
 report.html
+tests/test_chat_flow_generated.py
