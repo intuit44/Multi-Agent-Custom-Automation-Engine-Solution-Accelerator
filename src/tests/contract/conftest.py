@@ -138,11 +138,56 @@ _TELEMETRY_HOST_MARKERS = (
 
 
 def _drop_telemetry(request):
-    """Return None so VCR neither records nor matches App Insights traffic."""
+    """Drop telemetry traffic and scrub requests so cassettes are safe + replayable."""
     host = (request.host or "").lower()
     if any(marker in host for marker in _TELEMETRY_HOST_MARKERS):
         return None
-    return request
+
+    import json
+    import re
+
+    # Normalize real Azure resource hosts into the contract placeholders used in replay.
+    uri = request.uri
+    uri = re.sub(
+        r"https://[^/]+\\.blob\\.core\\.windows\\.net",
+        "https://contract.blob.core.windows.net",
+        uri,
+    )
+    uri = re.sub(
+        r"https://[^/]+\\.documents\\.azure\\.com(?::443)?",
+        "https://contract.documents.azure.com:443",
+        uri,
+    )
+    uri = re.sub(
+        r"https://[^/]+\\.services\\.ai\\.azure\\.com",
+        "https://contract.services.ai.azure.com",
+        uri,
+    )
+    uri = re.sub(
+        r"https://[^/]+\\.openai\\.azure\\.com",
+        "https://contract.openai.azure.com",
+        uri,
+    )
+
+    # Redact large/sensitive JSON payload fields (matching does not include body).
+    body = request.body
+    if body:
+        try:
+            text = (
+                body.decode("utf-8", "replace")
+                if isinstance(body, (bytes, bytearray))
+                else str(body)
+            )
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                for k in ("messages", "tools", "history"):
+                    if k in parsed:
+                        parsed[k] = "[REDACTED]"
+                body = json.dumps(parsed).encode()
+        except Exception:
+            pass
+
+    return request._replace(uri=uri, body=body)
 
 
 def _scrub_response(response):
