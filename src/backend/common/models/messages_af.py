@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
 # ---------------------------------------------------------------------------
 # Enumerations
@@ -324,7 +324,11 @@ class ChatMessageRequest(BaseModel):
     # UI chat|plan selector. False = this message may NEVER create a plan (the
     # run_plan capability is withheld from the router). Plan position in the UI
     # does not use this flag — it calls /process_request explicitly instead.
-    allow_plan: bool = True
+    # StrictBool: plain `bool` let pydantic coerce 0/1 (and "true"/"false"),
+    # so a body the schema declares invalid was accepted and silently decided
+    # whether a plan could be created. The frontend already sends a real
+    # boolean (ChatService.tsx:60) or omits the field.
+    allow_plan: StrictBool = True
 
 
 class ChatMessageResponse(BaseModel):

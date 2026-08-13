@@ -1,0 +1,972 @@
+interactions:
+- request:
+    body: null
+    headers:
+      Accept:
+      - application/xml
+      User-Agent:
+      - azsdk-python-storage-blob/12.27.1 Python/3.11.13 (Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31)
+      authorization:
+      - '[REDACTED]'
+      traceparent:
+      - 00-e3e70682c2094cac629f6fbed82c07cd-4da5e709d4713d60-01
+      x-ms-client-request-id:
+      - 7e519ac2-9603-11f1-ae72-1610e8660822
+      x-ms-date:
+      - Wed, 12 Aug 2026 04:08:37 GMT
+      x-ms-range:
+      - bytes=0-33554431
+      x-ms-version:
+      - '2025-11-05'
+    method: GET
+    uri: https://stpslc25991vme66zmins.blob.core.windows.net/generated-files/0
+  response:
+    body:
+      string: "\uFEFF<?xml version=\"1.0\" encoding=\"utf-8\"?><Error><Code>BlobNotFound</Code><Message>The
+        specified blob does not exist.\nRequestId:f4523417-201e-0075-6610-2a197e000000\nTime:2026-08-12T04:08:39.1665425Z</Message></Error>"
+    headers:
+      Content-Length:
+      - '215'
+      Content-Type:
+      - application/xml
+      Date:
+      - Wed, 12 Aug 2026 04:08:38 GMT
+      Server:
+      - Windows-Azure-Blob/1.0 Microsoft-HTTPAPI/2.0
+      x-ms-client-request-id:
+      - 7e519ac2-9603-11f1-ae72-1610e8660822
+      x-ms-error-code:
+      - BlobNotFound
+      x-ms-request-id:
+      - f4523417-201e-0075-6610-2a197e000000
+      x-ms-version:
+      - '2025-11-05'
+    status:
+      code: 404
+      message: The specified blob does not exist.
+- request:
+    body: null
+    headers:
+      Accept:
+      - application/json
+      User-Agent:
+      - azsdk-python-ai-agents/1.2.0b5 Python/3.11.13 (Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31)
+      authorization:
+      - '[REDACTED]'
+      traceparent:
+      - 00-e3e70682c2094cac629f6fbed82c07cd-e87a1613e443df78-01
+      x-ms-client-request-id:
+      - 7f131788-9603-11f1-ae72-1610e8660822
+    method: GET
+    uri: https://aif-pslc25991vme66zmins.services.ai.azure.com/api/projects/proj-pslc25991vme66zmins/files/0?api-version=2025-05-15-preview
+  response:
+    body:
+      string: "{\n  \"error\": {\n    \"code\": \"notFound\",\n    \"message\": \"The
+        specified entity cannot be found.\"\n  }\n}"
+    headers:
+      Access-Control-Expose-Headers:
+      - Operation-Location,Location,Apim-Request-Id,x-agent-session-id,x-agent-invocation-id
+      Content-Type:
+      - application/json; charset=utf-8
+      Date:
+      - Wed, 12 Aug 2026 04:08:40 GMT
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Accept-Encoding
+      api-supported-versions:
+      - 2022-12-01,2023-03-15-preview,2023-05-15,2023-06-01-preview,2023-07-01-preview,2023-08-01-preview,2023-09-01-preview,2023-10-01-preview,2023-12-01-preview,2024-02-01,2024-02-15-preview,2024-03-01-preview,2024-04-01-preview,2024-04-15-preview,2024-05-01-preview,2024-06-01,2024-07-01-preview,2024-08-01-preview,2024-09-01-preview,2024-10-01-preview,2024-10-21,2024-11-01-preview,2024-12-01-preview,2025-01-01-preview,2025-02-01-preview,2025-03-01-preview,2025-04-01-preview,2025-04-28,1
+      apim-request-id:
+      - 2aca077b-a673-497d-b447-2e0f6d44b105
+      azureml-served-by-cluster:
+      - hyena-eastus2-01
+      content-length:
+      - '99'
+      request-context:
+      - appId=
+      strict-transport-security:
+      - max-age=31536000; includeSubDomains; preload
+      x-content-type-options:
+      - nosniff
+      x-ms-region:
+      - East US 2
+      x-ms-response-type:
+      - standard
+    status:
+      code: 404
+      message: Not Found
+- request:
+    body: null
+    headers:
+      Accept:
+      - application/json
+      Cache-Control:
+      - no-cache
+      Content-Length:
+      - '0'
+      User-Agent:
+      - azsdk-python-cosmos-async/4.9.0 Python/3.11.13 (Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31)
+      authorization:
+      - '[REDACTED]'
+      traceparent:
+      - 00-e3e70682c2094cac629f6fbed82c07cd-7a024204f7c1bd87-01
+      x-ms-date:
+      - Wed, 12 Aug 2026 04:08:40 GMT
+      x-ms-documentdb-query-iscontinuationexpected:
+      - 'False'
+      x-ms-version:
+      - '2020-07-15'
+    method: GET
+    uri: https://cosmos-pslc25991vme66zmins.documents.azure.com/
+  response:
+    body:
+      string: '{"_self":"","id":"cosmos-pslc25991vme66zmins","_rid":"cosmos-pslc25991vme66zmins-eastus2.sql.cosmos.azure.com","media":"//media/","addresses":"//addresses/","_dbs":"//dbs/","writableLocations":[{"name":"East
+        US 2","databaseAccountEndpoint":"https://cosmos-pslc25991vme66zmins-eastus2.documents.azure.com:443/"}],"readableLocations":[{"name":"East
+        US 2","databaseAccountEndpoint":"https://cosmos-pslc25991vme66zmins-eastus2.documents.azure.com:443/"}],"enableMultipleWriteLocations":false,"continuousBackupEnabled":true,"enableNRegionSynchronousCommit":false,"enablePerPartitionFailoverBehavior":false,"disableCrossRegionalHedging":false,"userReplicationPolicy":{"asyncReplication":false,"minReplicaSetSize":3,"maxReplicasetSize":4},"userConsistencyPolicy":{"defaultConsistencyLevel":"Session"},"systemReplicationPolicy":{"minReplicaSetSize":3,"maxReplicasetSize":4},"readPolicy":{"primaryReadCoefficient":1,"secondaryReadCoefficient":1},"queryEngineConfiguration":"{\"allowNewKeywords\":true,\"maxJoinsPerSqlQuery\":10,\"maxQueryRequestTimeoutFraction\":0.9,\"maxSqlQueryInputLength\":524288,\"maxUdfRefPerSqlQuery\":10,\"queryMaxInMemorySortDocumentCount\":-1000,\"spatialMaxGeometryPointCount\":256,\"sqlAllowNonFiniteNumbers\":false,\"sqlDisableOptimizationFlags\":0,\"sqlQueryILDisableOptimizationFlags\":0,\"clientDisableOptimisticDirectExecution\":false,\"queryEnableFullText\":true,\"queryEnableFullTextPreviewFeatures\":false,\"queryMaxFullTextScoreSearchTerms\":30,\"queryMaxRrfArgumentCount\":100,\"enableSpatialIndexing\":true,\"maxInExpressionItemsCount\":2147483647,\"maxLogicalAndPerSqlQuery\":2147483647,\"maxLogicalOrPerSqlQuery\":2147483647,\"maxSpatialQueryCells\":2147483647,\"sqlAllowAggregateFunctions\":true,\"sqlAllowGroupByClause\":true,\"sqlAllowLike\":true,\"sqlAllowSubQuery\":true,\"sqlAllowScalarSubQuery\":true,\"sqlAllowTop\":true}"}'
+    headers:
+      Cache-Control:
+      - no-store, no-cache
+      Content-Length:
+      - '1864'
+      Content-Location:
+      - https://cosmos-pslc25991vme66zmins.documents.azure.com/
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 12 Aug 2026 04:08:42 GMT
+      Pragma:
+      - no-cache
+      Server:
+      - Microsoft-HTTPAPI/2.0
+      Strict-Transport-Security:
+      - max-age=31536000
+      x-ms-aad-applied-role-assignment:
+      - 15c70179-063b-47bd-af70-81426f8dc873
+      x-ms-databaseaccount-consumed-mb:
+      - '0'
+      x-ms-databaseaccount-provisioned-mb:
+      - '0'
+      x-ms-databaseaccount-reserved-mb:
+      - '0'
+      x-ms-gatewayversion:
+      - version=2.14.0
+      x-ms-max-media-storage-usage-mb:
+      - '0'
+      x-ms-media-storage-usage-mb:
+      - '0'
+    status:
+      code: 200
+      message: Ok
+- request:
+    body: null
+    headers:
+      Accept:
+      - application/json
+      Cache-Control:
+      - no-cache
+      Content-Length:
+      - '0'
+      User-Agent:
+      - azsdk-python-cosmos-async/4.9.0 Python/3.11.13 (Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31)
+      authorization:
+      - '[REDACTED]'
+      traceparent:
+      - 00-e3e70682c2094cac629f6fbed82c07cd-9558867f5ba91faf-01
+      x-ms-date:
+      - Wed, 12 Aug 2026 04:08:40 GMT
+      x-ms-documentdb-query-iscontinuationexpected:
+      - 'False'
+      x-ms-version:
+      - '2020-07-15'
+    method: GET
+    uri: https://cosmos-pslc25991vme66zmins.documents.azure.com/dbs/macae/colls/chat_sessions/
+  response:
+    body:
+      string: '{"id":"chat_sessions","indexingPolicy":{"indexingMode":"consistent","automatic":true,"includedPaths":[{"path":"/*"}],"excludedPaths":[{"path":"/\"_etag\"/?"}],"fullTextIndexes":[]},"partitionKey":{"paths":["/user_id"],"kind":"Hash"},"defaultTtl":-1,"uniqueKeyPolicy":{"uniqueKeys":[]},"conflictResolutionPolicy":{"mode":"LastWriterWins","conflictResolutionPath":"/_ts","conflictResolutionProcedure":""},"backupPolicy":{"type":1},"geospatialConfig":{"type":"Geography"},"_rid":"Nv1qAMaY+yU=","_ts":1775119385,"_self":"dbs/Nv1qAA==/colls/Nv1qAMaY+yU=/","_etag":"\"00001e02-0000-0200-0000-69ce2c190000\"","_docs":"docs/","_sprocs":"sprocs/","_triggers":"triggers/","_udfs":"udfs/","_conflicts":"conflicts/","computedProperties":[]}'
+    headers:
+      Cache-Control:
+      - no-store, no-cache
+      Content-Length:
+      - '728'
+      Content-Location:
+      - https://cosmos-pslc25991vme66zmins.documents.azure.com/dbs/macae/colls/chat_sessions/
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 12 Aug 2026 04:08:43 GMT
+      Etag:
+      - '"00001e02-0000-0200-0000-69ce2c190000"'
+      Pragma:
+      - no-cache
+      Server:
+      - Microsoft-HTTPAPI/2.0
+      Strict-Transport-Security:
+      - max-age=31536000
+      collection-partition-index:
+      - '0'
+      collection-service-index:
+      - '0'
+      lsn:
+      - '12506'
+      x-ms-aad-applied-role-assignment:
+      - 15c70179-063b-47bd-af70-81426f8dc873
+      x-ms-activity-id:
+      - 921e1dd5-64d6-45c4-abbc-265e20d8c7f4
+      x-ms-alt-content-path:
+      - dbs/macae
+      x-ms-collection-security-identifier:
+      - '"b190015a-5b27-4fb0-b88e-c8e2be696f75"'
+      x-ms-content-path:
+      - Nv1qAA==
+      x-ms-cosmos-internal-partition-id:
+      - 940a8d29-77ef-46cb-b959-8352bf51b1ec
+      x-ms-cosmos-item-llsn:
+      - '2'
+      x-ms-cosmos-llsn:
+      - '12506'
+      x-ms-cosmos-max-content-length:
+      - '2097152'
+      x-ms-cosmos-physical-partition-id:
+      - '0'
+      x-ms-documentdb-partitionkeyrangeid:
+      - '0'
+      x-ms-gatewayversion:
+      - version=2.14.0
+      x-ms-global-Committed-lsn:
+      - '12506'
+      x-ms-item-lsn:
+      - '2'
+      x-ms-last-state-change-utc:
+      - Fri, 07 Aug 2026 22:48:31.351 GMT
+      x-ms-number-of-read-regions:
+      - '0'
+      x-ms-request-charge:
+      - '2'
+      x-ms-request-duration-ms:
+      - '21.378'
+      x-ms-schemaversion:
+      - '1.21'
+      x-ms-serviceversion:
+      - version=2.14.0.0
+      x-ms-session-token:
+      - 0:-1#12506
+      x-ms-transport-request-id:
+      - '1'
+      x-ms-xp-role:
+      - '1'
+    status:
+      code: 200
+      message: Ok
+- request:
+    body: null
+    headers:
+      Accept:
+      - application/json
+      Cache-Control:
+      - no-cache
+      Content-Length:
+      - '0'
+      User-Agent:
+      - azsdk-python-cosmos-async/4.9.0 Python/3.11.13 (Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31)
+      authorization:
+      - '[REDACTED]'
+      traceparent:
+      - 00-e3e70682c2094cac629f6fbed82c07cd-8133287637ebdcd9-01
+      x-ms-cosmos-intended-collection-rid:
+      - Nv1qAMaY+yU=
+      x-ms-date:
+      - Wed, 12 Aug 2026 04:08:42 GMT
+      x-ms-documentdb-partitionkey:
+      - '["dev-local-user-0000-0000-000000000001"]'
+      x-ms-documentdb-query-iscontinuationexpected:
+      - 'False'
+      x-ms-version:
+      - '2020-07-15'
+    method: GET
+    uri: https://cosmos-pslc25991vme66zmins-eastus2.documents.azure.com/dbs/macae/colls/chat_sessions/docs/00000000-0000-0000-0000-000000000123/
+  response:
+    body:
+      string: "{\"id\":\"00000000-0000-0000-0000-000000000123\",\"user_id\":\"dev-local-user-0000-0000-000000000001\",\"session_name\":\"\",\"is_active\":true,\"messages\":[{\"id\":\"44876664-26c6-41b8-a53a-434ba3e0f4cc\",\"content\":\"\",\"role\":\"user\",\"timestamp\":\"2026-08-11T21:09:30.538087Z\",\"metadata\":{}},{\"id\":\"e5947c60-8d55-4a67-a0a3-853811cf158e\",\"content\":\"\u274C
+        **Unexpected Error**\\n\\nFull direct-response workflow build is no longer
+        supported. Use proxy_only=True or route TASK intent through process_request.\\n\\nError
+        reference: unknown\\nRequest ID: not available\\n\\nPlease contact support
+        with this information.\",\"role\":\"assistant\",\"timestamp\":\"2026-08-11T21:09:38.480979Z\",\"metadata\":{\"intent\":\"conversational\"}},{\"id\":\"cef77690-9ea4-4cc7-b4ee-53af4122cdda\",\"content\":\"\",\"role\":\"user\",\"timestamp\":\"2026-08-11T23:06:49.570621Z\",\"metadata\":{}},{\"id\":\"12ff3874-74d2-4879-aa53-1d176b399227\",\"content\":\"\u274C
+        **Unexpected Error**\\n\\nFull direct-response workflow build is no longer
+        supported. Use proxy_only=True or route TASK intent through process_request.\\n\\nError
+        reference: unknown\\nRequest ID: not available\\n\\nPlease contact support
+        with this information.\",\"role\":\"assistant\",\"timestamp\":\"2026-08-11T23:06:56.837267Z\",\"metadata\":{\"intent\":\"conversational\"}}],\"message_count\":4,\"created_at\":\"2026-08-11T21:09:30.538061Z\",\"updated_at\":\"2026-08-11T23:06:56.837267Z\",\"last_message_at\":\"2026-08-11T23:06:56.837267Z\",\"_rid\":\"Nv1qAMaY+yUHBQAAAAAAAA==\",\"_self\":\"dbs/Nv1qAA==/colls/Nv1qAMaY+yU=/docs/Nv1qAMaY+yUHBQAAAAAAAA==/\",\"_etag\":\"\\\"6200b4d5-0000-0200-0000-6a7bab120000\\\"\",\"_attachments\":\"attachments/\",\"_ts\":1786489618}"
+    headers:
+      Content-Length:
+      - '1590'
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 12 Aug 2026 04:08:42 GMT
+      Etag:
+      - '"6200b4d5-0000-0200-0000-6a7bab120000"'
+      Server:
+      - Compute
+      lsn:
+      - '12506'
+      x-ms-aad-applied-role-assignment:
+      - 15c70179-063b-47bd-af70-81426f8dc873
+      x-ms-activity-id:
+      - 503791f2-0082-45da-be04-07333cc2b21f
+      x-ms-alt-content-path:
+      - dbs/macae/colls/chat_sessions
+      x-ms-content-path:
+      - Nv1qAMaY+yU=
+      x-ms-cosmos-item-llsn:
+      - '12494'
+      x-ms-cosmos-llsn:
+      - '12506'
+      x-ms-cosmos-physical-partition-id:
+      - '0'
+      x-ms-documentdb-partitionkeyrangeid:
+      - '0'
+      x-ms-gatewayversion:
+      - 2.0.0
+      x-ms-global-Committed-lsn:
+      - '12506'
+      x-ms-item-lsn:
+      - '12494'
+      x-ms-last-state-change-utc:
+      - Fri, 07 Aug 2026 22:48:31.351 GMT
+      x-ms-number-of-read-regions:
+      - '0'
+      x-ms-request-charge:
+      - '1.05'
+      x-ms-request-duration-ms:
+      - '25.9856'
+      x-ms-resource-quota:
+      - documentSize=51200;documentsSize=52428800;documentsCount=-1;collectionSize=52428800;
+      x-ms-resource-usage:
+      - documentSize=15;documentsSize=15121;documentsCount=1285;collectionSize=15459;
+      x-ms-schemaversion:
+      - '1.21'
+      x-ms-serviceversion:
+      - '2020-07-15'
+      x-ms-session-token:
+      - 0:-1#12506
+      x-ms-thinclient-route-via-proxy:
+      - '1'
+      x-ms-transport-request-id:
+      - '8'
+      x-ms-xp-role:
+      - '1'
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"id": "00000000-0000-0000-0000-000000000123", "user_id": "dev-local-user-0000-0000-000000000001",
+      "session_name": "", "is_active": true, "messages": [{"id": "44876664-26c6-41b8-a53a-434ba3e0f4cc",
+      "content": "", "role": "user", "timestamp": "2026-08-11T21:09:30.538087Z", "metadata":
+      {}}, {"id": "e5947c60-8d55-4a67-a0a3-853811cf158e", "content": "\u274c **Unexpected
+      Error**\n\nFull direct-response workflow build is no longer supported. Use proxy_only=True
+      or route TASK intent through process_request.\n\nError reference: unknown\nRequest
+      ID: not available\n\nPlease contact support with this information.", "role":
+      "assistant", "timestamp": "2026-08-11T21:09:38.480979Z", "metadata": {"intent":
+      "conversational"}}, {"id": "cef77690-9ea4-4cc7-b4ee-53af4122cdda", "content":
+      "", "role": "user", "timestamp": "2026-08-11T23:06:49.570621Z", "metadata":
+      {}}, {"id": "12ff3874-74d2-4879-aa53-1d176b399227", "content": "\u274c **Unexpected
+      Error**\n\nFull direct-response workflow build is no longer supported. Use proxy_only=True
+      or route TASK intent through process_request.\n\nError reference: unknown\nRequest
+      ID: not available\n\nPlease contact support with this information.", "role":
+      "assistant", "timestamp": "2026-08-11T23:06:56.837267Z", "metadata": {"intent":
+      "conversational"}}, {"id": "d29669e4-6c7a-4b77-a86d-836b6e774dde", "content":
+      "", "role": "user", "timestamp": "2026-08-12T04:08:42.735532Z", "metadata":
+      {}}], "message_count": 5, "created_at": "2026-08-11T21:09:30.538061Z", "updated_at":
+      "2026-08-12T04:08:42.735532Z", "last_message_at": "2026-08-12T04:08:42.735532Z",
+      "_rid": "Nv1qAMaY+yUHBQAAAAAAAA==", "_self": "dbs/Nv1qAA==/colls/Nv1qAMaY+yU=/docs/Nv1qAMaY+yUHBQAAAAAAAA==/",
+      "_etag": "\"6200b4d5-0000-0200-0000-6a7bab120000\"", "_attachments": "attachments/",
+      "_ts": 1786489618}'
+    headers:
+      Accept:
+      - application/json
+      Cache-Control:
+      - no-cache
+      Content-Length:
+      - '1725'
+      Content-Type:
+      - application/json
+      User-Agent:
+      - azsdk-python-cosmos-async/4.9.0 Python/3.11.13 (Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31)
+      authorization:
+      - '[REDACTED]'
+      traceparent:
+      - 00-e3e70682c2094cac629f6fbed82c07cd-c17c627923c6612f-01
+      x-ms-cosmos-intended-collection-rid:
+      - Nv1qAMaY+yU=
+      x-ms-date:
+      - Wed, 12 Aug 2026 04:08:42 GMT
+      x-ms-documentdb-is-upsert:
+      - 'True'
+      x-ms-documentdb-partitionkey:
+      - '["dev-local-user-0000-0000-000000000001"]'
+      x-ms-documentdb-query-iscontinuationexpected:
+      - 'False'
+      x-ms-version:
+      - '2020-07-15'
+    method: POST
+    uri: https://cosmos-pslc25991vme66zmins-eastus2.documents.azure.com/dbs/macae/colls/chat_sessions/docs/
+  response:
+    body:
+      string: "{\"id\":\"00000000-0000-0000-0000-000000000123\",\"user_id\":\"dev-local-user-0000-0000-000000000001\",\"session_name\":\"\",\"is_active\":true,\"messages\":[{\"id\":\"44876664-26c6-41b8-a53a-434ba3e0f4cc\",\"content\":\"\",\"role\":\"user\",\"timestamp\":\"2026-08-11T21:09:30.538087Z\",\"metadata\":{}},{\"id\":\"e5947c60-8d55-4a67-a0a3-853811cf158e\",\"content\":\"\u274C
+        **Unexpected Error**\\n\\nFull direct-response workflow build is no longer
+        supported. Use proxy_only=True or route TASK intent through process_request.\\n\\nError
+        reference: unknown\\nRequest ID: not available\\n\\nPlease contact support
+        with this information.\",\"role\":\"assistant\",\"timestamp\":\"2026-08-11T21:09:38.480979Z\",\"metadata\":{\"intent\":\"conversational\"}},{\"id\":\"cef77690-9ea4-4cc7-b4ee-53af4122cdda\",\"content\":\"\",\"role\":\"user\",\"timestamp\":\"2026-08-11T23:06:49.570621Z\",\"metadata\":{}},{\"id\":\"12ff3874-74d2-4879-aa53-1d176b399227\",\"content\":\"\u274C
+        **Unexpected Error**\\n\\nFull direct-response workflow build is no longer
+        supported. Use proxy_only=True or route TASK intent through process_request.\\n\\nError
+        reference: unknown\\nRequest ID: not available\\n\\nPlease contact support
+        with this information.\",\"role\":\"assistant\",\"timestamp\":\"2026-08-11T23:06:56.837267Z\",\"metadata\":{\"intent\":\"conversational\"}},{\"id\":\"d29669e4-6c7a-4b77-a86d-836b6e774dde\",\"content\":\"\",\"role\":\"user\",\"timestamp\":\"2026-08-12T04:08:42.735532Z\",\"metadata\":{}}],\"message_count\":5,\"created_at\":\"2026-08-11T21:09:30.538061Z\",\"updated_at\":\"2026-08-12T04:08:42.735532Z\",\"last_message_at\":\"2026-08-12T04:08:42.735532Z\",\"_rid\":\"Nv1qAMaY+yUHBQAAAAAAAA==\",\"_self\":\"dbs/Nv1qAA==/colls/Nv1qAMaY+yU=/docs/Nv1qAMaY+yUHBQAAAAAAAA==/\",\"_etag\":\"\\\"7900640b-0000-0200-0000-6a7bf1cb0000\\\"\",\"_attachments\":\"attachments/\",\"_ts\":1786507723}"
+    headers:
+      Content-Length:
+      - '1719'
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 12 Aug 2026 04:08:42 GMT
+      Etag:
+      - '"7900640b-0000-0200-0000-6a7bf1cb0000"'
+      Server:
+      - Compute
+      lsn:
+      - '12507'
+      x-ms-aad-applied-role-assignment:
+      - 15c70179-063b-47bd-af70-81426f8dc873
+      x-ms-activity-id:
+      - 83466dcf-34f6-4cf0-adf8-1dcd1bd46e01
+      x-ms-alt-content-path:
+      - dbs/macae/colls/chat_sessions
+      x-ms-content-path:
+      - Nv1qAMaY+yU=
+      x-ms-cosmos-internal-partition-id:
+      - 940a8d29-77ef-46cb-b959-8352bf51b1ec
+      x-ms-cosmos-llsn:
+      - '12507'
+      x-ms-cosmos-physical-partition-id:
+      - '0'
+      x-ms-cosmos-quorum-acked-llsn:
+      - '12506'
+      x-ms-current-replica-set-size:
+      - '4'
+      x-ms-current-write-quorum:
+      - '3'
+      x-ms-documentdb-partitionkeyrangeid:
+      - '0'
+      x-ms-gatewayversion:
+      - 2.0.0
+      x-ms-global-Committed-lsn:
+      - '12506'
+      x-ms-last-state-change-utc:
+      - Tue, 11 Aug 2026 02:10:06.735 GMT
+      x-ms-number-of-read-regions:
+      - '0'
+      x-ms-quorum-acked-lsn:
+      - '12506'
+      x-ms-request-charge:
+      - '15.05'
+      x-ms-request-duration-ms:
+      - '27.577'
+      x-ms-resource-quota:
+      - documentSize=51200;documentsSize=52428800;documentsCount=-1;collectionSize=52428800;
+      x-ms-resource-usage:
+      - documentSize=15;documentsSize=15104;documentsCount=1285;collectionSize=15443;
+      x-ms-schemaversion:
+      - '1.21'
+      x-ms-serviceversion:
+      - version=2.14.0.0
+      x-ms-session-token:
+      - 0:-1#12507
+      x-ms-transport-request-id:
+      - '1'
+      x-ms-xp-role:
+      - '1'
+    status:
+      code: 200
+      message: Ok
+- request:
+    body: '{"query":"SELECT * FROM c WHERE c.data_type=@data_type ORDER BY c.created
+      DESC","parameters":[{"name":"@data_type","value":"team_config"}]}'
+    headers:
+      Accept:
+      - application/json
+      Cache-Control:
+      - no-cache
+      Content-Length:
+      - '139'
+      Content-Type:
+      - application/query+json
+      User-Agent:
+      - azsdk-python-cosmos-async/4.9.0 Python/3.11.13 (Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31)
+      authorization:
+      - '[REDACTED]'
+      traceparent:
+      - 00-e3e70682c2094cac629f6fbed82c07cd-e6f4590b9a164106-01
+      x-ms-cosmos-correlated-activityid:
+      - 75df72f4-8be6-4d5f-99e0-6d0f0d767fe4
+      x-ms-date:
+      - Wed, 12 Aug 2026 04:08:42 GMT
+      x-ms-documentdb-isquery:
+      - 'true'
+      x-ms-documentdb-query-enablecrosspartition:
+      - 'True'
+      x-ms-documentdb-query-iscontinuationexpected:
+      - 'False'
+      x-ms-version:
+      - '2020-07-15'
+    method: POST
+    uri: https://cosmos-pslc25991vme66zmins.documents.azure.com/dbs/macae/colls/memory/docs/
+  response:
+    body:
+      string: '{"code":"BadRequest","message":"The provided cross partition query
+        can not be directly served by the gateway. This is a first chance (internal)
+        exception that all newer clients will know how to handle gracefully. This
+        exception is traced, but unless you see it bubble up as an exception (which
+        only happens on older SDK clients), then you can safely ignore this message.\r\nActivityId:
+        46a9dd5b-999f-4e4e-96a7-f31ffe8fd76b, Windows/10.0.20348 cosmos-netstandard-sdk/3.18.0","additionalErrorInfo":"{\"partitionedQueryExecutionInfoVersion\":2,\"queryInfo\":{\"distinctType\":\"None\",\"top\":null,\"offset\":null,\"limit\":null,\"orderBy\":[\"Descending\"],\"orderByExpressions\":[\"c.created\"],\"groupByExpressions\":[],\"groupByAliases\":[],\"aggregates\":[],\"groupByAliasToAggregateType\":{},\"rewrittenQuery\":\"SELECT
+        c._rid, [{\\\"item\\\": c.created}] AS orderByItems, c AS payload\\nFROM c\\nWHERE
+        ((c.data_type = @data_type) AND ({documentdb-formattableorderbyquery-filter}))\\nORDER
+        BY c.created DESC\",\"hasSelectValue\":false,\"dCountInfo\":null,\"hasNonStreamingOrderBy\":false},\"queryRanges\":[{\"min\":\"\",\"max\":\"FF\",\"isMinInclusive\":true,\"isMaxInclusive\":false}],\"hybridSearchQueryInfo\":null}"}'
+    headers:
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 12 Aug 2026 04:08:43 GMT
+      Server:
+      - Compute
+      Transfer-Encoding:
+      - chunked
+      x-ms-activity-id:
+      - 46a9dd5b-999f-4e4e-96a7-f31ffe8fd76b
+      x-ms-gatewayversion:
+      - 2.0.0
+      x-ms-substatus:
+      - '1004'
+    status:
+      code: 400
+      message: Bad Request
+- request:
+    body: '{"query": "SELECT * FROM c WHERE c.data_type=@data_type ORDER BY c.created
+      DESC", "parameters": [{"name": "@data_type", "value": "team_config"}]}'
+    headers:
+      Accept:
+      - application/json
+      Cache-Control:
+      - no-cache
+      Content-Length:
+      - '139'
+      Content-Type:
+      - application/json
+      User-Agent:
+      - azsdk-python-cosmos-async/4.9.0 Python/3.11.13 (Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31)
+      authorization:
+      - '[REDACTED]'
+      traceparent:
+      - 00-e3e70682c2094cac629f6fbed82c07cd-4f65d4d9259f4329-01
+      x-ms-cosmos-is-query-plan-request:
+      - 'True'
+      x-ms-cosmos-query-version:
+      - '1.0'
+      x-ms-cosmos-supported-query-features:
+      - Aggregate,CompositeAggregate,Distinct,MultipleOrderBy,OffsetAndLimit,OrderBy,Top,NonStreamingOrderBy,HybridSearch,CountIf
+      x-ms-date:
+      - Wed, 12 Aug 2026 04:08:43 GMT
+      x-ms-documentdb-isquery:
+      - 'true'
+      x-ms-documentdb-query-iscontinuationexpected:
+      - 'False'
+      x-ms-version:
+      - '2020-07-15'
+    method: POST
+    uri: https://cosmos-pslc25991vme66zmins-eastus2.documents.azure.com/dbs/macae/colls/memory/docs/
+  response:
+    body:
+      string: '{"partitionedQueryExecutionInfoVersion":2,"queryInfo":{"distinctType":"None","top":null,"offset":null,"limit":null,"orderBy":["Descending"],"orderByExpressions":["c.created"],"groupByExpressions":[],"groupByAliases":[],"aggregates":[],"groupByAliasToAggregateType":{},"rewrittenQuery":"SELECT
+        c._rid, [{\"item\": c.created}] AS orderByItems, c AS payload\nFROM c\nWHERE
+        ((c.data_type = @data_type) AND ({documentdb-formattableorderbyquery-filter}))\nORDER
+        BY c.created DESC","hasSelectValue":false,"dCountInfo":null,"hasNonStreamingOrderBy":false},"queryRanges":[{"min":"","max":"FF","isMinInclusive":true,"isMaxInclusive":false}],"hybridSearchQueryInfo":null}'
+    headers:
+      Cache-Control:
+      - no-store, no-cache
+      Content-Length:
+      - '660'
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 12 Aug 2026 04:08:44 GMT
+      Pragma:
+      - no-cache
+      Server:
+      - Microsoft-HTTPAPI/2.0
+      Strict-Transport-Security:
+      - max-age=31536000
+      x-ms-aad-applied-role-assignment:
+      - 15c70179-063b-47bd-af70-81426f8dc873
+      x-ms-gatewayversion:
+      - version=2.14.0
+    status:
+      code: 200
+      message: Ok
+- request:
+    body: null
+    headers:
+      Accept:
+      - application/json
+      Cache-Control:
+      - no-cache
+      Content-Length:
+      - '0'
+      User-Agent:
+      - azsdk-python-cosmos-async/4.9.0 Python/3.11.13 (Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31)
+      authorization:
+      - '[REDACTED]'
+      traceparent:
+      - 00-e3e70682c2094cac629f6fbed82c07cd-bad640fb19488dec-01
+      x-ms-date:
+      - Wed, 12 Aug 2026 04:08:43 GMT
+      x-ms-documentdb-query-iscontinuationexpected:
+      - 'False'
+      x-ms-version:
+      - '2020-07-15'
+    method: GET
+    uri: https://cosmos-pslc25991vme66zmins-eastus2.documents.azure.com/dbs/macae/colls/memory/pkranges/
+  response:
+    body:
+      string: '{"_rid":"Nv1qAObhPIY=","PartitionKeyRanges":[{"_rid":"Nv1qAObhPIYCAAAAAAAAUA==","id":"0","_etag":"\"0000cf05-0000-0200-0000-69c025910000\"","minInclusive":"","maxExclusive":"FF","ridPrefix":0,"_self":"dbs/Nv1qAA==/colls/Nv1qAObhPIY=/pkranges/Nv1qAObhPIYCAAAAAAAAUA==/","throughputFraction":1,"status":"online","parents":[],"ownedArchivalPKRangeIds":[],"_ts":1774200209,"lsn":12}],"_count":1}'
+    headers:
+      Cache-Control:
+      - no-store, no-cache
+      Content-Length:
+      - '391'
+      Content-Location:
+      - https://cosmos-pslc25991vme66zmins-eastus2.documents.azure.com/dbs/macae/colls/memory/pkranges/
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 12 Aug 2026 04:08:44 GMT
+      Pragma:
+      - no-cache
+      Server:
+      - Microsoft-HTTPAPI/2.0
+      Strict-Transport-Security:
+      - max-age=31536000
+      lsn:
+      - '37'
+      x-ms-aad-applied-role-assignment:
+      - 15c70179-063b-47bd-af70-81426f8dc873
+      x-ms-activity-id:
+      - 1da57a71-6bd8-405c-ad26-cf0b4bc6c82d
+      x-ms-alt-content-path:
+      - dbs/macae/colls/memory
+      x-ms-content-path:
+      - Nv1qAObhPIY=
+      x-ms-cosmos-internal-partition-id:
+      - 4071d3e2-5618-4dfb-b3b9-42edaa3d0c44
+      x-ms-cosmos-llsn:
+      - '37'
+      x-ms-gatewayversion:
+      - version=2.14.0
+      x-ms-global-Committed-lsn:
+      - '37'
+      x-ms-item-count:
+      - '1'
+      x-ms-last-state-change-utc:
+      - Tue, 11 Aug 2026 18:25:10.766 GMT
+      x-ms-number-of-read-regions:
+      - '0'
+      x-ms-request-duration-ms:
+      - '0.407'
+      x-ms-schemaversion:
+      - '1.21'
+      x-ms-serviceversion:
+      - version=2.14.0.0
+      x-ms-session-token:
+      - 0:-1#37
+      x-ms-transport-request-id:
+      - '187278'
+      x-ms-xp-role:
+      - '1'
+    status:
+      code: 200
+      message: Ok
+- request:
+    body: '{"messages": [{"role": "system", "content": "Ground every decision in the
+      CURRENT user message and the immediately preceding assistant message of this
+      conversation. When the current message is a bare acknowledgement or continuation
+      (e.g. ''si'', ''ok'', ''adelante'', ''correcto'', ''continua''), it refers ONLY
+      to that immediately preceding assistant message \u2014 answer in that context.
+      NEVER pick a capability based on older or retrieved context alone: a capability
+      requires an explicit request in the CURRENT message. If the preceding assistant
+      message presented a completed multi-agent plan, continue that discussion directly
+      instead of launching tools."}, {"role": "assistant", "content": "\u274c **Unexpected
+      Error**\n\nFull direct-response workflow build is no longer supported. Use proxy_only=True
+      or route TASK intent through process_request.\n\nError reference: unknown\nRequest
+      ID: not available\n\nPlease contact support with this information."}, {"role":
+      "user", "content": ""}], "model": "model-router", "stream": true, "tools": [{"type":
+      "function", "function": {"name": "run_python_execution", "description": "The
+      request needs running Python code, computation, data analysis, or producing
+      a downloadable file (script, CSV, chart, plot, etc.).", "parameters": {"type":
+      "object", "properties": {"task": {"type": "string", "description": "The full,
+      self-contained task to execute."}}, "required": ["task"]}}}, {"type": "function",
+      "function": {"name": "run_image_generation", "description": "The request asks
+      to GENERATE or EDIT an IMAGE \u2014 a picture, product shot, campaign visual,
+      illustration, logo, or photo-realistic scene. NOT questions ABOUT images and
+      NOT data charts/plots (that is run_python_execution).", "parameters": {"type":
+      "object", "properties": {"task": {"type": "string", "description": "A complete,
+      self-contained image prompt: subject, style, composition, lighting, aspect/mood."}},
+      "required": ["task"]}}}, {"type": "function", "function": {"name": "run_macae_mcp_server",
+      "description": "The request needs to USE the tools of an external connected
+      server \u2014 e.g. Infobip, GitHub (list branches, PRs, issues, files, commits),
+      ARM (list resources, subscriptions), Grafana (dashboards, metrics), Outlook/mail
+      (send/read email), or any other server available in the Toolbox. The task MUST
+      be worded as a direct tool action (e.g. ''list branches of repo X using GitHub
+      tools'', ''send email via Outlook tools'') so the execution model calls the
+      tool directly. NOT the user''s knowledge bases (that is run_knowledge_base)
+      and NOT public web search (that is run_web_search). Reading or summarizing the
+      CONTENT of a file from GitHub or any external repo/system is ALWAYS this capability,
+      never run_knowledge_base. Never answer from memory; this fetches real data via
+      the tools.", "parameters": {"type": "object", "properties": {"task": {"type":
+      "string", "description": "The full, self-contained task expressed as a DIRECT
+      tool action (e.g. ''Use GitHub___list_branches to list branches of owner=X repo=Y'')."}},
+      "required": ["task"]}}}, {"type": "function", "function": {"name": "run_knowledge_base",
+      "description": "The request asks about the user''s OWN documents, organization,
+      domain knowledge, or indexed sources \u2014 answerable from the user''s knowledge
+      bases (Foundry IQ / Azure AI Search). NOT public web search, NOT a connected
+      external server, and NOT reading files/code from GitHub or external repos (that
+      is run_macae_mcp_server). Retrieves authoritative, source-attributable content.",
+      "parameters": {"type": "object", "properties": {"task": {"type": "string", "description":
+      "A well-formed query describing the information to retrieve from the KB."}},
+      "required": ["task"]}}}, {"type": "function", "function": {"name": "run_foundry_mcp",
+      "description": "The request is about managing/operating Azure AI Foundry ITSELF
+      \u2014 Foundry agents (list/get/create/update/invoke/delete), models (catalog,
+      deploy, benchmark, quotas, monitoring), evaluations and evaluators, datasets,
+      prompt optimization, project connections, or Foundry sessions. Uses the native
+      Foundry MCP Server. NOT the user''s own connected external servers (that is
+      run_macae_mcp_server) and NOT knowledge bases.", "parameters": {"type": "object",
+      "properties": {"task": {"type": "string", "description": "The full, self-contained
+      task for the Foundry MCP Server."}}, "required": ["task"]}}}, {"type": "function",
+      "function": {"name": "run_web_search", "description": "The request needs CURRENT
+      PUBLIC information from the live internet \u2014 news, recent events, latest
+      releases/announcements, docs, prices, or anything likely newer than your training
+      data. Runs a real web search.", "parameters": {"type": "object", "properties":
+      {"task": {"type": "string", "description": "A well-formed web search query for
+      the information needed."}}, "required": ["task"]}}}]}'
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      authorization:
+      - '[REDACTED]'
+      connection:
+      - keep-alive
+      content-length:
+      - '4721'
+      content-type:
+      - application/json
+      host:
+      - aif-pslc25991vme66zmins.services.ai.azure.com
+      user-agent:
+      - AsyncOpenAI/Python 2.16.0
+      x-stainless-arch:
+      - x64
+      x-stainless-async:
+      - async:asyncio
+      x-stainless-lang:
+      - python
+      x-stainless-os:
+      - Linux
+      x-stainless-package-version:
+      - 2.16.0
+      x-stainless-read-timeout:
+      - '120'
+      x-stainless-retry-count:
+      - '0'
+      x-stainless-runtime:
+      - CPython
+      x-stainless-runtime-version:
+      - 3.11.13
+    method: POST
+    uri: https://aif-pslc25991vme66zmins.services.ai.azure.com/openai/deployments/model-router/chat/completions?api-version=2025-01-01-preview
+  response:
+    body:
+      string: '{"error":{"code":"invalid_request_error","message":"messages.2: user
+        messages must have non-empty content","type":"invalid_request_error","param":null}}
+
+
+        '
+    headers:
+      apim-request-id:
+      - d178c465-e287-4941-a665-e907fa31f8d3
+      azureai-fe-is-streaming:
+      - 'False'
+      azureai-fe-requested-service-tier:
+      - paygo
+      azureai-fe-requested-zone:
+      - default
+      azureai-processed-tier:
+      - default
+      azureai-requested-tier:
+      - default
+      content-type:
+      - application/json
+      date:
+      - Wed, 12 Aug 2026 04:08:45 GMT
+      request-context:
+      - appId=
+      skip-error-remapping:
+      - 'true'
+      strict-transport-security:
+      - max-age=31536000; includeSubDomains; preload
+      transfer-encoding:
+      - chunked
+      x-content-type-options:
+      - nosniff
+      x-model-router-fallback-attempt-count:
+      - '0'
+      x-model-router-fallback-category:
+      - none
+      x-model-router-fallback-occurred:
+      - 'false'
+      x-model-router-first-llm-choice:
+      - claude-opus-4-7
+      x-model-router-routing-latency-ms:
+      - '17'
+      x-model-router-routing-mode:
+      - quality
+      x-model-router-selected-model:
+      - claude-opus-4-7
+      x-ms-client-request-id:
+      - Not-Set
+      x-ms-is-spilled-over:
+      - 'false'
+      x-ms-region:
+      - East US 2
+      x-ms-response-type:
+      - standard
+      x-ratelimit-abusepenalty-active:
+      - 'False'
+      x-ratelimit-key:
+      - claude-opus-4-7
+      x-ratelimit-limit-requests:
+      - '40'
+      x-ratelimit-limit-tokens:
+      - '40000'
+      x-ratelimit-remaining-requests:
+      - '39'
+      x-ratelimit-remaining-tokens:
+      - '39900'
+      x-ratelimit-renewalperiod-requests:
+      - '60'
+      x-ratelimit-renewalperiod-tokens:
+      - '60'
+      x-ratelimit-reset-requests:
+      - '1'
+      x-ratelimit-reset-tokens:
+      - '0'
+      x-request-id:
+      - req_011CdxCQcFrrnxYEUx2eCLp1
+      x-robots-tag:
+      - none
+    status:
+      code: 400
+      message: Bad Request
+- request:
+    body: null
+    headers:
+      Accept:
+      - application/xml
+      User-Agent:
+      - azsdk-python-storage-blob/12.27.1 Python/3.11.13 (Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31)
+      authorization:
+      - '[REDACTED]'
+      traceparent:
+      - 00-e3e70682c2094cac629f6fbed82c07cd-4da5e709d4713d60-01
+      x-ms-client-request-id:
+      - 72154310-9628-11f1-833d-1610e8660822
+      x-ms-date:
+      - Wed, 12 Aug 2026 08:33:08 GMT
+      x-ms-range:
+      - bytes=0-33554431
+      x-ms-version:
+      - '2025-11-05'
+    method: GET
+    uri: https://stpslc25991vme66zmins.blob.core.windows.net/generated-files/contract-fixed-id
+  response:
+    body:
+      string: "\uFEFF<?xml version=\"1.0\" encoding=\"utf-8\"?><Error><Code>BlobNotFound</Code><Message>The
+        specified blob does not exist.\nRequestId:ba3ce491-f01e-002b-2935-2af29e000000\nTime:2026-08-12T08:33:09.8811926Z</Message></Error>"
+    headers:
+      Content-Length:
+      - '215'
+      Content-Type:
+      - application/xml
+      Date:
+      - Wed, 12 Aug 2026 08:33:09 GMT
+      Server:
+      - Windows-Azure-Blob/1.0 Microsoft-HTTPAPI/2.0
+      x-ms-client-request-id:
+      - 72154310-9628-11f1-833d-1610e8660822
+      x-ms-error-code:
+      - BlobNotFound
+      x-ms-request-id:
+      - ba3ce491-f01e-002b-2935-2af29e000000
+      x-ms-version:
+      - '2025-11-05'
+    status:
+      code: 404
+      message: The specified blob does not exist.
+- request:
+    body: null
+    headers:
+      Accept:
+      - application/json
+      User-Agent:
+      - azsdk-python-ai-agents/1.2.0b5 Python/3.11.13 (Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31)
+      authorization:
+      - '[REDACTED]'
+      traceparent:
+      - 00-e3e70682c2094cac629f6fbed82c07cd-e87a1613e443df78-01
+      x-ms-client-request-id:
+      - 7266a458-9628-11f1-833d-1610e8660822
+    method: GET
+    uri: https://aif-pslc25991vme66zmins.services.ai.azure.com/api/projects/proj-pslc25991vme66zmins/files/contract-fixed-id?api-version=2025-05-15-preview
+  response:
+    body:
+      string: "{\n  \"error\": {\n    \"code\": \"notFound\",\n    \"message\": \"The
+        specified entity cannot be found.\"\n  }\n}"
+    headers:
+      Access-Control-Expose-Headers:
+      - Operation-Location,Location,Apim-Request-Id,x-agent-session-id,x-agent-invocation-id
+      Content-Type:
+      - application/json; charset=utf-8
+      Date:
+      - Wed, 12 Aug 2026 08:33:10 GMT
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Accept-Encoding
+      api-supported-versions:
+      - 2022-12-01,2023-03-15-preview,2023-05-15,2023-06-01-preview,2023-07-01-preview,2023-08-01-preview,2023-09-01-preview,2023-10-01-preview,2023-12-01-preview,2024-02-01,2024-02-15-preview,2024-03-01-preview,2024-04-01-preview,2024-04-15-preview,2024-05-01-preview,2024-06-01,2024-07-01-preview,2024-08-01-preview,2024-09-01-preview,2024-10-01-preview,2024-10-21,2024-11-01-preview,2024-12-01-preview,2025-01-01-preview,2025-02-01-preview,2025-03-01-preview,2025-04-01-preview,2025-04-28,1
+      apim-request-id:
+      - 60d14125-5b75-4ecb-a71f-2aa498e8a618
+      azureml-served-by-cluster:
+      - hyena-eastus2-01
+      content-length:
+      - '99'
+      request-context:
+      - appId=
+      strict-transport-security:
+      - max-age=31536000; includeSubDomains; preload
+      x-content-type-options:
+      - nosniff
+      x-ms-region:
+      - East US 2
+      x-ms-response-type:
+      - standard
+    status:
+      code: 404
+      message: Not Found
+version: 1
