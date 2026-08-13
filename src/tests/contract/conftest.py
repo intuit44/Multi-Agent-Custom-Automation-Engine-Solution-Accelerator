@@ -184,8 +184,9 @@ def _drop_telemetry(request):
                     if k in parsed:
                         parsed[k] = "[REDACTED]"
                 body = json.dumps(parsed).encode()
-        except Exception:
-            pass
+        except (ValueError, TypeError, UnicodeDecodeError):
+            # Best-effort scrubbing: if payload is not parseable JSON, keep body unchanged.
+            body = body
 
     return request._replace(uri=uri, body=body)
 
