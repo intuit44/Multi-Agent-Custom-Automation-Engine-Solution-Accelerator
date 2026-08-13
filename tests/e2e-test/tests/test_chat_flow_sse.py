@@ -22,7 +22,9 @@ import json
 import pytest
 from playwright.sync_api import Page
 
-APP = "http://localhost:3001/"
+from e2e_constants import URL
+
+APP = f"{URL}/" if URL else "http://localhost:3001/"
 PROMPT = "Genera un grafico de barras con categorias A, B, C, D y valores 20, 30, 60, 80"
 
 # Nombres accesibles, no hashes CSS: sobreviven a los rebuilds del frontend.
