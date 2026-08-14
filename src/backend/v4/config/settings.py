@@ -89,6 +89,9 @@ class OrchestrationConfig:
     def __init__(self):
         # Previously Dict[str, MagenticOrchestration]; now generic workflow objects from MagenticBuilder.build()
         self.orchestrations: Dict[str, Any] = {}  # user_id -> workflow instance
+        self.managers: Dict[
+            str, Any
+        ] = {}  # user_id -> HumanApprovalMagenticManager (same lifecycle as its workflow)
         self.agent_wrappers: Dict[
             str, List[Any]
         ] = {}  # user_id -> list of lifecycle-managed agent wrappers (for proper close)

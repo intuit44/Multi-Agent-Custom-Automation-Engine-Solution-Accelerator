@@ -30,11 +30,13 @@ Not in ``testpaths``: this is a separate pytest session on purpose.
 """
 
 import os
+import re
 import sys
 from pathlib import Path
+
+import pytest
 import schemathesis
 from schemathesis import GenerationMode
-import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _BACKEND = _REPO_ROOT / "src" / "backend"
@@ -88,6 +90,15 @@ def pytest_configure(config):
         "COSMOSDB_CONTAINER": "contract-container",
         "MCP_SERVER_ENDPOINT": "http://localhost:9000/mcp",
         "CHAT_ORCHESTRATOR_AGENT_NAME": "contract-orchestrator",
+        # Empty on purpose, not a placeholder: app_config's load_dotenv() pulls
+        # the REAL search endpoint from src/backend/.env, the service
+        # initializes, and replay emits embeddings calls the cassette does not
+        # contain — at record time the search path never reached HTTP (zero
+        # search/embedding entries recorded). Empty disables the service, so
+        # replay makes the same calls the recording actually holds. When a
+        # re-record captures real search traffic, point this at a contract.*
+        # placeholder instead.
+        "AZURE_AI_SEARCH_ENDPOINT": "",
         # Telemetry off: the exporter and QuickPulse ping Azure from
         # background threads, which has nothing to do with the contract and
         # drowns the report in cassette misses.
@@ -137,6 +148,32 @@ _TELEMETRY_HOST_MARKERS = (
 )
 
 
+# Real Azure resource hosts → the contract placeholders replay boots on, so
+# future recordings carry no subscription resource names. (The Copilot-autofix
+# version of this normalization never ran: `\\.` inside a raw string matches a
+# literal backslash — the patterns could not match a URL — and
+# `request._replace` does not exist on vcr's Request, which mutates via
+# attribute assignment like vcr's own filters do.)
+_HOST_PLACEHOLDERS = (
+    (
+        re.compile(r"https://[^/]+\.blob\.core\.windows\.net"),
+        "https://contract.blob.core.windows.net",
+    ),
+    (
+        re.compile(r"https://[^/]+\.documents\.azure\.com(?::443)?"),
+        "https://contract.documents.azure.com:443",
+    ),
+    (
+        re.compile(r"https://[^/]+\.services\.ai\.azure\.com"),
+        "https://contract.services.ai.azure.com",
+    ),
+    (
+        re.compile(r"https://[^/]+\.openai\.azure\.com"),
+        "https://contract.openai.azure.com",
+    ),
+)
+
+
 def _drop_telemetry(request):
     """Drop telemetry traffic and scrub requests so cassettes are safe + replayable."""
     host = (request.host or "").lower()
@@ -144,30 +181,9 @@ def _drop_telemetry(request):
         return None
 
     import json
-    import re
 
-    # Normalize real Azure resource hosts into the contract placeholders used in replay.
-    uri = request.uri
-    uri = re.sub(
-        r"https://[^/]+\\.blob\\.core\\.windows\\.net",
-        "https://contract.blob.core.windows.net",
-        uri,
-    )
-    uri = re.sub(
-        r"https://[^/]+\\.documents\\.azure\\.com(?::443)?",
-        "https://contract.documents.azure.com:443",
-        uri,
-    )
-    uri = re.sub(
-        r"https://[^/]+\\.services\\.ai\\.azure\\.com",
-        "https://contract.services.ai.azure.com",
-        uri,
-    )
-    uri = re.sub(
-        r"https://[^/]+\\.openai\\.azure\\.com",
-        "https://contract.openai.azure.com",
-        uri,
-    )
+    for pattern, placeholder in _HOST_PLACEHOLDERS:
+        request.uri = pattern.sub(placeholder, request.uri)
 
     # Redact large/sensitive JSON payload fields (matching does not include body).
     body = request.body
@@ -183,12 +199,62 @@ def _drop_telemetry(request):
                 for k in ("messages", "tools", "history"):
                     if k in parsed:
                         parsed[k] = "[REDACTED]"
-                body = json.dumps(parsed).encode()
+                request.body = json.dumps(parsed).encode()
         except (ValueError, TypeError, UnicodeDecodeError):
             # Best-effort scrubbing: if payload is not parseable JSON, keep body unchanged.
             pass
 
-    return request._replace(uri=uri, body=body)
+    return request
+
+
+# ── Matching: recorded-vs-replay endpoints differ by design ────────────────
+#
+# Cassettes are recorded against the REAL subscription (cosmos-<acct>,
+# /dbs/macae/colls/chat_sessions); replay boots the app on inert placeholders
+# (contract.documents.azure.com, /dbs/contract-db/colls/contract-container).
+# Literal host/path matching therefore misses every recorded call. The match
+# is on the SERVICE CLASS and the normalized path shape instead — which is
+# also what makes the suite runnable in CI, where no real endpoint exists.
+
+_AZURE_HOST_CLASSES = (
+    (".documents.azure.com", "cosmos"),
+    (".openai.azure.com", "aoai"),
+    (".services.ai.azure.com", "foundry"),
+    (".blob.core.windows.net", "blob"),
+    (".search.windows.net", "search"),
+    (".vault.azure.net", "keyvault"),
+)
+
+
+def _host_class(host):
+    h = (host or "").lower()
+    for suffix, cls in _AZURE_HOST_CLASSES:
+        if h.endswith(suffix):
+            return cls
+    # login.microsoftonline.com etc. — literal match
+    return h
+
+
+def _normalize_path(path):
+    # Account and container names are deployment config, not contract shape.
+    return re.sub(r"/dbs/[^/]+/colls/[^/]+", "/dbs/_/colls/_", path or "")
+
+
+def _azure_host_matcher(r1, r2):
+    assert _host_class(r1.host) == _host_class(r2.host), (
+        f"{_host_class(r1.host)} != {_host_class(r2.host)}"
+    )
+
+
+def _azure_path_matcher(r1, r2):
+    assert _normalize_path(r1.path) == _normalize_path(r2.path), (
+        f"{_normalize_path(r1.path)} != {_normalize_path(r2.path)}"
+    )
+
+
+def pytest_recording_configure(config, vcr):
+    vcr.register_matcher("azure_host", _azure_host_matcher)
+    vcr.register_matcher("azure_path", _azure_path_matcher)
 
 
 def _scrub_response(response):
@@ -243,8 +309,10 @@ def vcr_config():
         "before_record_response": _scrub_response,
         # Generated requests vary by design, so the recorded upstream call
         # must match on the endpoint, not on the exact payload. Without this
-        # every fuzzed variant would miss its cassette.
-        "match_on": ["method", "scheme", "host", "port", "path"],
+        # every fuzzed variant would miss its cassette. azure_host/azure_path
+        # (registered in pytest_recording_configure) compare service class and
+        # normalized path shape, so replay works on placeholder config.
+        "match_on": ["method", "scheme", "azure_host", "port", "azure_path"],
         "allow_playback_repeats": True,
         # The ASGI call is in-process (no socket); only the app's own
         # outbound traffic is of interest.

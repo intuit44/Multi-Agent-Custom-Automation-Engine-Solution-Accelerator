@@ -367,6 +367,8 @@ mock_orchestration_config.max_rounds = 10
 mock_orchestration_config.orchestrations = {}
 # Source stores/pops agent wrappers per user (cleanup on rebuild) — must be a real dict
 mock_orchestration_config.agent_wrappers = {}
+# Source stores the HumanApprovalMagenticManager per user (chat_history seeding)
+mock_orchestration_config.managers = {}
 mock_orchestration_config.get_current_orchestration = Mock(return_value=None)
 mock_orchestration_config.set_approval_pending = Mock()
 
@@ -468,6 +470,7 @@ class TestOrchestrationManager(IsolatedAsyncioTestCase):
         # so we must do it explicitly to avoid cross-test pollution.
         orchestration_config.orchestrations.clear()
         orchestration_config.agent_wrappers.clear()
+        orchestration_config.managers.clear()
         orchestration_config.get_current_orchestration.return_value = None
         orchestration_config.set_approval_pending.reset_mock()
         connection_config.send_status_update_async.reset_mock()
@@ -1318,6 +1321,7 @@ class TestWorkflowOutputEventHandling(IsolatedAsyncioTestCase):
         # so we must do it explicitly to avoid cross-test pollution.
         orchestration_config.orchestrations.clear()
         orchestration_config.agent_wrappers.clear()
+        orchestration_config.managers.clear()
         orchestration_config.get_current_orchestration.return_value = None
         connection_config.send_status_update_async.reset_mock()
         connection_config.send_status_update_async.side_effect = None

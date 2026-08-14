@@ -280,14 +280,15 @@ class PlanWithSteps(Plan):
 
 
 class InputTask(BaseModel):
-    """Message representing the initial input task from the user."""
+    """Message representing the initial input task from the user.
+
+    Deliberately has NO context field: prior conversation is recovered
+    server-side and enters the Magentic manager as chat_history Messages —
+    a request-body field for it would let clients inject grounding.
+    """
 
     session_id: str
     description: str
-    # Optional grounding preamble (recovered session context). Seeded at the
-    # Plan boundary so the Magentic manager plans WITH prior context instead of
-    # from a bare task string. Empty when there is no prior context.
-    context: str = ""
 
 
 class UserLanguage(BaseModel):

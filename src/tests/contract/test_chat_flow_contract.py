@@ -30,7 +30,7 @@ from app import app
 
 schema = schemathesis.openapi.from_asgi("/openapi.json", app)
 
-CHAT_FLOW = schema.include(path_regex=r"^/api/v4/chat/")
+CHAT_FLOW = schema.include(path_regex=r"^/api/v4/")
 
 # Replay is free, so generate broadly. Recording is not: each example is a
 # real Foundry invocation and a real Cosmos write, so a recording pass takes
