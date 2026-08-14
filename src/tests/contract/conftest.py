@@ -148,6 +148,32 @@ _TELEMETRY_HOST_MARKERS = (
 )
 
 
+# Real Azure resource hosts → the contract placeholders replay boots on, so
+# future recordings carry no subscription resource names. (The Copilot-autofix
+# version of this normalization never ran: `\\.` inside a raw string matches a
+# literal backslash — the patterns could not match a URL — and
+# `request._replace` does not exist on vcr's Request, which mutates via
+# attribute assignment like vcr's own filters do.)
+_HOST_PLACEHOLDERS = (
+    (
+        re.compile(r"https://[^/]+\.blob\.core\.windows\.net"),
+        "https://contract.blob.core.windows.net",
+    ),
+    (
+        re.compile(r"https://[^/]+\.documents\.azure\.com(?::443)?"),
+        "https://contract.documents.azure.com:443",
+    ),
+    (
+        re.compile(r"https://[^/]+\.services\.ai\.azure\.com"),
+        "https://contract.services.ai.azure.com",
+    ),
+    (
+        re.compile(r"https://[^/]+\.openai\.azure\.com"),
+        "https://contract.openai.azure.com",
+    ),
+)
+
+
 def _drop_telemetry(request):
     """Drop telemetry traffic and scrub requests so cassettes are safe + replayable."""
     host = (request.host or "").lower()
@@ -155,30 +181,9 @@ def _drop_telemetry(request):
         return None
 
     import json
-    import re
 
-    # Normalize real Azure resource hosts into the contract placeholders used in replay.
-    uri = request.uri
-    uri = re.sub(
-        r"https://[^/]+\\.blob\\.core\\.windows\\.net",
-        "https://contract.blob.core.windows.net",
-        uri,
-    )
-    uri = re.sub(
-        r"https://[^/]+\\.documents\\.azure\\.com(?::443)?",
-        "https://contract.documents.azure.com:443",
-        uri,
-    )
-    uri = re.sub(
-        r"https://[^/]+\\.services\\.ai\\.azure\\.com",
-        "https://contract.services.ai.azure.com",
-        uri,
-    )
-    uri = re.sub(
-        r"https://[^/]+\\.openai\\.azure\\.com",
-        "https://contract.openai.azure.com",
-        uri,
-    )
+    for pattern, placeholder in _HOST_PLACEHOLDERS:
+        request.uri = pattern.sub(placeholder, request.uri)
 
     # Redact large/sensitive JSON payload fields (matching does not include body).
     body = request.body
@@ -194,12 +199,12 @@ def _drop_telemetry(request):
                 for k in ("messages", "tools", "history"):
                     if k in parsed:
                         parsed[k] = "[REDACTED]"
-                body = json.dumps(parsed).encode()
+                request.body = json.dumps(parsed).encode()
         except (ValueError, TypeError, UnicodeDecodeError):
             # Best-effort scrubbing: if payload is not parseable JSON, keep body unchanged.
             pass
 
-    return request._replace(uri=uri, body=body)
+    return request
 
 
 # ── Matching: recorded-vs-replay endpoints differ by design ────────────────
