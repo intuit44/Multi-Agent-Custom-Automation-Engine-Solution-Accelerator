@@ -96,8 +96,42 @@ DO NOT EVER OFFER TO HELP FURTHER IN THE FINAL ANSWER! Just provide the final an
         )
 
         self.current_user_id = user_id
+        # Prior-session turns waiting to enter the next plan's chat_history.
+        # Set per run by seed_chat_history, consumed once by plan().
+        self._pending_chat_history: list[Message] = []
         # New API: StandardMagenticManager takes agent as first positional argument
         super().__init__(agent, *args, **kwargs)
+
+    def seed_chat_history(self, history: list) -> None:
+        """Stage recovered session turns for the NEXT plan's MagenticContext.
+
+        The framework separates ``MagenticContext.task`` (current objective)
+        from ``MagenticContext.chat_history`` (conversation), but
+        ``workflow.run`` accepts only the single task message — so prior
+        context enters here, at the plan boundary, as real Messages instead of
+        being welded into the task string.
+
+        Only user turns are seeded: assistant turns recovered by AI Search are
+        prior plan drafts / tool output, and grounding on them makes the
+        orchestrator re-emit them verbatim instead of acting on the user's
+        actual intent.
+        """
+        self._pending_chat_history = [
+            Message(role="user", text=(m.get("content") or "").strip())
+            for m in history or []
+            if m.get("role") == "user" and (m.get("content") or "").strip()
+        ]
+
+    def _apply_pending_history(self, magentic_context: MagenticContext) -> None:
+        """Insert staged turns BEFORE the task message, consuming them.
+
+        At plan() time ``chat_history`` holds exactly the task message; the
+        conversation must precede it. Consumed once so a replan or a second
+        run on the same (reused) manager never re-seeds stale context.
+        """
+        if self._pending_chat_history:
+            magentic_context.chat_history[:0] = self._pending_chat_history
+            self._pending_chat_history = []
 
     async def _complete(self, messages: list[Message]) -> Message:
         """Override to pass session=None, making each LLM call stateless.
@@ -151,6 +185,8 @@ DO NOT EVER OFFER TO HELP FURTHER IN THE FINAL ANSWER! Just provide the final an
         Override the plan method to create the plan first, then ask for approval before execution.
         Returns the original plan ChatMessage if approved, otherwise raises.
         """
+        self._apply_pending_history(magentic_context)
+
         # Normalize task text
         task_text = getattr(magentic_context.task, "text", str(magentic_context.task))
 

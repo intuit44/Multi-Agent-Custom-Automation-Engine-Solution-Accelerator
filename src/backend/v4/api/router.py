@@ -432,20 +432,18 @@ async def _create_plan_and_start(
             detail="Request contains content that doesn't meet our safety guidelines, try again.",
         )
 
-    # Seed the Plan with the SAME session context the router uses (single source
-    # of truth), so the Magentic manager plans WITH prior context instead of a
-    # bare task string. The SSE run_plan escalation passes the already-recovered
-    # history; process_request (no prior recovery) recovers it here via the same
-    # helper — one loader, not two parallel ones.
+    # Recover the SAME session context the router uses (single source of
+    # truth). The SSE run_plan escalation passes the already-recovered history;
+    # process_request (no prior recovery) recovers it here via the same helper
+    # — one loader, not two parallel ones. It rides to run_orchestration and
+    # enters the Magentic manager as MagenticContext.chat_history (Messages),
+    # never welded into the task string.
     if history is None:
         _ctx_svc = await get_chat_cosmos_service()
         history = await _recover_session_context(
             _ctx_svc, session_id, user_id, description
         )
-    context_block = _format_context_block(history)
-    input_task = InputTask(
-        session_id=session_id, description=description, context=context_block
-    )
+    input_task = InputTask(session_id=session_id, description=description)
 
     try:
         plan_id = str(uuid.uuid4())
@@ -541,7 +539,7 @@ async def _create_plan_and_start(
         async def run_orchestration_task():
             try:
                 await OrchestrationManager().run_orchestration(
-                    user_id, session_id, input_task, plan_id=plan_id
+                    user_id, session_id, input_task, plan_id=plan_id, history=history
                 )
             finally:
                 orchestration_config.clear_run_active(session_id)
@@ -634,32 +632,6 @@ async def _recover_session_context(
     except Exception as _hist_err:
         logger.warning("Could not rebuild chat history: %s", _hist_err)
     return history
-
-
-def _format_context_block(history: list) -> str:
-    """Render recovered history as a grounding preamble for the Plan task.
-
-    The Magentic manager plans from a single task string, so the session context
-    must ride along inside it. Empty history → empty string (no grounding added).
-
-    Only [user] turns are included. Assistant messages are plan drafts / tool
-    output returned by AI Search because they are semantically relevant — but
-    injecting them into the grounding causes the Group Chat Manager to re-emit
-    them verbatim instead of acting on the user's actual intent.
-    """
-    if not history:
-        return ""
-    lines = [
-        f"[user] {m.get('content', '')}".strip()
-        for m in history
-        if m.get("role") == "user" and (m.get("content") or "").strip()
-    ]
-    if not lines:
-        return ""
-    return (
-        "Prior conversation context (grounding — use it to understand the user "
-        "intent; do not repeat verbatim):\n" + "\n".join(lines)
-    )
 
 
 # ── Chat Mode Endpoint (P0 — conversational without plan) ────────────

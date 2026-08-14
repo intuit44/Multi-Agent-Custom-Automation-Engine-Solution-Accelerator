@@ -182,6 +182,9 @@ class OrchestrationManager:
                 user_id,
                 orchestration_config.max_rounds,
             )
+            # The builder swallows the reference; run_orchestration needs it to
+            # seed prior-session context into MagenticContext.chat_history.
+            orchestration_config.managers[user_id] = manager
         except Exception as e:
             cls.logger.error("Failed to create manager: %s", e)
             raise
@@ -395,7 +398,12 @@ class OrchestrationManager:
             )
 
     async def run_orchestration(
-        self, user_id, session_id: str, input_task, plan_id: Optional[str] = None
+        self,
+        user_id,
+        session_id: str,
+        input_task,
+        plan_id: Optional[str] = None,
+        history: Optional[list] = None,
     ) -> None:
         """
         Execute the Magentic workflow for the provided user and task description.
@@ -476,20 +484,19 @@ class OrchestrationManager:
                 )
         # --- END NEW BLOCK ---
 
-        # Build task from input. Prior conversation context (recovered from the
-        # single source of truth at the Plan boundary) rides inside the task string
-        # so the Magentic manager plans WITH context instead of from a bare goal.
-        # Cross-run bleed was already cleared above; this is the CURRENT session's
-        # grounding, seeded deliberately.
+        # The task is the bare objective. Prior conversation enters the manager
+        # as MagenticContext.chat_history (real Messages) at plan() time — the
+        # framework models objective and conversation separately; welding the
+        # history into the task string polluted the plan (steps like "review
+        # prior context", agents chosen for past topics).
         task_text = getattr(input_task, "description", str(input_task))
-        _context = getattr(input_task, "context", "") or ""
-        if _context:
-            task_text = f"{_context}\n\n---\n\nCurrent objective:\n{task_text}"
-            self.logger.info(
-                "Seeded orchestration task with %d chars of session context",
-                len(_context),
-            )
         self.logger.debug("Task: %s", task_text)
+
+        manager = orchestration_config.managers.get(user_id)
+        if manager is not None:
+            # Unconditional: an empty list clears any stale pending seed left
+            # by a run that never reached plan().
+            manager.seed_chat_history(history or [])
 
         # ── Stamp session_id on ProxyAgent instances so they can write to chat_cosmos ──
         from v4.magentic_agents.proxy_agent import ProxyAgent as _ProxyAgent
