@@ -55,7 +55,11 @@ class ChatCosmosService:
             return
 
         endpoint = config.COSMOSDB_ENDPOINT
-        credential = config.get_azure_credential_async(config.AZURE_CLIENT_ID)
+        # Key (dev) wins over AAD: the account trusts a foreign creation-time
+        # tenant, so local AAD tokens 401 — see COSMOSDB_KEY in app_config.
+        credential = config.COSMOSDB_KEY or config.get_azure_credential_async(
+            config.AZURE_CLIENT_ID
+        )
         db_name = config.COSMOSDB_DATABASE
 
         if not endpoint or not db_name:

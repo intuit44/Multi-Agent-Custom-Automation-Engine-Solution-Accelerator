@@ -30,6 +30,8 @@ AGENT_INSTRUCTIONS = (
     "- Ask for clarification only if the task is genuinely ambiguous"
 )
 MODEL_DEPLOYMENT_NAME = "gpt-4.1"
+
+
 async def test_agent():
     """Simple chat test harness for the agent."""
     print("🤖 Starting agent test harness...")
@@ -38,18 +40,18 @@ async def test_agent():
         # If environment variables are missing, catch exception and abort
         try:
             mcp_init = MCPConfig().from_env()
-            #bing_init = BingConfig().from_env()
+            # bing_init = BingConfig().from_env()
             search_init = SearchConfig().from_env()
         except ValueError as ve:
             print(f"❌ Configuration error: {ve}")
             return
         async with FoundryAgentTemplate(agent_name=AGENT_NAME,
-                                        agent_description=AGENT_DESCRIPTION, 
-                                        agent_instructions=AGENT_INSTRUCTIONS, 
+                                        agent_description=AGENT_DESCRIPTION,
+                                        agent_instructions=AGENT_INSTRUCTIONS,
                                         model_deployment_name=MODEL_DEPLOYMENT_NAME,
                                         enable_code_interpreter=True,
                                         mcp_config=mcp_init,
-                                        #bing_config=bing_init,
+                                        # bing_config=bing_init,
                                         search_config=search_init) as agent:
             print("💬 Type 'quit' or 'exit' to stop\n")
 
