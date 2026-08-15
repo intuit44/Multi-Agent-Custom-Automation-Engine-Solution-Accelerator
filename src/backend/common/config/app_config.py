@@ -86,11 +86,10 @@ class AppConfig:
         self.COSMOSDB_ENDPOINT = self._get_optional("COSMOSDB_ENDPOINT")
         # Dev-only escape hatch: the account's data-plane AAD trust is stamped
         # with the tenant the subscription lived in at creation
-        # (chiranjib5072gmail.onmicrosoft.com's Default Directory), so tokens
-        # from the CURRENT tenant are rejected with 401 "not trusted by this
-        # database account". A key (ARM-plane, listable from the current
-        # tenant) bypasses AAD entirely. Unset in prod: deployed MIs still
-        # mint accepted tokens. Never commit the key; .env only.
+        # (creation-time tenant), so tokens from the current tenant can be rejected
+        # with 401 "not trusted by this database account". A key (ARM-plane,
+        # listable from the current tenant) bypasses AAD entirely. Unset in prod:
+        # deployed MIs still mint accepted tokens. Never commit the key; .env only.
         self.COSMOSDB_KEY = self._get_optional("COSMOSDB_KEY")
         self.COSMOSDB_DATABASE = self._get_optional("COSMOSDB_DATABASE")
         self.COSMOSDB_CONTAINER = self._get_optional("COSMOSDB_CONTAINER")
