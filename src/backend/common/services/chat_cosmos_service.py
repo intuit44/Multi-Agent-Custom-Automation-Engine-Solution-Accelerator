@@ -55,7 +55,12 @@ class ChatCosmosService:
             return
 
         endpoint = config.COSMOSDB_ENDPOINT
-        credential = config.get_azure_credential_async(config.AZURE_CLIENT_ID)
+        # Allow key-based auth only in dev to avoid accidentally bypassing AAD in prod.
+        credential = (
+            config.COSMOSDB_KEY
+            if config.APP_ENV == "dev" and config.COSMOSDB_KEY
+            else config.get_azure_credential_async(config.AZURE_CLIENT_ID)
+        )
         db_name = config.COSMOSDB_DATABASE
 
         if not endpoint or not db_name:

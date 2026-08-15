@@ -37,7 +37,12 @@ class DatabaseFactory:
         if force_new or DatabaseFactory._instance is None:
             cosmos_db_client = CosmosDBClient(
                 endpoint=config.COSMOSDB_ENDPOINT,
-                credential=config.get_azure_credentials(),
+                # Allow key-based auth only in dev to avoid accidentally bypassing AAD in prod.
+                credential=(
+                    config.COSMOSDB_KEY
+                    if config.APP_ENV == "dev" and config.COSMOSDB_KEY
+                    else config.get_azure_credentials()
+                ),
                 database_name=config.COSMOSDB_DATABASE,
                 container_name=config.COSMOSDB_CONTAINER,
                 session_id="",
