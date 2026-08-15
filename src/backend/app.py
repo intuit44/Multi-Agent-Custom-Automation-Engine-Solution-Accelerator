@@ -53,15 +53,26 @@ async def lifespan(app: FastAPI):
         except Exception as cfg_e:
             logger.warning(f"Shared resource cleanup warning (non-fatal): {cfg_e}")
 
-        # Clean up global MCP resource service if it exists
+        # Clean up global MCP resource service if it exists. Close-and-unbind:
+        # closing the object while the module global kept pointing at it left
+        # a dead client for any request after shutdown began.
         try:
-            from v4.common.services.mcp_resource_service import _mcp_resource_service
+            from v4.common.services.mcp_resource_service import (
+                aclose_mcp_resource_service,
+            )
 
-            if _mcp_resource_service and hasattr(_mcp_resource_service, "close"):
-                await _mcp_resource_service.close()
-                logger.info("✅ MCP Resource Service cleanup completed")
+            await aclose_mcp_resource_service()
+            logger.info("✅ MCP Resource Service cleanup completed")
         except Exception as mcp_e:
             logger.warning(f"MCP cleanup warning (non-fatal): {mcp_e}")
+
+        # Close the Inspector bridge's httpx client (same singleton pattern)
+        try:
+            from v4.common.services.mcp_inspector_bridge import aclose_inspector_bridge
+
+            await aclose_inspector_bridge()
+        except Exception as ib_e:
+            logger.warning(f"Inspector bridge cleanup warning (non-fatal): {ib_e}")
 
     except ImportError as ie:
         logger.error(f"❌ Could not import agent_registry: {ie}")

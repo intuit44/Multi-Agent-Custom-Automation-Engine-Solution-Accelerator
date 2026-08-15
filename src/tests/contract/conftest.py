@@ -314,14 +314,15 @@ def vcr_config():
         # normalized path shape, so replay works on placeholder config.
         "match_on": ["method", "scheme", "azure_host", "port", "azure_path"],
         "allow_playback_repeats": True,
-        # The ASGI call is in-process (no socket); only the app's own
-        # outbound traffic is of interest.
-        "ignore_localhost": True,
+        # localhost is NOT ignored: the app's outbound localhost calls (MCP
+        # server :9000, Inspector proxy :16277) must be recorded and replayed
+        # like any other dependency — ignoring them let replay talk to
+        # whatever happened to be running locally, so the suite's result
+        # depended on live services (15 passed recording vs 4 on "replay").
+        # The schemathesis→app calls themselves are in-process ASGI and never
+        # reach vcr's transport patches; "testserver" is listed defensively.
         "ignore_hosts": [
             "testserver",
-            "localhost",
-            "127.0.0.1",
-            "::1",
         ],
         # Telemetry is not part of any contract — never record it, never
         # count its misses as findings.

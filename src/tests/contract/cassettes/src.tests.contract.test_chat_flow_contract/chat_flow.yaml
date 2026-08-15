@@ -15,13 +15,13 @@ interactions:
       traceparent:
       - 00-e3e70682c2094cac629f6fbed82c07cd-4da5e709d4713d60-01
       x-ms-date:
-      - Fri, 14 Aug 2026 07:01:52 GMT
+      - Fri, 14 Aug 2026 10:32:47 GMT
       x-ms-documentdb-query-iscontinuationexpected:
       - 'False'
       x-ms-version:
       - '2020-07-15'
     method: GET
-    uri: https://cosmos-pslc25991vme66zmins.documents.azure.com/
+    uri: https://contract.documents.azure.com:443/
   response:
     body:
       string: '{"_self":"","id":"cosmos-pslc25991vme66zmins","_rid":"cosmos-pslc25991vme66zmins-eastus2.sql.cosmos.azure.com","media":"//media/","addresses":"//addresses/","_dbs":"//dbs/","writableLocations":[{"name":"East
@@ -37,7 +37,7 @@ interactions:
       Content-Type:
       - application/json
       Date:
-      - Fri, 14 Aug 2026 07:01:52 GMT
+      - Fri, 14 Aug 2026 10:32:48 GMT
       Pragma:
       - no-cache
       Server:
@@ -62,7 +62,9 @@ interactions:
       code: 200
       message: Ok
 - request:
-    body: '{"query":"SELECT * FROM c WHERE c.team_id=@team_id AND c.data_type=@data_type","parameters":[{"name":"@team_id","value":"00000000-0000-0000-0000-000000000004"},{"name":"@data_type","value":"team_config"}]}'
+    body: '{"query": "SELECT * FROM c WHERE c.team_id=@team_id AND c.data_type=@data_type",
+      "parameters": [{"name": "@team_id", "value": "00000000-0000-0000-0000-000000000004"},
+      {"name": "@data_type", "value": "team_config"}]}'
     headers:
       Accept:
       - application/json
@@ -79,9 +81,9 @@ interactions:
       traceparent:
       - 00-e3e70682c2094cac629f6fbed82c07cd-7a024204f7c1bd87-01
       x-ms-cosmos-correlated-activityid:
-      - d8023548-f9fb-4df7-b18b-8ea2292c89eb
+      - 5c2e4d8a-49e5-473c-afba-4a260573e6ab
       x-ms-date:
-      - Fri, 14 Aug 2026 07:01:52 GMT
+      - Fri, 14 Aug 2026 10:32:47 GMT
       x-ms-documentdb-isquery:
       - 'true'
       x-ms-documentdb-query-enablecrosspartition:
@@ -91,7 +93,7 @@ interactions:
       x-ms-version:
       - '2020-07-15'
     method: POST
-    uri: https://cosmos-pslc25991vme66zmins.documents.azure.com/dbs/macae/colls/memory/docs/
+    uri: https://contract.documents.azure.com:443/dbs/macae/colls/memory/docs/
   response:
     body:
       string: '{"_rid":"Nv1qAObhPIY=","Documents":[{"id":"00000000-0000-0000-0000-000000000004","session_id":"fff83d1e-bd55-4e08-a95c-bfba715b1e22","team_id":"00000000-0000-0000-0000-000000000004","data_type":"team_config","user_id":"system","name":"RFP
@@ -130,15 +132,15 @@ interactions:
       Content-Type:
       - application/json
       Date:
-      - Fri, 14 Aug 2026 07:01:53 GMT
+      - Fri, 14 Aug 2026 10:32:48 GMT
       Server:
       - Compute
       lsn:
-      - '3958'
+      - '3967'
       x-ms-aad-applied-role-assignment:
       - 15c70179-063b-47bd-af70-81426f8dc873
       x-ms-activity-id:
-      - 425959bf-11b6-4a6b-9f00-34626dbb352b
+      - e3680033-3864-4e88-b214-ea34e9539d15
       x-ms-alt-content-path:
       - dbs/macae/colls/memory
       x-ms-content-path:
@@ -148,7 +150,7 @@ interactions:
       x-ms-cosmos-is-partition-key-delete-pending:
       - 'false'
       x-ms-cosmos-llsn:
-      - '3958'
+      - '3967'
       x-ms-cosmos-physical-partition-id:
       - '0'
       x-ms-cosmos-query-execution-info:
@@ -158,36 +160,38 @@ interactions:
       x-ms-gatewayversion:
       - 2.0.0
       x-ms-global-Committed-lsn:
-      - '3958'
+      - '3967'
       x-ms-item-count:
       - '1'
       x-ms-last-state-change-utc:
-      - Fri, 14 Aug 2026 05:09:30.708 GMT
+      - Fri, 14 Aug 2026 05:52:19.196 GMT
       x-ms-number-of-read-regions:
       - '0'
       x-ms-request-charge:
       - '2.98'
       x-ms-request-duration-ms:
-      - '20.867'
+      - '21.972'
       x-ms-resource-quota:
       - documentSize=51200;documentsSize=52428800;documentsCount=-1;collectionSize=52428800;
       x-ms-resource-usage:
-      - documentSize=10;documentsSize=10678;documentsCount=1679;collectionSize=11120;
+      - documentSize=10;documentsSize=10720;documentsCount=1686;collectionSize=11164;
       x-ms-schemaversion:
       - '1.21'
       x-ms-serviceversion:
       - version=2.14.0.0
       x-ms-session-token:
-      - 0:-1#3958
+      - 0:-1#3967
       x-ms-transport-request-id:
-      - '916'
+      - '1'
       x-ms-xp-role:
       - '1'
     status:
       code: 200
       message: Ok
 - request:
-    body: '{"query":"SELECT * FROM c WHERE c.data_type=@data_type AND c.user_id=@user_id","parameters":[{"name":"@data_type","value":"user_current_team"},{"name":"@user_id","value":"dev-local-user-0000-0000-000000000001"}]}'
+    body: '{"query": "SELECT * FROM c WHERE c.data_type=@data_type AND c.user_id=@user_id",
+      "parameters": [{"name": "@data_type", "value": "user_current_team"}, {"name":
+      "@user_id", "value": "dev-local-user-0000-0000-000000000001"}]}'
     headers:
       Accept:
       - application/json
@@ -204,9 +208,9 @@ interactions:
       traceparent:
       - 00-e3e70682c2094cac629f6fbed82c07cd-e87a1613e443df78-01
       x-ms-cosmos-correlated-activityid:
-      - a5061a53-b204-43e9-a8f9-e2cd0747434f
+      - 7a43908d-58b9-4f09-9a57-5a073eab9790
       x-ms-date:
-      - Fri, 14 Aug 2026 07:01:53 GMT
+      - Fri, 14 Aug 2026 10:32:48 GMT
       x-ms-documentdb-isquery:
       - 'true'
       x-ms-documentdb-query-enablecrosspartition:
@@ -216,25 +220,25 @@ interactions:
       x-ms-version:
       - '2020-07-15'
     method: POST
-    uri: https://cosmos-pslc25991vme66zmins-eastus2.documents.azure.com/dbs/macae/colls/memory/docs/
+    uri: https://contract.documents.azure.com:443/dbs/macae/colls/memory/docs/
   response:
     body:
-      string: '{"_rid":"Nv1qAObhPIY=","Documents":[],"_count":0}'
+      string: '{"_rid":"Nv1qAObhPIY=","Documents":[{"id":"fc95b04c-ca18-40d7-893a-0516d30d721a","session_id":"4ab2a0d5-ed37-419a-a700-7ad4868f6f1c","tenant_id":"","timestamp":"2026-08-14T07:01:54.207472+00:00","data_type":"user_current_team","user_id":"dev-local-user-0000-0000-000000000001","team_id":"00000000-0000-0000-0000-000000000004","_rid":"Nv1qAObhPIbGCQAAAAAAAA==","_self":"dbs/Nv1qAA==/colls/Nv1qAObhPIY=/docs/Nv1qAObhPIbGCQAAAAAAAA==/","_etag":"\"01009bfe-0000-0200-0000-6a7ebd620000\"","_attachments":"attachments/","_ts":1786690914}],"_count":1}'
     headers:
       Content-Length:
-      - '49'
+      - '544'
       Content-Type:
       - application/json
       Date:
-      - Fri, 14 Aug 2026 07:01:54 GMT
+      - Fri, 14 Aug 2026 10:32:49 GMT
       Server:
       - Compute
       lsn:
-      - '3958'
+      - '3967'
       x-ms-aad-applied-role-assignment:
       - 15c70179-063b-47bd-af70-81426f8dc873
       x-ms-activity-id:
-      - 0267148d-ae07-4403-b2f6-b457aea92ebe
+      - 8e24902c-cb31-43d0-9e79-11e142764b77
       x-ms-alt-content-path:
       - dbs/macae/colls/memory
       x-ms-content-path:
@@ -244,7 +248,7 @@ interactions:
       x-ms-cosmos-is-partition-key-delete-pending:
       - 'false'
       x-ms-cosmos-llsn:
-      - '3958'
+      - '3967'
       x-ms-cosmos-physical-partition-id:
       - '0'
       x-ms-cosmos-query-execution-info:
@@ -254,332 +258,38 @@ interactions:
       x-ms-gatewayversion:
       - 2.0.0
       x-ms-global-Committed-lsn:
-      - '3958'
+      - '3967'
       x-ms-item-count:
-      - '0'
-      x-ms-last-state-change-utc:
-      - Fri, 14 Aug 2026 05:52:19.196 GMT
-      x-ms-number-of-read-regions:
-      - '0'
-      x-ms-request-charge:
-      - '2.89'
-      x-ms-request-duration-ms:
-      - '22.486'
-      x-ms-resource-quota:
-      - documentSize=51200;documentsSize=52428800;documentsCount=-1;collectionSize=52428800;
-      x-ms-resource-usage:
-      - documentSize=10;documentsSize=10722;documentsCount=1679;collectionSize=11164;
-      x-ms-schemaversion:
-      - '1.21'
-      x-ms-serviceversion:
-      - version=2.14.0.0
-      x-ms-session-token:
-      - 0:-1#3958
-      x-ms-transport-request-id:
       - '1'
-      x-ms-xp-role:
-      - '1'
-    status:
-      code: 200
-      message: Ok
-- request:
-    body: '{"query":"SELECT c.id, c.session_id FROM c WHERE c.user_id=@user_id AND
-      c.data_type=@data_type","parameters":[{"name":"@user_id","value":"dev-local-user-0000-0000-000000000001"},{"name":"@data_type","value":"user_current_team"}]}'
-    headers:
-      Accept:
-      - application/json
-      Cache-Control:
-      - no-cache
-      Content-Length:
-      - '229'
-      Content-Type:
-      - application/query+json
-      User-Agent:
-      - azsdk-python-cosmos-async/4.9.0 Python/3.11.13 (Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31)
-      authorization:
-      - '[REDACTED]'
-      traceparent:
-      - 00-e3e70682c2094cac629f6fbed82c07cd-4826867323a7711a-01
-      x-ms-cosmos-correlated-activityid:
-      - 9099f240-ef78-4fc4-be46-90223cd37af1
-      x-ms-date:
-      - Fri, 14 Aug 2026 07:01:54 GMT
-      x-ms-documentdb-isquery:
-      - 'true'
-      x-ms-documentdb-query-enablecrosspartition:
-      - 'True'
-      x-ms-documentdb-query-iscontinuationexpected:
-      - 'False'
-      x-ms-version:
-      - '2020-07-15'
-    method: POST
-    uri: https://cosmos-pslc25991vme66zmins-eastus2.documents.azure.com/dbs/macae/colls/memory/docs/
-  response:
-    body:
-      string: '{"_rid":"Nv1qAObhPIY=","Documents":[],"_count":0}'
-    headers:
-      Content-Length:
-      - '49'
-      Content-Type:
-      - application/json
-      Date:
-      - Fri, 14 Aug 2026 07:01:54 GMT
-      Server:
-      - Compute
-      lsn:
-      - '3958'
-      x-ms-aad-applied-role-assignment:
-      - 15c70179-063b-47bd-af70-81426f8dc873
-      x-ms-activity-id:
-      - 151b1fbe-855c-44c0-902b-11b6967435b0
-      x-ms-alt-content-path:
-      - dbs/macae/colls/memory
-      x-ms-content-path:
-      - Nv1qAObhPIY=
-      x-ms-cosmos-internal-partition-id:
-      - a4663f92-9af0-4666-b63a-4c5383b71959
-      x-ms-cosmos-is-partition-key-delete-pending:
-      - 'false'
-      x-ms-cosmos-llsn:
-      - '3958'
-      x-ms-cosmos-physical-partition-id:
-      - '0'
-      x-ms-cosmos-query-execution-info:
-      - '{"reverseRidEnabled":false,"reverseIndexScan":false}'
-      x-ms-documentdb-partitionkeyrangeid:
-      - '0'
-      x-ms-gatewayversion:
-      - 2.0.0
-      x-ms-global-Committed-lsn:
-      - '3958'
-      x-ms-item-count:
-      - '0'
       x-ms-last-state-change-utc:
       - Fri, 14 Aug 2026 05:09:30.708 GMT
       x-ms-number-of-read-regions:
       - '0'
       x-ms-request-charge:
-      - '2.8'
+      - '2.92'
       x-ms-request-duration-ms:
-      - '22.843'
+      - '20.831'
       x-ms-resource-quota:
       - documentSize=51200;documentsSize=52428800;documentsCount=-1;collectionSize=52428800;
       x-ms-resource-usage:
-      - documentSize=10;documentsSize=10678;documentsCount=1679;collectionSize=11120;
+      - documentSize=10;documentsSize=10740;documentsCount=1686;collectionSize=11184;
       x-ms-schemaversion:
       - '1.21'
       x-ms-serviceversion:
       - version=2.14.0.0
       x-ms-session-token:
-      - 0:-1#3958
+      - 0:-1#3967
       x-ms-transport-request-id:
-      - '894'
+      - '1'
       x-ms-xp-role:
       - '1'
     status:
       code: 200
       message: Ok
 - request:
-    body: null
-    headers:
-      Accept:
-      - application/json
-      Cache-Control:
-      - no-cache
-      Content-Length:
-      - '0'
-      User-Agent:
-      - azsdk-python-cosmos-async/4.9.0 Python/3.11.13 (Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31)
-      authorization:
-      - '[REDACTED]'
-      traceparent:
-      - 00-e3e70682c2094cac629f6fbed82c07cd-9e4d6e3c1846d424-01
-      x-ms-date:
-      - Fri, 14 Aug 2026 07:01:54 GMT
-      x-ms-documentdb-query-iscontinuationexpected:
-      - 'False'
-      x-ms-version:
-      - '2020-07-15'
-    method: GET
-    uri: https://cosmos-pslc25991vme66zmins-eastus2.documents.azure.com/dbs/macae/colls/memory/
-  response:
-    body:
-      string: '{"id":"memory","indexingPolicy":{"indexingMode":"consistent","automatic":true,"includedPaths":[{"path":"/*"}],"excludedPaths":[{"path":"/\"_etag\"/?"}],"fullTextIndexes":[]},"partitionKey":{"paths":["/session_id"],"kind":"Hash","version":2},"defaultTtl":-1,"uniqueKeyPolicy":{"uniqueKeys":[]},"conflictResolutionPolicy":{"mode":"LastWriterWins","conflictResolutionPath":"/_ts","conflictResolutionProcedure":""},"backupPolicy":{"type":1},"geospatialConfig":{"type":"Geography"},"_rid":"Nv1qAObhPIY=","_ts":1774200209,"_self":"dbs/Nv1qAA==/colls/Nv1qAObhPIY=/","_etag":"\"0000cc05-0000-0200-0000-69c025910000\"","_docs":"docs/","_sprocs":"sprocs/","_triggers":"triggers/","_udfs":"udfs/","_conflicts":"conflicts/","computedProperties":[]}'
-    headers:
-      Cache-Control:
-      - no-store, no-cache
-      Content-Length:
-      - '736'
-      Content-Location:
-      - https://cosmos-pslc25991vme66zmins-eastus2.documents.azure.com/dbs/macae/colls/memory/
-      Content-Type:
-      - application/json
-      Date:
-      - Fri, 14 Aug 2026 07:01:54 GMT
-      Etag:
-      - '"0000cc05-0000-0200-0000-69c025910000"'
-      Pragma:
-      - no-cache
-      Server:
-      - Microsoft-HTTPAPI/2.0
-      Strict-Transport-Security:
-      - max-age=31536000
-      collection-partition-index:
-      - '0'
-      collection-service-index:
-      - '0'
-      lsn:
-      - '3958'
-      x-ms-aad-applied-role-assignment:
-      - 15c70179-063b-47bd-af70-81426f8dc873
-      x-ms-activity-id:
-      - 63084973-d7bb-4ec4-9d0f-177373918f32
-      x-ms-alt-content-path:
-      - dbs/macae
-      x-ms-collection-security-identifier:
-      - '"88b66f0c-757d-4992-b00a-a378c6c2d4dd"'
-      x-ms-content-path:
-      - Nv1qAA==
-      x-ms-cosmos-internal-partition-id:
-      - a4663f92-9af0-4666-b63a-4c5383b71959
-      x-ms-cosmos-item-llsn:
-      - '1'
-      x-ms-cosmos-llsn:
-      - '3958'
-      x-ms-cosmos-max-content-length:
-      - '2097152'
-      x-ms-cosmos-physical-partition-id:
-      - '0'
-      x-ms-documentdb-partitionkeyrangeid:
-      - '0'
-      x-ms-gatewayversion:
-      - version=2.14.0
-      x-ms-global-Committed-lsn:
-      - '3958'
-      x-ms-item-lsn:
-      - '1'
-      x-ms-last-state-change-utc:
-      - Fri, 14 Aug 2026 05:52:19.196 GMT
-      x-ms-number-of-read-regions:
-      - '0'
-      x-ms-request-charge:
-      - '2'
-      x-ms-request-duration-ms:
-      - '19.548'
-      x-ms-schemaversion:
-      - '1.21'
-      x-ms-serviceversion:
-      - version=2.14.0.0
-      x-ms-session-token:
-      - 0:-1#3958
-      x-ms-transport-request-id:
-      - '2'
-      x-ms-xp-role:
-      - '1'
-    status:
-      code: 200
-      message: Ok
-- request:
-    body: '{"id": "fc95b04c-ca18-40d7-893a-0516d30d721a", "session_id": "4ab2a0d5-ed37-419a-a700-7ad4868f6f1c",
-      "tenant_id": "", "timestamp": "2026-08-14T07:01:54.207472+00:00", "data_type":
-      "user_current_team", "user_id": "dev-local-user-0000-0000-000000000001", "team_id":
-      "00000000-0000-0000-0000-000000000004"}'
-    headers:
-      Accept:
-      - application/json
-      Cache-Control:
-      - no-cache
-      Content-Length:
-      - '290'
-      Content-Type:
-      - application/json
-      User-Agent:
-      - azsdk-python-cosmos-async/4.9.0 Python/3.11.13 (Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31)
-      authorization:
-      - '[REDACTED]'
-      traceparent:
-      - 00-e3e70682c2094cac629f6fbed82c07cd-40212ef7cca5a5a1-01
-      x-ms-date:
-      - Fri, 14 Aug 2026 07:01:54 GMT
-      x-ms-documentdb-partitionkey:
-      - '["4ab2a0d5-ed37-419a-a700-7ad4868f6f1c"]'
-      x-ms-documentdb-query-iscontinuationexpected:
-      - 'False'
-      x-ms-version:
-      - '2020-07-15'
-    method: POST
-    uri: https://cosmos-pslc25991vme66zmins-eastus2.documents.azure.com/dbs/macae/colls/memory/docs/
-  response:
-    body:
-      string: '{"id":"fc95b04c-ca18-40d7-893a-0516d30d721a","session_id":"4ab2a0d5-ed37-419a-a700-7ad4868f6f1c","tenant_id":"","timestamp":"2026-08-14T07:01:54.207472+00:00","data_type":"user_current_team","user_id":"dev-local-user-0000-0000-000000000001","team_id":"00000000-0000-0000-0000-000000000004","_rid":"Nv1qAObhPIbGCQAAAAAAAA==","_self":"dbs/Nv1qAA==/colls/Nv1qAObhPIY=/docs/Nv1qAObhPIbGCQAAAAAAAA==/","_etag":"\"01009bfe-0000-0200-0000-6a7ebd620000\"","_attachments":"attachments/","_ts":1786690914}'
-    headers:
-      Content-Length:
-      - '495'
-      Content-Type:
-      - application/json
-      Date:
-      - Fri, 14 Aug 2026 07:01:54 GMT
-      Etag:
-      - '"01009bfe-0000-0200-0000-6a7ebd620000"'
-      Server:
-      - Compute
-      lsn:
-      - '3959'
-      x-ms-aad-applied-role-assignment:
-      - 15c70179-063b-47bd-af70-81426f8dc873
-      x-ms-activity-id:
-      - a2c4e25e-face-44fc-91ed-44715aa4ade0
-      x-ms-alt-content-path:
-      - dbs/macae/colls/memory
-      x-ms-content-path:
-      - Nv1qAObhPIY=
-      x-ms-cosmos-llsn:
-      - '3959'
-      x-ms-cosmos-physical-partition-id:
-      - '0'
-      x-ms-cosmos-quorum-acked-llsn:
-      - '3958'
-      x-ms-current-replica-set-size:
-      - '4'
-      x-ms-current-write-quorum:
-      - '3'
-      x-ms-documentdb-partitionkeyrangeid:
-      - '0'
-      x-ms-gatewayversion:
-      - 2.0.0
-      x-ms-global-Committed-lsn:
-      - '3958'
-      x-ms-last-state-change-utc:
-      - Fri, 14 Aug 2026 05:07:01.190 GMT
-      x-ms-number-of-read-regions:
-      - '0'
-      x-ms-quorum-acked-lsn:
-      - '3958'
-      x-ms-request-charge:
-      - '7.81'
-      x-ms-request-duration-ms:
-      - '162.1788'
-      x-ms-resource-quota:
-      - documentSize=51200;documentsSize=52428800;documentsCount=-1;collectionSize=52428800;
-      x-ms-resource-usage:
-      - documentSize=10;documentsSize=10701;documentsCount=1679;collectionSize=11143;
-      x-ms-schemaversion:
-      - '1.21'
-      x-ms-serviceversion:
-      - '2020-07-15'
-      x-ms-session-token:
-      - 0:-1#3959
-      x-ms-thinclient-route-via-proxy:
-      - '1'
-      x-ms-transport-request-id:
-      - '1'
-      x-ms-xp-role:
-      - '1'
-    status:
-      code: 201
-      message: Created
-- request:
-    body: '{"query":"SELECT * FROM c WHERE c.team_id=@team_id AND c.data_type=@data_type","parameters":[{"name":"@team_id","value":"00000000-0000-0000-0000-000000000004"},{"name":"@data_type","value":"team_config"}]}'
+    body: '{"query": "SELECT * FROM c WHERE c.team_id=@team_id AND c.data_type=@data_type",
+      "parameters": [{"name": "@team_id", "value": "00000000-0000-0000-0000-000000000004"},
+      {"name": "@data_type", "value": "team_config"}]}'
     headers:
       Accept:
       - application/json
@@ -594,13 +304,11 @@ interactions:
       authorization:
       - '[REDACTED]'
       traceparent:
-      - 00-e3e70682c2094cac629f6fbed82c07cd-fb97d43588561712-01
+      - 00-e3e70682c2094cac629f6fbed82c07cd-4826867323a7711a-01
       x-ms-cosmos-correlated-activityid:
-      - 534d67c5-a2ac-4e5d-9ba6-05c40ebe8cc8
-      x-ms-cosmos-intended-collection-rid:
-      - Nv1qAObhPIY=
+      - 03afa106-c56e-46d5-b7de-5edf08b6badf
       x-ms-date:
-      - Fri, 14 Aug 2026 07:01:54 GMT
+      - Fri, 14 Aug 2026 10:32:49 GMT
       x-ms-documentdb-isquery:
       - 'true'
       x-ms-documentdb-query-enablecrosspartition:
@@ -610,7 +318,7 @@ interactions:
       x-ms-version:
       - '2020-07-15'
     method: POST
-    uri: https://cosmos-pslc25991vme66zmins-eastus2.documents.azure.com/dbs/macae/colls/memory/docs/
+    uri: https://contract.documents.azure.com:443/dbs/macae/colls/memory/docs/
   response:
     body:
       string: '{"_rid":"Nv1qAObhPIY=","Documents":[{"id":"00000000-0000-0000-0000-000000000004","session_id":"fff83d1e-bd55-4e08-a95c-bfba715b1e22","team_id":"00000000-0000-0000-0000-000000000004","data_type":"team_config","user_id":"system","name":"RFP
@@ -649,15 +357,15 @@ interactions:
       Content-Type:
       - application/json
       Date:
-      - Fri, 14 Aug 2026 07:01:54 GMT
+      - Fri, 14 Aug 2026 10:32:49 GMT
       Server:
       - Compute
       lsn:
-      - '3959'
+      - '3967'
       x-ms-aad-applied-role-assignment:
       - 15c70179-063b-47bd-af70-81426f8dc873
       x-ms-activity-id:
-      - af8ccb3c-30ec-4da7-9e0e-460ea4dbd5a1
+      - 71e2950d-f2f5-4976-bd51-9da2fd6180e7
       x-ms-alt-content-path:
       - dbs/macae/colls/memory
       x-ms-content-path:
@@ -667,47 +375,39 @@ interactions:
       x-ms-cosmos-is-partition-key-delete-pending:
       - 'false'
       x-ms-cosmos-llsn:
-      - '3959'
+      - '3967'
       x-ms-cosmos-physical-partition-id:
       - '0'
       x-ms-cosmos-query-execution-info:
       - '{"reverseRidEnabled":false,"reverseIndexScan":false}'
-      x-ms-cosmos-quorum-acked-llsn:
-      - '3959'
-      x-ms-current-replica-set-size:
-      - '4'
-      x-ms-current-write-quorum:
-      - '3'
       x-ms-documentdb-partitionkeyrangeid:
       - '0'
       x-ms-gatewayversion:
       - 2.0.0
       x-ms-global-Committed-lsn:
-      - '3959'
+      - '3967'
       x-ms-item-count:
       - '1'
       x-ms-last-state-change-utc:
-      - Fri, 14 Aug 2026 05:07:01.190 GMT
+      - Fri, 14 Aug 2026 05:52:19.196 GMT
       x-ms-number-of-read-regions:
       - '0'
-      x-ms-quorum-acked-lsn:
-      - '3959'
       x-ms-request-charge:
       - '2.98'
       x-ms-request-duration-ms:
-      - '21.54'
+      - '20.716'
       x-ms-resource-quota:
       - documentSize=51200;documentsSize=52428800;documentsCount=-1;collectionSize=52428800;
       x-ms-resource-usage:
-      - documentSize=10;documentsSize=10701;documentsCount=1680;collectionSize=11143;
+      - documentSize=10;documentsSize=10720;documentsCount=1686;collectionSize=11164;
       x-ms-schemaversion:
       - '1.21'
       x-ms-serviceversion:
       - version=2.14.0.0
       x-ms-session-token:
-      - 0:-1#3959
+      - 0:-1#3967
       x-ms-transport-request-id:
-      - '244'
+      - '1'
       x-ms-xp-role:
       - '1'
     status:
@@ -723,26 +423,35 @@ interactions:
       authorization:
       - '[REDACTED]'
       traceparent:
-      - 00-e3e70682c2094cac629f6fbed82c07cd-4f65d4d9259f4329-01
+      - 00-e3e70682c2094cac629f6fbed82c07cd-40212ef7cca5a5a1-01
       x-ms-client-request-id:
-      - 085dee9a-97ae-11f1-9dba-1610e8660822
+      - 7f1e5cbe-97cb-11f1-a5ba-1610e8660822
     method: GET
-    uri: https://aif-pslc25991vme66zmins.services.ai.azure.com/api/projects/proj-pslc25991vme66zmins/agents?api-version=v1
+    uri: https://contract.services.ai.azure.com/api/projects/proj-pslc25991vme66zmins/agents?api-version=v1
   response:
     body:
       string: "{\n  \"data\": [\n    {\n      \"object\": \"agent\",\n      \"id\":
-        \"RFP-Team\",\n      \"name\": \"RFP-Team\",\n      \"state\": \"enabled\",\n
-        \     \"versions\": {\n        \"latest\": {\n          \"metadata\": {},\n
-        \         \"object\": \"agent.version\",\n          \"id\": \"RFP-Team:2\",\n
-        \         \"name\": \"RFP-Team\",\n          \"version\": \"2\",\n          \"description\":
-        \"\",\n          \"created_at\": 1786661191,\n          \"definition\": {\n
+        \"Retail-Customer-Success-Team\",\n      \"name\": \"Retail-Customer-Success-Team\",\n
+        \     \"state\": \"enabled\",\n      \"versions\": {\n        \"latest\":
+        {\n          \"metadata\": {},\n          \"object\": \"agent.version\",\n
+        \         \"id\": \"Retail-Customer-Success-Team:4\",\n          \"name\":
+        \"Retail-Customer-Success-Team\",\n          \"version\": \"4\",\n          \"description\":
+        \"\",\n          \"created_at\": 1786697620,\n          \"definition\": {\n
         \           \"kind\": \"prompt\",\n            \"model\": \"gpt-4.1-mini\"\n
         \         },\n          \"draft\": false,\n          \"status\": \"active\",\n
-        \         \"agent_guid\": \"1736f8c1-db1e-4c5b-b5b3-66ae329f3f2b\"\n        }\n
-        \     }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\": \"TechnicalSupportAgent\",\n
-        \     \"name\": \"TechnicalSupportAgent\",\n      \"state\": \"enabled\",\n
-        \     \"versions\": {\n        \"latest\": {\n          \"metadata\": {\n
-        \           \"microsoft.voice-live.enabled\": \"false\",\n            \"microsoft.voice-live.configuration\":
+        \         \"agent_guid\": \"703c9a6b-3f93-4622-bf2a-0e0f0d05fe40\"\n        }\n
+        \     }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\": \"RFP-Team\",\n
+        \     \"name\": \"RFP-Team\",\n      \"state\": \"enabled\",\n      \"versions\":
+        {\n        \"latest\": {\n          \"metadata\": {},\n          \"object\":
+        \"agent.version\",\n          \"id\": \"RFP-Team:2\",\n          \"name\":
+        \"RFP-Team\",\n          \"version\": \"2\",\n          \"description\": \"\",\n
+        \         \"created_at\": 1786661191,\n          \"definition\": {\n            \"kind\":
+        \"prompt\",\n            \"model\": \"gpt-4.1-mini\"\n          },\n          \"draft\":
+        false,\n          \"status\": \"active\",\n          \"agent_guid\": \"1736f8c1-db1e-4c5b-b5b3-66ae329f3f2b\"\n
+        \       }\n      }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\":
+        \"TechnicalSupportAgent\",\n      \"name\": \"TechnicalSupportAgent\",\n      \"state\":
+        \"enabled\",\n      \"versions\": {\n        \"latest\": {\n          \"metadata\":
+        {\n            \"microsoft.voice-live.enabled\": \"false\",\n            \"microsoft.voice-live.configuration\":
         \"{\\\"session\\\":{\\\"voice\\\":{\\\"name\\\":\\\"en-US-Ava:DragonHDLatestNeural\\\",\\\"type\\\":\\\"azure-standard\\\",\\\"temperature\\\":0.8,\\\"rate\\\":\\\"1\\\",\\\"isHdVoice\\\":true},\\\"inputAudioTranscription\\\":{\\\"model\\\":\\\"azure-speech\\\",\\\"language\\\":\\\"auto-detect\\\"},\\\"turnDetection\\\":{\\\"type\\\":\\\"azure_semantic_vad\\\",\\\"endOfUtteranceDetection\\\":null,\\\"removeFillerWords\\\":true},\\\"inputAudioNoiseReduction\\\":null,\\\"inputAudioEchoCancellation\\\":null,\\\"fillerResponse\\\":null,\\\"avatar\\\":null,\\\"proactiveEngagement\\\":false}}\",\n
         \           \"description\": \"\",\n            \"modified_at\": \"1785715301\"\n
         \         },\n          \"object\": \"agent.version\",\n          \"id\":
@@ -1856,44 +1565,15 @@ interactions:
         \               \"project_connection_id\": \"kb-knowledgebase550-lrm9b\"\n
         \             }\n            ]\n          },\n          \"draft\": false,\n
         \         \"status\": \"active\",\n          \"agent_guid\": \"1bb08ece-0420-4111-a49f-1c10ce032221\"\n
-        \       }\n      }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\":
-        \"RfpComplianceAgent\",\n      \"name\": \"RfpComplianceAgent\",\n      \"state\":
-        \"enabled\",\n      \"versions\": {\n        \"latest\": {\n          \"metadata\":
-        {\n            \"microsoft.voice-live.enabled\": \"false\",\n            \"microsoft.voice-live.configuration\":
-        \"{\\\"session\\\":{\\\"voice\\\":{\\\"name\\\":\\\"en-US-Ava:DragonHDLatestNeural\\\",\\\"type\\\":\\\"azure-standard\\\",\\\"temperature\\\":0.8,\\\"rate\\\":\\\"1\\\",\\\"isHdVoice\\\":true},\\\"inputAudioTranscription\\\":{\\\"model\\\":\\\"azure-speech\\\",\\\"language\\\":\\\"auto-detect\\\"},\\\"turnDetection\\\":{\\\"type\\\":\\\"azure_semantic_vad\\\",\\\"endOfUtteranceDetection\\\":null,\\\"removeFillerWords\\\":true},\\\"inputAudioNoiseReduction\\\":null,\\\"inputAudioEchoCancellation\\\":null,\\\"fillerResponse\\\":null,\\\"avatar\\\":null,\\\"proactiveEngagement\\\":false}}\",\n
-        \           \"description\": \"\",\n            \"modified_at\": \"1779887179\"\n
-        \         },\n          \"object\": \"agent.version\",\n          \"id\":
-        \"RfpComplianceAgent:6\",\n          \"name\": \"RfpComplianceAgent\",\n          \"version\":
-        \"6\",\n          \"description\": \"\",\n          \"created_at\": 1779887179,\n
-        \         \"definition\": {\n            \"kind\": \"prompt\",\n            \"model\":
-        \"gpt-4.1-mini\",\n            \"instructions\": \"You are the Compliance
-        Agent. Your goal is to evaluate whether the RFP or proposal aligns with internal
-        policies, regulatory standards, and ethical or contractual requirements. Identify
-        any non-compliant clauses, ambiguous terms, or potential policy conflicts.
-        For each issue, specify the related policy area (e.g., data privacy, labor,
-        financial controls) and classify it as Mandatory or Recommended for review.
-        Maintain a professional, objective tone and emphasize actionable compliance
-        insights. Always use the Azure AI Search tool and configured index for knowledge
-        retrieval.\",\n            \"tools\": [\n              {\n                \"type\":
-        \"azure_ai_search\",\n                \"azure_ai_search\": {\n                  \"indexes\":
-        [\n                    {\n                      \"project_connection_id\":
-        \"aifp-srch-connection-pslc25991vme66zmins\",\n                      \"index_name\":
-        \"macae-rfp-compliance-index\",\n                      \"query_type\": \"semantic\",\n
-        \                     \"top_k\": 5\n                    }\n                  ]\n
-        \               }\n              },\n              {\n                \"type\":
-        \"code_interpreter\",\n                \"container\": {\n                  \"type\":
-        \"auto\"\n                }\n              }\n            ]\n          },\n
-        \         \"draft\": false,\n          \"status\": \"active\",\n          \"agent_guid\":
-        \"f0dcf461-9529-4281-b9b8-c8ac4906d329\"\n        }\n      }\n    }\n  ],\n
-        \ \"first_id\": \"RFP-Team\",\n  \"last_id\": \"RfpComplianceAgent\",\n  \"has_more\":
-        true,\n  \"object\": \"list\"\n}"
+        \       }\n      }\n    }\n  ],\n  \"first_id\": \"Retail-Customer-Success-Team\",\n
+        \ \"last_id\": \"RfpRiskAgent\",\n  \"has_more\": true,\n  \"object\": \"list\"\n}"
     headers:
       Access-Control-Expose-Headers:
       - Operation-Location,Location,Apim-Request-Id,x-agent-session-id,x-agent-invocation-id
       Content-Type:
       - application/json; charset=utf-8
       Date:
-      - Fri, 14 Aug 2026 07:01:56 GMT
+      - Fri, 14 Aug 2026 10:32:51 GMT
       Strict-Transport-Security:
       - max-age=31536000; includeSubDomains; preload
       Transfer-Encoding:
@@ -1903,11 +1583,11 @@ interactions:
       api-supported-versions:
       - 1.0,2025-05-15-preview,2025-11-15-preview
       apim-request-id:
-      - 758a1bb2-8d10-4fe8-8d1e-d0bacd2bea8d
+      - 52cc5d89-84c1-4e4a-8509-1be3b0332c50
       azureml-served-by-cluster:
-      - hyena-eastus2-02
+      - hyena-eastus2-01
       content-length:
-      - '98148'
+      - '96250'
       request-context:
       - appId=
       x-content-type-options:
@@ -1931,26 +1611,35 @@ interactions:
       authorization:
       - '[REDACTED]'
       traceparent:
-      - 00-e3e70682c2094cac629f6fbed82c07cd-af19922ad9b8a714-01
+      - 00-e3e70682c2094cac629f6fbed82c07cd-cf6a659eb4862b21-01
       x-ms-client-request-id:
-      - 09ae5fa0-97ae-11f1-9dba-1610e8660822
+      - 80039f04-97cb-11f1-a5ba-1610e8660822
     method: GET
-    uri: https://aif-pslc25991vme66zmins.services.ai.azure.com/api/projects/proj-pslc25991vme66zmins/agents?api-version=v1
+    uri: https://contract.services.ai.azure.com/api/projects/proj-pslc25991vme66zmins/agents?api-version=v1
   response:
     body:
       string: "{\n  \"data\": [\n    {\n      \"object\": \"agent\",\n      \"id\":
-        \"RFP-Team\",\n      \"name\": \"RFP-Team\",\n      \"state\": \"enabled\",\n
-        \     \"versions\": {\n        \"latest\": {\n          \"metadata\": {},\n
-        \         \"object\": \"agent.version\",\n          \"id\": \"RFP-Team:2\",\n
-        \         \"name\": \"RFP-Team\",\n          \"version\": \"2\",\n          \"description\":
-        \"\",\n          \"created_at\": 1786661191,\n          \"definition\": {\n
+        \"Retail-Customer-Success-Team\",\n      \"name\": \"Retail-Customer-Success-Team\",\n
+        \     \"state\": \"enabled\",\n      \"versions\": {\n        \"latest\":
+        {\n          \"metadata\": {},\n          \"object\": \"agent.version\",\n
+        \         \"id\": \"Retail-Customer-Success-Team:4\",\n          \"name\":
+        \"Retail-Customer-Success-Team\",\n          \"version\": \"4\",\n          \"description\":
+        \"\",\n          \"created_at\": 1786697620,\n          \"definition\": {\n
         \           \"kind\": \"prompt\",\n            \"model\": \"gpt-4.1-mini\"\n
         \         },\n          \"draft\": false,\n          \"status\": \"active\",\n
-        \         \"agent_guid\": \"1736f8c1-db1e-4c5b-b5b3-66ae329f3f2b\"\n        }\n
-        \     }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\": \"TechnicalSupportAgent\",\n
-        \     \"name\": \"TechnicalSupportAgent\",\n      \"state\": \"enabled\",\n
-        \     \"versions\": {\n        \"latest\": {\n          \"metadata\": {\n
-        \           \"microsoft.voice-live.enabled\": \"false\",\n            \"microsoft.voice-live.configuration\":
+        \         \"agent_guid\": \"703c9a6b-3f93-4622-bf2a-0e0f0d05fe40\"\n        }\n
+        \     }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\": \"RFP-Team\",\n
+        \     \"name\": \"RFP-Team\",\n      \"state\": \"enabled\",\n      \"versions\":
+        {\n        \"latest\": {\n          \"metadata\": {},\n          \"object\":
+        \"agent.version\",\n          \"id\": \"RFP-Team:2\",\n          \"name\":
+        \"RFP-Team\",\n          \"version\": \"2\",\n          \"description\": \"\",\n
+        \         \"created_at\": 1786661191,\n          \"definition\": {\n            \"kind\":
+        \"prompt\",\n            \"model\": \"gpt-4.1-mini\"\n          },\n          \"draft\":
+        false,\n          \"status\": \"active\",\n          \"agent_guid\": \"1736f8c1-db1e-4c5b-b5b3-66ae329f3f2b\"\n
+        \       }\n      }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\":
+        \"TechnicalSupportAgent\",\n      \"name\": \"TechnicalSupportAgent\",\n      \"state\":
+        \"enabled\",\n      \"versions\": {\n        \"latest\": {\n          \"metadata\":
+        {\n            \"microsoft.voice-live.enabled\": \"false\",\n            \"microsoft.voice-live.configuration\":
         \"{\\\"session\\\":{\\\"voice\\\":{\\\"name\\\":\\\"en-US-Ava:DragonHDLatestNeural\\\",\\\"type\\\":\\\"azure-standard\\\",\\\"temperature\\\":0.8,\\\"rate\\\":\\\"1\\\",\\\"isHdVoice\\\":true},\\\"inputAudioTranscription\\\":{\\\"model\\\":\\\"azure-speech\\\",\\\"language\\\":\\\"auto-detect\\\"},\\\"turnDetection\\\":{\\\"type\\\":\\\"azure_semantic_vad\\\",\\\"endOfUtteranceDetection\\\":null,\\\"removeFillerWords\\\":true},\\\"inputAudioNoiseReduction\\\":null,\\\"inputAudioEchoCancellation\\\":null,\\\"fillerResponse\\\":null,\\\"avatar\\\":null,\\\"proactiveEngagement\\\":false}}\",\n
         \           \"description\": \"\",\n            \"modified_at\": \"1785715301\"\n
         \         },\n          \"object\": \"agent.version\",\n          \"id\":
@@ -3064,44 +2753,15 @@ interactions:
         \               \"project_connection_id\": \"kb-knowledgebase550-lrm9b\"\n
         \             }\n            ]\n          },\n          \"draft\": false,\n
         \         \"status\": \"active\",\n          \"agent_guid\": \"1bb08ece-0420-4111-a49f-1c10ce032221\"\n
-        \       }\n      }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\":
-        \"RfpComplianceAgent\",\n      \"name\": \"RfpComplianceAgent\",\n      \"state\":
-        \"enabled\",\n      \"versions\": {\n        \"latest\": {\n          \"metadata\":
-        {\n            \"microsoft.voice-live.enabled\": \"false\",\n            \"microsoft.voice-live.configuration\":
-        \"{\\\"session\\\":{\\\"voice\\\":{\\\"name\\\":\\\"en-US-Ava:DragonHDLatestNeural\\\",\\\"type\\\":\\\"azure-standard\\\",\\\"temperature\\\":0.8,\\\"rate\\\":\\\"1\\\",\\\"isHdVoice\\\":true},\\\"inputAudioTranscription\\\":{\\\"model\\\":\\\"azure-speech\\\",\\\"language\\\":\\\"auto-detect\\\"},\\\"turnDetection\\\":{\\\"type\\\":\\\"azure_semantic_vad\\\",\\\"endOfUtteranceDetection\\\":null,\\\"removeFillerWords\\\":true},\\\"inputAudioNoiseReduction\\\":null,\\\"inputAudioEchoCancellation\\\":null,\\\"fillerResponse\\\":null,\\\"avatar\\\":null,\\\"proactiveEngagement\\\":false}}\",\n
-        \           \"description\": \"\",\n            \"modified_at\": \"1779887179\"\n
-        \         },\n          \"object\": \"agent.version\",\n          \"id\":
-        \"RfpComplianceAgent:6\",\n          \"name\": \"RfpComplianceAgent\",\n          \"version\":
-        \"6\",\n          \"description\": \"\",\n          \"created_at\": 1779887179,\n
-        \         \"definition\": {\n            \"kind\": \"prompt\",\n            \"model\":
-        \"gpt-4.1-mini\",\n            \"instructions\": \"You are the Compliance
-        Agent. Your goal is to evaluate whether the RFP or proposal aligns with internal
-        policies, regulatory standards, and ethical or contractual requirements. Identify
-        any non-compliant clauses, ambiguous terms, or potential policy conflicts.
-        For each issue, specify the related policy area (e.g., data privacy, labor,
-        financial controls) and classify it as Mandatory or Recommended for review.
-        Maintain a professional, objective tone and emphasize actionable compliance
-        insights. Always use the Azure AI Search tool and configured index for knowledge
-        retrieval.\",\n            \"tools\": [\n              {\n                \"type\":
-        \"azure_ai_search\",\n                \"azure_ai_search\": {\n                  \"indexes\":
-        [\n                    {\n                      \"project_connection_id\":
-        \"aifp-srch-connection-pslc25991vme66zmins\",\n                      \"index_name\":
-        \"macae-rfp-compliance-index\",\n                      \"query_type\": \"semantic\",\n
-        \                     \"top_k\": 5\n                    }\n                  ]\n
-        \               }\n              },\n              {\n                \"type\":
-        \"code_interpreter\",\n                \"container\": {\n                  \"type\":
-        \"auto\"\n                }\n              }\n            ]\n          },\n
-        \         \"draft\": false,\n          \"status\": \"active\",\n          \"agent_guid\":
-        \"f0dcf461-9529-4281-b9b8-c8ac4906d329\"\n        }\n      }\n    }\n  ],\n
-        \ \"first_id\": \"RFP-Team\",\n  \"last_id\": \"RfpComplianceAgent\",\n  \"has_more\":
-        true,\n  \"object\": \"list\"\n}"
+        \       }\n      }\n    }\n  ],\n  \"first_id\": \"Retail-Customer-Success-Team\",\n
+        \ \"last_id\": \"RfpRiskAgent\",\n  \"has_more\": true,\n  \"object\": \"list\"\n}"
     headers:
       Access-Control-Expose-Headers:
       - Operation-Location,Location,Apim-Request-Id,x-agent-session-id,x-agent-invocation-id
       Content-Type:
       - application/json; charset=utf-8
       Date:
-      - Fri, 14 Aug 2026 07:01:56 GMT
+      - Fri, 14 Aug 2026 10:32:51 GMT
       Strict-Transport-Security:
       - max-age=31536000; includeSubDomains; preload
       Transfer-Encoding:
@@ -3111,11 +2771,11 @@ interactions:
       api-supported-versions:
       - 1.0,2025-05-15-preview,2025-11-15-preview
       apim-request-id:
-      - a4ac620e-d2b4-41b2-979e-7643f812eb33
+      - ab8e524a-7ed0-4455-bc21-ba4bddc3f221
       azureml-served-by-cluster:
       - hyena-eastus2-01
       content-length:
-      - '98148'
+      - '96250'
       request-context:
       - appId=
       x-content-type-options:
@@ -3139,26 +2799,35 @@ interactions:
       authorization:
       - '[REDACTED]'
       traceparent:
-      - 00-e3e70682c2094cac629f6fbed82c07cd-6f25e2a25a921187-01
+      - 00-e3e70682c2094cac629f6fbed82c07cd-bad640fb19488dec-01
       x-ms-client-request-id:
-      - 09cf2e88-97ae-11f1-9dba-1610e8660822
+      - 8020f4a0-97cb-11f1-a5ba-1610e8660822
     method: GET
-    uri: https://aif-pslc25991vme66zmins.services.ai.azure.com/api/projects/proj-pslc25991vme66zmins/agents?api-version=v1
+    uri: https://contract.services.ai.azure.com/api/projects/proj-pslc25991vme66zmins/agents?api-version=v1
   response:
     body:
       string: "{\n  \"data\": [\n    {\n      \"object\": \"agent\",\n      \"id\":
-        \"RFP-Team\",\n      \"name\": \"RFP-Team\",\n      \"state\": \"enabled\",\n
-        \     \"versions\": {\n        \"latest\": {\n          \"metadata\": {},\n
-        \         \"object\": \"agent.version\",\n          \"id\": \"RFP-Team:2\",\n
-        \         \"name\": \"RFP-Team\",\n          \"version\": \"2\",\n          \"description\":
-        \"\",\n          \"created_at\": 1786661191,\n          \"definition\": {\n
+        \"Retail-Customer-Success-Team\",\n      \"name\": \"Retail-Customer-Success-Team\",\n
+        \     \"state\": \"enabled\",\n      \"versions\": {\n        \"latest\":
+        {\n          \"metadata\": {},\n          \"object\": \"agent.version\",\n
+        \         \"id\": \"Retail-Customer-Success-Team:4\",\n          \"name\":
+        \"Retail-Customer-Success-Team\",\n          \"version\": \"4\",\n          \"description\":
+        \"\",\n          \"created_at\": 1786697620,\n          \"definition\": {\n
         \           \"kind\": \"prompt\",\n            \"model\": \"gpt-4.1-mini\"\n
         \         },\n          \"draft\": false,\n          \"status\": \"active\",\n
-        \         \"agent_guid\": \"1736f8c1-db1e-4c5b-b5b3-66ae329f3f2b\"\n        }\n
-        \     }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\": \"TechnicalSupportAgent\",\n
-        \     \"name\": \"TechnicalSupportAgent\",\n      \"state\": \"enabled\",\n
-        \     \"versions\": {\n        \"latest\": {\n          \"metadata\": {\n
-        \           \"microsoft.voice-live.enabled\": \"false\",\n            \"microsoft.voice-live.configuration\":
+        \         \"agent_guid\": \"703c9a6b-3f93-4622-bf2a-0e0f0d05fe40\"\n        }\n
+        \     }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\": \"RFP-Team\",\n
+        \     \"name\": \"RFP-Team\",\n      \"state\": \"enabled\",\n      \"versions\":
+        {\n        \"latest\": {\n          \"metadata\": {},\n          \"object\":
+        \"agent.version\",\n          \"id\": \"RFP-Team:2\",\n          \"name\":
+        \"RFP-Team\",\n          \"version\": \"2\",\n          \"description\": \"\",\n
+        \         \"created_at\": 1786661191,\n          \"definition\": {\n            \"kind\":
+        \"prompt\",\n            \"model\": \"gpt-4.1-mini\"\n          },\n          \"draft\":
+        false,\n          \"status\": \"active\",\n          \"agent_guid\": \"1736f8c1-db1e-4c5b-b5b3-66ae329f3f2b\"\n
+        \       }\n      }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\":
+        \"TechnicalSupportAgent\",\n      \"name\": \"TechnicalSupportAgent\",\n      \"state\":
+        \"enabled\",\n      \"versions\": {\n        \"latest\": {\n          \"metadata\":
+        {\n            \"microsoft.voice-live.enabled\": \"false\",\n            \"microsoft.voice-live.configuration\":
         \"{\\\"session\\\":{\\\"voice\\\":{\\\"name\\\":\\\"en-US-Ava:DragonHDLatestNeural\\\",\\\"type\\\":\\\"azure-standard\\\",\\\"temperature\\\":0.8,\\\"rate\\\":\\\"1\\\",\\\"isHdVoice\\\":true},\\\"inputAudioTranscription\\\":{\\\"model\\\":\\\"azure-speech\\\",\\\"language\\\":\\\"auto-detect\\\"},\\\"turnDetection\\\":{\\\"type\\\":\\\"azure_semantic_vad\\\",\\\"endOfUtteranceDetection\\\":null,\\\"removeFillerWords\\\":true},\\\"inputAudioNoiseReduction\\\":null,\\\"inputAudioEchoCancellation\\\":null,\\\"fillerResponse\\\":null,\\\"avatar\\\":null,\\\"proactiveEngagement\\\":false}}\",\n
         \           \"description\": \"\",\n            \"modified_at\": \"1785715301\"\n
         \         },\n          \"object\": \"agent.version\",\n          \"id\":
@@ -4272,7 +3941,60 @@ interactions:
         \               \"project_connection_id\": \"kb-knowledgebase550-lrm9b\"\n
         \             }\n            ]\n          },\n          \"draft\": false,\n
         \         \"status\": \"active\",\n          \"agent_guid\": \"1bb08ece-0420-4111-a49f-1c10ce032221\"\n
-        \       }\n      }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\":
+        \       }\n      }\n    }\n  ],\n  \"first_id\": \"Retail-Customer-Success-Team\",\n
+        \ \"last_id\": \"RfpRiskAgent\",\n  \"has_more\": true,\n  \"object\": \"list\"\n}"
+    headers:
+      Access-Control-Expose-Headers:
+      - Operation-Location,Location,Apim-Request-Id,x-agent-session-id,x-agent-invocation-id
+      Content-Type:
+      - application/json; charset=utf-8
+      Date:
+      - Fri, 14 Aug 2026 10:32:52 GMT
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Accept-Encoding
+      api-supported-versions:
+      - 1.0,2025-05-15-preview,2025-11-15-preview
+      apim-request-id:
+      - a7cead9e-f575-4ef1-897b-40e0170c5df9
+      azureml-served-by-cluster:
+      - hyena-eastus2-01
+      content-length:
+      - '96250'
+      request-context:
+      - appId=
+      x-content-type-options:
+      - nosniff
+      x-ms-region:
+      - East US 2
+      x-ms-response-type:
+      - standard
+      x-request-id:
+      - e3e70682c2094cac629f6fbed82c07cd
+    status:
+      code: 200
+      message: OK
+- request:
+    body: null
+    headers:
+      Accept:
+      - application/json
+      User-Agent:
+      - azsdk-python-ai-projects/2.0.0 Python/3.11.13 (Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.31)
+      authorization:
+      - '[REDACTED]'
+      traceparent:
+      - 00-e3e70682c2094cac629f6fbed82c07cd-e61a441c12e0c8b2-01
+      x-ms-client-request-id:
+      - 8039e474-97cb-11f1-a5ba-1610e8660822
+    method: GET
+    uri: https://contract.services.ai.azure.com/api/projects/proj-pslc25991vme66zmins/agents?after=RfpRiskAgent&api-version=v1
+  response:
+    body:
+      string: "{\n  \"data\": [\n    {\n      \"object\": \"agent\",\n      \"id\":
         \"RfpComplianceAgent\",\n      \"name\": \"RfpComplianceAgent\",\n      \"state\":
         \"enabled\",\n      \"versions\": {\n        \"latest\": {\n          \"metadata\":
         {\n            \"microsoft.voice-live.enabled\": \"false\",\n            \"microsoft.voice-live.configuration\":
@@ -4300,16 +4022,443 @@ interactions:
         \"code_interpreter\",\n                \"container\": {\n                  \"type\":
         \"auto\"\n                }\n              }\n            ]\n          },\n
         \         \"draft\": false,\n          \"status\": \"active\",\n          \"agent_guid\":
-        \"f0dcf461-9529-4281-b9b8-c8ac4906d329\"\n        }\n      }\n    }\n  ],\n
-        \ \"first_id\": \"RFP-Team\",\n  \"last_id\": \"RfpComplianceAgent\",\n  \"has_more\":
-        true,\n  \"object\": \"list\"\n}"
+        \"f0dcf461-9529-4281-b9b8-c8ac4906d329\"\n        }\n      }\n    },\n    {\n
+        \     \"object\": \"agent\",\n      \"id\": \"Direct-Response-Team-Direct\",\n
+        \     \"name\": \"Direct-Response-Team-Direct\",\n      \"state\": \"enabled\",\n
+        \     \"versions\": {\n        \"latest\": {\n          \"metadata\": {},\n
+        \         \"object\": \"agent.version\",\n          \"id\": \"Direct-Response-Team-Direct:1\",\n
+        \         \"name\": \"Direct-Response-Team-Direct\",\n          \"version\":
+        \"1\",\n          \"description\": \"\",\n          \"created_at\": 1779419363,\n
+        \         \"definition\": {\n            \"kind\": \"prompt\",\n            \"model\":
+        \"gpt-4.1-mini\",\n            \"tools\": []\n          },\n          \"draft\":
+        false,\n          \"status\": \"active\",\n          \"instance_identity\":
+        {\n            \"principal_id\": \"47f5d830-c23a-4012-a12c-6aaa7b679374\",\n
+        \           \"client_id\": \"47f5d830-c23a-4012-a12c-6aaa7b679374\"\n          },\n
+        \         \"blueprint\": {\n            \"principal_id\": \"1d09fa8f-7a7c-447d-9a4d-e34c27e0080c\",\n
+        \           \"client_id\": \"8965ac99-4db3-42e0-8e4c-b27171e1e51e\"\n          },\n
+        \         \"blueprint_reference\": {\n            \"type\": \"ManagedAgentIdentityBlueprint\",\n
+        \           \"blueprint_id\": \"Direct-Response-Team-Direct-e0327\"\n          },\n
+        \         \"agent_guid\": \"e032774b-a5e5-40e5-ad70-77e47846fef0\"\n        }\n
+        \     }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\": \"ProductAgent\",\n
+        \     \"name\": \"ProductAgent\",\n      \"state\": \"enabled\",\n      \"versions\":
+        {\n        \"latest\": {\n          \"metadata\": {\n            \"description\":
+        \"Updated ProductAgent\",\n            \"modified_at\": \"1778981857\",\n
+        \           \"microsoft.voice-live.enabled\": \"false\",\n            \"microsoft.voice-live.configuration\":
+        \"{\\\"session\\\":{\\\"voice\\\":{\\\"name\\\":\\\"en-US-Ava:DragonHDLatestNeural\\\",\\\"type\\\":\\\"azure-standard\\\",\\\"temperature\\\":0.8,\\\"rate\\\":\\\"1\\\",\\\"isHdVoice\\\":true},\\\"inputAudioTranscription\\\":{\\\"model\\\":\\\"azure-speech\\\",\\\"language\\\":\\\"auto-detect\\\"},\\\"turnDetection\\\":{\\\"type\\\":\\\"azure_semantic_vad\\\",\\\"endOfUtteranceDetection\\\":null,\\\"removeFillerWords\\\":true},\\\"inputAudioNoiseReduction\\\":null,\\\"inputAudioEchoCancellation\\\":null,\\\"fillerResponse\\\":null,\\\"avatar\\\":null,\\\"proactiveEngagement\\\":false}}\"\n
+        \         },\n          \"object\": \"agent.version\",\n          \"id\":
+        \"ProductAgent:29\",\n          \"name\": \"ProductAgent\",\n          \"version\":
+        \"29\",\n          \"description\": \"Updated ProductAgent\",\n          \"created_at\":
+        1778981877,\n          \"definition\": {\n            \"kind\": \"prompt\",\n
+        \           \"model\": \"gpt-4.1-mini\",\n            \"instructions\": \"You
+        are a Product agent. You have access to MCP tools which allow you to obtain
+        knowledge about products, product management, development, and compliance
+        guidelines. When asked to call one of these tools, you should summarize back
+        what was done.\",\n            \"tools\": [\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"employee_onboarding_blueprint_flat\",\n
+        \               \"description\": \"Ultra-minimal onboarding blueprint (flat
+        list).\\nAgent usage:\\n1. Call this first when onboarding intent detected.\\n2.
+        Filter steps to its own domain.\\n3. Execute in listed order while honoring
+        depends_on.\",\n                \"parameters\": {\n                  \"properties\":
+        {\n                    \"employee_name\": {\n                      \"anyOf\":
+        [\n                        {\n                          \"type\": \"string\"\n
+        \                       },\n                        {\n                          \"type\":
+        \"null\"\n                        }\n                      ],\n                      \"default\":
+        null\n                    },\n                    \"start_date\": {\n                      \"anyOf\":
+        [\n                        {\n                          \"type\": \"string\"\n
+        \                       },\n                        {\n                          \"type\":
+        \"null\"\n                        }\n                      ],\n                      \"default\":
+        null\n                    },\n                    \"role\": {\n                      \"anyOf\":
+        [\n                        {\n                          \"type\": \"string\"\n
+        \                       },\n                        {\n                          \"type\":
+        \"null\"\n                        }\n                      ],\n                      \"default\":
+        null\n                    }\n                  },\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"schedule_orientation_session\",\n
+        \               \"description\": \"Schedule an orientation session for a new
+        employee.\",\n                \"parameters\": {\n                  \"properties\":
+        {\n                    \"employee_name\": {\n                      \"type\":
+        \"string\"\n                    },\n                    \"date\": {\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\",\n                    \"date\"\n
+        \                 ],\n                  \"type\": \"object\",\n                  \"additionalProperties\":
+        false\n                },\n                \"strict\": false\n              },\n
+        \             {\n                \"type\": \"function\",\n                \"name\":
+        \"assign_mentor\",\n                \"description\": \"Assign a mentor to
+        a new employee.\",\n                \"parameters\": {\n                  \"properties\":
+        {\n                    \"employee_name\": {\n                      \"type\":
+        \"string\"\n                    },\n                    \"mentor_name\": {\n
+        \                     \"default\": \"TBD\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"register_for_benefits\",\n                \"description\":
+        \"Register a new employee for benefits.\",\n                \"parameters\":
+        {\n                  \"properties\": {\n                    \"employee_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"benefits_package\":
+        {\n                      \"default\": \"Standard\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"provide_employee_handbook\",\n
+        \               \"description\": \"Provide the employee handbook to a new
+        employee.\",\n                \"parameters\": {\n                  \"properties\":
+        {\n                    \"employee_name\": {\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"initiate_background_check\",\n
+        \               \"description\": \"Initiate a background check for a new employee.\",\n
+        \               \"parameters\": {\n                  \"properties\": {\n                    \"employee_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"check_type\":
+        {\n                      \"default\": \"Standard\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"request_id_card\",\n                \"description\":
+        \"Request an ID card for a new employee.\",\n                \"parameters\":
+        {\n                  \"properties\": {\n                    \"employee_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"department\":
+        {\n                      \"default\": \"General\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"set_up_payroll\",\n                \"description\":
+        \"Set up payroll for a new employee.\",\n                \"parameters\": {\n
+        \                 \"properties\": {\n                    \"employee_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"salary\":
+        {\n                      \"default\": \"As per contract\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"send_welcome_email\",\n                \"description\":
+        \"Send a welcome email to a new employee as part of onboarding.\",\n                \"parameters\":
+        {\n                  \"properties\": {\n                    \"employee_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"email_address\":
+        {\n                      \"type\": \"string\"\n                    }\n                  },\n
+        \                 \"required\": [\n                    \"employee_name\",\n
+        \                   \"email_address\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"set_up_office_365_account\",\n
+        \               \"description\": \"Set up an Office 365 account for an employee.\",\n
+        \               \"parameters\": {\n                  \"properties\": {\n                    \"employee_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"email_address\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"department\":
+        {\n                      \"default\": \"General\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\",\n                    \"email_address\"\n
+        \                 ],\n                  \"type\": \"object\",\n                  \"additionalProperties\":
+        false\n                },\n                \"strict\": false\n              },\n
+        \             {\n                \"type\": \"function\",\n                \"name\":
+        \"configure_laptop\",\n                \"description\": \"Configure a laptop
+        for a new employee.\",\n                \"parameters\": {\n                  \"properties\":
+        {\n                    \"employee_name\": {\n                      \"type\":
+        \"string\"\n                    },\n                    \"laptop_model\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"operating_system\":
+        {\n                      \"default\": \"Windows 11\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\",\n                    \"laptop_model\"\n
+        \                 ],\n                  \"type\": \"object\",\n                  \"additionalProperties\":
+        false\n                },\n                \"strict\": false\n              },\n
+        \             {\n                \"type\": \"function\",\n                \"name\":
+        \"setup_vpn_access\",\n                \"description\": \"Set up VPN access
+        for an employee.\",\n                \"parameters\": {\n                  \"properties\":
+        {\n                    \"employee_name\": {\n                      \"type\":
+        \"string\"\n                    },\n                    \"access_level\":
+        {\n                      \"default\": \"Standard\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"create_system_accounts\",\n                \"description\":
+        \"Create system accounts for a new employee.\",\n                \"parameters\":
+        {\n                  \"properties\": {\n                    \"employee_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"systems\":
+        {\n                      \"default\": \"Standard business systems\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"generate_press_release\",\n                \"description\":
+        \"This is a function to draft / write a press release. You must call the function
+        by passing the key information that you want to be included in the press release.\",\n
+        \               \"parameters\": {\n                  \"properties\": {\n                    \"key_information_for_press_release\":
+        {\n                      \"type\": \"string\"\n                    }\n                  },\n
+        \                 \"required\": [\n                    \"key_information_for_press_release\"\n
+        \                 ],\n                  \"type\": \"object\",\n                  \"additionalProperties\":
+        false\n                },\n                \"strict\": false\n              },\n
+        \             {\n                \"type\": \"function\",\n                \"name\":
+        \"handle_influencer_collaboration\",\n                \"description\": \"Handle
+        collaboration with an influencer.\",\n                \"parameters\": {\n
+        \                 \"properties\": {\n                    \"influencer_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"campaign_name\":
+        {\n                      \"type\": \"string\"\n                    }\n                  },\n
+        \                 \"required\": [\n                    \"influencer_name\",\n
+        \                   \"campaign_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"get_product_info\",\n                \"description\":
+        \"Get information about the different products and phone plans available,
+        including roaming services.\",\n                \"parameters\": {\n                  \"properties\":
+        {},\n                  \"type\": \"object\",\n                  \"additionalProperties\":
+        false\n                },\n                \"strict\": false\n              },\n
+        \             {\n                \"type\": \"mcp\",\n                \"server_label\":
+        \"kb_knowledgebase550_lrm9b\",\n                \"server_url\": \"https://srch-pslc25991vme66zmins.search.windows.net/knowledgebases/knowledgebase550/mcp?api-version=2025-11-01-Preview\",\n
+        \               \"require_approval\": {\n                  \"never\": {}\n
+        \               },\n                \"project_connection_id\": \"kb-knowledgebase550-lrm9b\"\n
+        \             },\n              {\n                \"type\": \"mcp\",\n                \"server_label\":
+        \"kb_knowledgebase36_lrm9b\",\n                \"server_url\": \"https://srch-pslc25991vme66zmins.search.windows.net/knowledgebases/knowledgebase36/mcp?api-version=2025-11-01-Preview\",\n
+        \               \"require_approval\": {\n                  \"never\": {}\n
+        \               },\n                \"project_connection_id\": \"kb-knowledgebase36-lrm9b\"\n
+        \             },\n              {\n                \"type\": \"memory_search_preview\",\n
+        \               \"memory_store_name\": \"MemoryStore-plucky_parrot_xccgrxld6z\",\n
+        \               \"scope\": \"{{$userId}}\",\n                \"update_delay\":
+        30\n              },\n              {\n                \"type\": \"mcp\",\n
+        \               \"server_label\": \"MacaeMcpServer\",\n                \"server_url\":
+        \"https://ca-mcp-pslc25991vme66zmins.purpleplant-4c595cea.eastus2.azurecontainerapps.io/mcp\",\n
+        \               \"require_approval\": {\n                  \"never\": {\n
+        \                   \"tool_names\": [\n                      \"send_welcome_email\"\n
+        \                   ]\n                  }\n                },\n                \"project_connection_id\":
+        \"MacaeMcpServer\"\n              },\n              {\n                \"type\":
+        \"azure_ai_search\",\n                \"azure_ai_search\": {\n                  \"indexes\":
+        [\n                    {\n                      \"project_connection_id\":
+        \"/subscriptions/380fa841-83f3-42fe-adc4-582a5ebe139b/resourceGroups/arg-macaev4-8d1cceac/providers/Microsoft.CognitiveServices/accounts/aif-pslc25991vme66zmins/projects/proj-pslc25991vme66zmins/connections/aifp-srch-connection-pslc25991vme66zmins\",\n
+        \                     \"index_name\": \"macae-marketing-knowledge-index\",\n
+        \                     \"query_type\": \"simple\",\n                      \"top_k\":
+        5\n                    }\n                  ]\n                }\n              }\n
+        \           ]\n          },\n          \"draft\": false,\n          \"status\":
+        \"active\",\n          \"agent_guid\": \"4c01ce94-3047-46ca-8d5e-6e4b9520392d\"\n
+        \       }\n      }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\":
+        \"MarketingAgent\",\n      \"name\": \"MarketingAgent\",\n      \"state\":
+        \"enabled\",\n      \"versions\": {\n        \"latest\": {\n          \"metadata\":
+        {},\n          \"object\": \"agent.version\",\n          \"id\": \"MarketingAgent:10\",\n
+        \         \"name\": \"MarketingAgent\",\n          \"version\": \"10\",\n
+        \         \"description\": \"Updated MarketingAgent\",\n          \"created_at\":
+        1778963288,\n          \"definition\": {\n            \"kind\": \"prompt\",\n
+        \           \"model\": \"gpt-4.1-mini\",\n            \"instructions\": \"You
+        are a Marketing agent. You have access to a number of HR related MCP tools
+        for tasks like campaign development, content creation, and market analysis.
+        You help create effective marketing campaigns, analyze market data, and develop
+        promotional content for products and services.\",\n            \"tools\":
+        [\n              {\n                \"type\": \"function\",\n                \"name\":
+        \"employee_onboarding_blueprint_flat\",\n                \"description\":
+        \"Ultra-minimal onboarding blueprint (flat list).\\nAgent usage:\\n1. Call
+        this first when onboarding intent detected.\\n2. Filter steps to its own domain.\\n3.
+        Execute in listed order while honoring depends_on.\",\n                \"parameters\":
+        {\n                  \"properties\": {\n                    \"employee_name\":
+        {\n                      \"anyOf\": [\n                        {\n                          \"type\":
+        \"string\"\n                        },\n                        {\n                          \"type\":
+        \"null\"\n                        }\n                      ],\n                      \"default\":
+        null\n                    },\n                    \"start_date\": {\n                      \"anyOf\":
+        [\n                        {\n                          \"type\": \"string\"\n
+        \                       },\n                        {\n                          \"type\":
+        \"null\"\n                        }\n                      ],\n                      \"default\":
+        null\n                    },\n                    \"role\": {\n                      \"anyOf\":
+        [\n                        {\n                          \"type\": \"string\"\n
+        \                       },\n                        {\n                          \"type\":
+        \"null\"\n                        }\n                      ],\n                      \"default\":
+        null\n                    }\n                  },\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"schedule_orientation_session\",\n
+        \               \"description\": \"Schedule an orientation session for a new
+        employee.\",\n                \"parameters\": {\n                  \"properties\":
+        {\n                    \"employee_name\": {\n                      \"type\":
+        \"string\"\n                    },\n                    \"date\": {\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\",\n                    \"date\"\n
+        \                 ],\n                  \"type\": \"object\",\n                  \"additionalProperties\":
+        false\n                },\n                \"strict\": false\n              },\n
+        \             {\n                \"type\": \"function\",\n                \"name\":
+        \"assign_mentor\",\n                \"description\": \"Assign a mentor to
+        a new employee.\",\n                \"parameters\": {\n                  \"properties\":
+        {\n                    \"employee_name\": {\n                      \"type\":
+        \"string\"\n                    },\n                    \"mentor_name\": {\n
+        \                     \"default\": \"TBD\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"register_for_benefits\",\n                \"description\":
+        \"Register a new employee for benefits.\",\n                \"parameters\":
+        {\n                  \"properties\": {\n                    \"employee_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"benefits_package\":
+        {\n                      \"default\": \"Standard\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"provide_employee_handbook\",\n
+        \               \"description\": \"Provide the employee handbook to a new
+        employee.\",\n                \"parameters\": {\n                  \"properties\":
+        {\n                    \"employee_name\": {\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"initiate_background_check\",\n
+        \               \"description\": \"Initiate a background check for a new employee.\",\n
+        \               \"parameters\": {\n                  \"properties\": {\n                    \"employee_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"check_type\":
+        {\n                      \"default\": \"Standard\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"request_id_card\",\n                \"description\":
+        \"Request an ID card for a new employee.\",\n                \"parameters\":
+        {\n                  \"properties\": {\n                    \"employee_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"department\":
+        {\n                      \"default\": \"General\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"set_up_payroll\",\n                \"description\":
+        \"Set up payroll for a new employee.\",\n                \"parameters\": {\n
+        \                 \"properties\": {\n                    \"employee_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"salary\":
+        {\n                      \"default\": \"As per contract\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"send_welcome_email\",\n                \"description\":
+        \"Send a welcome email to a new employee as part of onboarding.\",\n                \"parameters\":
+        {\n                  \"properties\": {\n                    \"employee_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"email_address\":
+        {\n                      \"type\": \"string\"\n                    }\n                  },\n
+        \                 \"required\": [\n                    \"employee_name\",\n
+        \                   \"email_address\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"set_up_office_365_account\",\n
+        \               \"description\": \"Set up an Office 365 account for an employee.\",\n
+        \               \"parameters\": {\n                  \"properties\": {\n                    \"employee_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"email_address\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"department\":
+        {\n                      \"default\": \"General\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\",\n                    \"email_address\"\n
+        \                 ],\n                  \"type\": \"object\",\n                  \"additionalProperties\":
+        false\n                },\n                \"strict\": false\n              },\n
+        \             {\n                \"type\": \"function\",\n                \"name\":
+        \"configure_laptop\",\n                \"description\": \"Configure a laptop
+        for a new employee.\",\n                \"parameters\": {\n                  \"properties\":
+        {\n                    \"employee_name\": {\n                      \"type\":
+        \"string\"\n                    },\n                    \"laptop_model\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"operating_system\":
+        {\n                      \"default\": \"Windows 11\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\",\n                    \"laptop_model\"\n
+        \                 ],\n                  \"type\": \"object\",\n                  \"additionalProperties\":
+        false\n                },\n                \"strict\": false\n              },\n
+        \             {\n                \"type\": \"function\",\n                \"name\":
+        \"setup_vpn_access\",\n                \"description\": \"Set up VPN access
+        for an employee.\",\n                \"parameters\": {\n                  \"properties\":
+        {\n                    \"employee_name\": {\n                      \"type\":
+        \"string\"\n                    },\n                    \"access_level\":
+        {\n                      \"default\": \"Standard\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"create_system_accounts\",\n                \"description\":
+        \"Create system accounts for a new employee.\",\n                \"parameters\":
+        {\n                  \"properties\": {\n                    \"employee_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"systems\":
+        {\n                      \"default\": \"Standard business systems\",\n                      \"type\":
+        \"string\"\n                    }\n                  },\n                  \"required\":
+        [\n                    \"employee_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"generate_press_release\",\n                \"description\":
+        \"This is a function to draft / write a press release. You must call the function
+        by passing the key information that you want to be included in the press release.\",\n
+        \               \"parameters\": {\n                  \"properties\": {\n                    \"key_information_for_press_release\":
+        {\n                      \"type\": \"string\"\n                    }\n                  },\n
+        \                 \"required\": [\n                    \"key_information_for_press_release\"\n
+        \                 ],\n                  \"type\": \"object\",\n                  \"additionalProperties\":
+        false\n                },\n                \"strict\": false\n              },\n
+        \             {\n                \"type\": \"function\",\n                \"name\":
+        \"handle_influencer_collaboration\",\n                \"description\": \"Handle
+        collaboration with an influencer.\",\n                \"parameters\": {\n
+        \                 \"properties\": {\n                    \"influencer_name\":
+        {\n                      \"type\": \"string\"\n                    },\n                    \"campaign_name\":
+        {\n                      \"type\": \"string\"\n                    }\n                  },\n
+        \                 \"required\": [\n                    \"influencer_name\",\n
+        \                   \"campaign_name\"\n                  ],\n                  \"type\":
+        \"object\",\n                  \"additionalProperties\": false\n                },\n
+        \               \"strict\": false\n              },\n              {\n                \"type\":
+        \"function\",\n                \"name\": \"get_product_info\",\n                \"description\":
+        \"Get information about the different products and phone plans available,
+        including roaming services.\",\n                \"parameters\": {\n                  \"properties\":
+        {},\n                  \"type\": \"object\",\n                  \"additionalProperties\":
+        false\n                },\n                \"strict\": false\n              },\n
+        \             {\n                \"type\": \"code_interpreter\",\n                \"container\":
+        {\n                  \"type\": \"auto\"\n                }\n              },\n
+        \             {\n                \"type\": \"mcp\",\n                \"server_label\":
+        \"kb_knowledgebase550_lrm9b\",\n                \"server_url\": \"https://srch-pslc25991vme66zmins.search.windows.net/knowledgebases/knowledgebase550/mcp?api-version=2025-11-01-Preview\",\n
+        \               \"require_approval\": {\n                  \"never\": {}\n
+        \               },\n                \"project_connection_id\": \"kb-knowledgebase550-lrm9b\"\n
+        \             },\n              {\n                \"type\": \"mcp\",\n                \"server_label\":
+        \"kb_knowledgebase36_lrm9b\",\n                \"server_url\": \"https://srch-pslc25991vme66zmins.search.windows.net/knowledgebases/knowledgebase36/mcp?api-version=2025-11-01-Preview\",\n
+        \               \"require_approval\": {\n                  \"never\": {}\n
+        \               },\n                \"project_connection_id\": \"kb-knowledgebase36-lrm9b\"\n
+        \             },\n              {\n                \"type\": \"memory_search_preview\",\n
+        \               \"memory_store_name\": \"MemoryStore-plucky_parrot_xccgrxld6z\",\n
+        \               \"scope\": \"{{$userId}}\",\n                \"update_delay\":
+        30\n              },\n              {\n                \"type\": \"azure_ai_search\",\n
+        \               \"azure_ai_search\": {\n                  \"indexes\": [\n
+        \                   {\n                      \"query_type\": \"simple\",\n
+        \                     \"top_k\": 5,\n                      \"index_asset_id\":
+        \"macae-marketing-knowledge-index/versions/1\"\n                    }\n                  ]\n
+        \               }\n              }\n            ]\n          },\n          \"draft\":
+        false,\n          \"status\": \"active\",\n          \"agent_guid\": \"2037663f-3c24-46bc-b48d-bfebec41f686\"\n
+        \       }\n      }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\":
+        \"LegalAnalysisAgent\",\n      \"name\": \"LegalAnalysisAgent\",\n      \"state\":
+        \"enabled\",\n      \"versions\": {\n        \"latest\": {\n          \"metadata\":
+        {},\n          \"object\": \"agent.version\",\n          \"id\": \"LegalAnalysisAgent:1\",\n
+        \         \"name\": \"LegalAnalysisAgent\",\n          \"version\": \"1\",\n
+        \         \"description\": \"Agent specialized in legal document analysis.\",\n
+        \         \"created_at\": 1778789370,\n          \"definition\": {\n            \"kind\":
+        \"prompt\",\n            \"model\": \"gpt-4.1-mini\",\n            \"instructions\":
+        \"You are a legal analysis expert. Review documents, identify legal risks,
+        and provide compliance recommendations.\",\n            \"temperature\": 0.1,\n
+        \           \"tools\": []\n          },\n          \"draft\": false,\n          \"status\":
+        \"active\",\n          \"instance_identity\": {\n            \"principal_id\":
+        \"d8371bc1-efb0-4ef8-8d36-477b3abefb5c\",\n            \"client_id\": \"d8371bc1-efb0-4ef8-8d36-477b3abefb5c\"\n
+        \         },\n          \"blueprint\": {\n            \"principal_id\": \"fb2060e5-5627-4562-b946-bd2ec3fc1953\",\n
+        \           \"client_id\": \"94e6e5f6-5225-4822-bfbf-3321e505609a\"\n          },\n
+        \         \"blueprint_reference\": {\n            \"type\": \"ManagedAgentIdentityBlueprint\",\n
+        \           \"blueprint_id\": \"LegalAnalysisAgent-e184f\"\n          },\n
+        \         \"agent_guid\": \"e184f20f-4c3f-4b78-9009-664144f42df7\"\n        }\n
+        \     }\n    },\n    {\n      \"object\": \"agent\",\n      \"id\": \"Contract-Compliance-Review-Team\",\n
+        \     \"name\": \"Contract-Compliance-Review-Team\",\n      \"state\": \"enabled\",\n
+        \     \"versions\": {\n        \"latest\": {\n          \"metadata\": {},\n
+        \         \"object\": \"agent.version\",\n          \"id\": \"Contract-Compliance-Review-Team:1\",\n
+        \         \"name\": \"Contract-Compliance-Review-Team\",\n          \"version\":
+        \"1\",\n          \"description\": \"\",\n          \"created_at\": 1774263759,\n
+        \         \"definition\": {\n            \"kind\": \"prompt\",\n            \"model\":
+        \"gpt-4.1-mini\",\n            \"tools\": []\n          },\n          \"draft\":
+        false,\n          \"status\": \"active\",\n          \"agent_guid\": \"30855a3f-530f-461a-9047-46ccc0e34d9c\"\n
+        \       }\n      }\n    }\n  ],\n  \"first_id\": \"RfpComplianceAgent\",\n
+        \ \"last_id\": \"Contract-Compliance-Review-Team\",\n  \"has_more\": false,\n
+        \ \"object\": \"list\"\n}"
     headers:
       Access-Control-Expose-Headers:
       - Operation-Location,Location,Apim-Request-Id,x-agent-session-id,x-agent-invocation-id
       Content-Type:
       - application/json; charset=utf-8
       Date:
-      - Fri, 14 Aug 2026 07:01:57 GMT
+      - Fri, 14 Aug 2026 10:32:52 GMT
       Strict-Transport-Security:
       - max-age=31536000; includeSubDomains; preload
       Transfer-Encoding:
@@ -4319,11 +4468,11 @@ interactions:
       api-supported-versions:
       - 1.0,2025-05-15-preview,2025-11-15-preview
       apim-request-id:
-      - 4687daef-ece9-48c2-94fb-067a754fed67
+      - fc4dbaf6-bbc3-4f51-92a5-b9dfb3e5511a
       azureml-served-by-cluster:
       - hyena-eastus2-01
       content-length:
-      - '98148'
+      - '38088'
       request-context:
       - appId=
       x-content-type-options:
