@@ -137,6 +137,11 @@ _SECRET_JSON_KEYS = (
     "assertion",
     "primaryMasterKey",
     "secondaryMasterKey",
+    # Identity GUIDs in Foundry agent-definition bodies. Copilot code
+    # scanning flagged them in a recorded cassette (e9ef476d edited the tape
+    # by hand); scrubbing here makes every future recording come out clean.
+    "principal_id",
+    "client_id",
 )
 
 
