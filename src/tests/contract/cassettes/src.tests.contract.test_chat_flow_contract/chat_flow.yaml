@@ -2218,7 +2218,7 @@ interactions:
         \             },\n              {\n                \"type\": \"sharepoint_grounding_preview\",\n
         \               \"sharepoint_grounding_preview\": {\n                  \"project_connections\":
         [\n                    {\n                      \"project_connection_id\":
-        \"/subscriptions/380fa841-83f3-42fe-adc4-582a5ebe139b/resourceGroups/arg-macaev4-8d1cceac/providers/Microsoft.CognitiveServices/accounts/aif-pslc25991vme66zmins/projects/proj-pslc25991vme66zmins/connections/sharepoint_grounding_562ff9\"\n
+        \"[REDACTED]\"\n
         \                   }\n                  ]\n                }\n              },\n
         \             {\n                \"type\": \"mcp\",\n                \"server_label\":
         \"InfobipWhatsAppMCPserver\",\n                \"server_url\": \"https://azure-mcp.infobip.com/whatsapp\",\n
