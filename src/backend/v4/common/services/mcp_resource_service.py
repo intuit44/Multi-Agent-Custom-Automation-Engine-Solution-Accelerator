@@ -396,6 +396,23 @@ class MCPResourceService:
 _mcp_resource_service: Optional[MCPResourceService] = None
 
 
+async def aclose_mcp_resource_service() -> None:
+    """Close AND unbind the singleton (app lifespan shutdown).
+
+    app.py used to close the instance while the module global kept pointing
+    at it, so any request after shutdown began (graceful drain, or every
+    schemathesis example — its TestClient cycles the full lifespan per call)
+    got a dead client: "Cannot send a request, as the client has been
+    closed" ×234 in the contract suite. Closed singletons must be
+    recreatable — same invariant as aclose_shared_resources and
+    GeneratedFileStore.aclose_instance.
+    """
+    global _mcp_resource_service
+    if _mcp_resource_service is not None:
+        await _mcp_resource_service.close()
+        _mcp_resource_service = None
+
+
 def get_mcp_resource_service(
     mcp_server_url: Optional[str] = None,
 ) -> MCPResourceService:

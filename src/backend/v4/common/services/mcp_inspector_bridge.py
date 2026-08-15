@@ -123,6 +123,19 @@ class MCPInspectorBridge:
 _inspector_bridge: Optional[MCPInspectorBridge] = None
 
 
+async def aclose_inspector_bridge() -> None:
+    """Close the singleton's httpx client (app lifespan shutdown).
+
+    The bridge always had close(); nothing called it, so the AsyncClient's
+    sockets to the Inspector proxy died unclosed at GC (surfaced by the
+    ResourceWarning gate in the contract suite).
+    """
+    global _inspector_bridge
+    if _inspector_bridge is not None:
+        await _inspector_bridge.close()
+        _inspector_bridge = None
+
+
 def get_inspector_bridge() -> MCPInspectorBridge:
     """Get or create the global Inspector Bridge instance."""
     global _inspector_bridge
