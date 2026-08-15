@@ -545,10 +545,10 @@ interactions:
         \           \"text\": {\n              \"format\": {\n                \"type\":
         \"text\"\n              },\n              \"verbosity\": null\n            }\n
         \         },\n          \"draft\": false,\n          \"status\": \"active\",\n
-        \         \"instance_identity\": {\n            \"principal_id\": \"6ace0cdb-64e0-4508-b11b-c3b71c365975\",\n
-        \           \"client_id\": \"6ace0cdb-64e0-4508-b11b-c3b71c365975\"\n          },\n
-        \         \"blueprint\": {\n            \"principal_id\": \"946021da-0804-40e1-8896-e61656141369\",\n
-        \           \"client_id\": \"c5fce2ae-eda3-4f8f-a6b1-eefb82a30d89\"\n          },\n
+        \         \"instance_identity\": {\n            \"principal_id\": \"[REDACTED]\",\n
+        \           \"client_id\": \"[REDACTED]\"\n          },\n
+        \         \"blueprint\": {\n            \"principal_id\": \"[REDACTED]\",\n
+        \           \"client_id\": \"[REDACTED]\"\n          },\n
         \         \"blueprint_reference\": {\n            \"type\": \"ManagedAgentIdentityBlueprint\",\n
         \           \"blueprint_id\": \"ProxyAgent-e254a\"\n          },\n          \"agent_guid\":
         \"e254a781-9755-4783-8286-2c40478c5a4e\"\n        }\n      }\n    },\n    {\n
