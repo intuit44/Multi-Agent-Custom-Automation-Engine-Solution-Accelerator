@@ -77,8 +77,8 @@ def main() -> int:
         if isinstance(req_body, bytes):
             req_body = req_body.decode("utf-8", "replace")
         elif not isinstance(req_body, str):
-            # vcr stores multipart/form bodies as dicts — scan their repr
-            req_body = repr(req_body)
+            # vcr stores multipart/form bodies as dicts — scan a normalized repr
+            req_body = repr(req_body).replace("'", '"')
 
         header_blob = repr(i["request"].get("headers", {})) + repr(
             i["response"].get("headers", {})
