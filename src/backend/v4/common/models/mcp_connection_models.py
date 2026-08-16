@@ -294,3 +294,37 @@ class MCPUserConnection(BaseModel):
         default=2592000,  # 30 days in seconds
         description="Cosmos DB TTL for auto-cleanup of stale connections",
     )
+
+
+class McpReadResourceRequest(BaseModel):
+    """Request body for POST /api/v4/mcp/resources/read."""
+
+    uri: str
+
+
+class MCPServerUpdateRequest(BaseModel):
+    """Partial-update body for PUT /api/v4/mcp/connections/servers/{server_id}.
+
+    All fields are optional — only the provided ones are applied.
+    Identity / partition fields (id, pk, doc_type, created_at) are never
+    accepted from the client.
+    """
+
+    server_name: Optional[str] = None
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    icon_url: Optional[str] = None
+    endpoint: Optional[str] = None
+    transport: Optional[MCPTransportType] = None
+    auth_type: Optional[MCPAuthType] = None
+    credential_source: Optional[MCPCredentialSource] = None
+    audience: Optional[str] = None
+    auth_fields: Optional[List[str]] = None
+    oauth_scopes: Optional[List[str]] = None
+    oauth_authorize_url: Optional[str] = None
+    oauth_token_url: Optional[str] = None
+    oauth_client_id_env: Optional[str] = None
+    oauth_client_secret_env: Optional[str] = None
+    allowed_agents: Optional[List[str]] = None
+    enabled: Optional[bool] = None
+    tenant_id: Optional[str] = None

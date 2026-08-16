@@ -332,6 +332,12 @@ class ChatMessageRequest(BaseModel):
     allow_plan: StrictBool = True
 
 
+class ResumePlanRequest(BaseModel):
+    """Request body for POST /api/v4/resume_plan."""
+
+    plan_id: str
+
+
 class ChatMessageResponse(BaseModel):
     """Response from the chat/message endpoint."""
 
