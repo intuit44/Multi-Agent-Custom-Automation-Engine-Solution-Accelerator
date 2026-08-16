@@ -68,14 +68,23 @@ def main() -> int:
         if code in (401, 403) or code >= 500:
             poison.append(f"{code} {i['request']['method']} {uri}")
 
-        body = i["response"].get("body", {}).get("string") or ""
-        if isinstance(body, bytes):
-            body = body.decode("utf-8", "replace")
+        resp_body = i["response"].get("body", {}).get("string") or ""
+        if isinstance(resp_body, bytes):
+            resp_body = resp_body.decode("utf-8", "replace")
+
+        req_body = i["request"].get("body") or ""
+        if isinstance(req_body, bytes):
+            req_body = req_body.decode("utf-8", "replace")
+
+        header_blob = repr(i["request"].get("headers", {})) + repr(
+            i["response"].get("headers", {})
+        )
+
         for marker in _POISON_BODY_MARKERS:
-            if marker in body:
+            if marker in resp_body:
                 poison.append(f"body-marker '{marker}' in {uri}")
         for pat in _SECRET_PATTERNS:
-            if pat.search(body):
+            if pat.search(resp_body) or pat.search(req_body) or pat.search(header_blob):
                 poison.append(f"secret-leak pattern {pat.pattern!r} in {uri}")
 
     print(f"{len(interactions)} interactions:")
