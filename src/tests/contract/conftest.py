@@ -90,15 +90,13 @@ def pytest_configure(config):
         "COSMOSDB_CONTAINER": "contract-container",
         "MCP_SERVER_ENDPOINT": "http://localhost:9000/mcp",
         "CHAT_ORCHESTRATOR_AGENT_NAME": "contract-orchestrator",
-        # Empty on purpose, not a placeholder: app_config's load_dotenv() pulls
-        # the REAL search endpoint from src/backend/.env, the service
-        # initializes, and replay emits embeddings calls the cassette does not
-        # contain — at record time the search path never reached HTTP (zero
-        # search/embedding entries recorded). Empty disables the service, so
-        # replay makes the same calls the recording actually holds. When a
-        # re-record captures real search traffic, point this at a contract.*
-        # placeholder instead.
-        "AZURE_AI_SEARCH_ENDPOINT": "",
+        # Placeholder, NOT empty: use_rag agents require a search endpoint at
+        # CONSTRUCTION time — with "" the factory failed every RAG agent,
+        # init_team 400'd "participants cannot be empty", and replay diverged
+        # from the recorded flow (which built them fine under the real .env).
+        # Actual search/embedding HTTP is served from the cassette like every
+        # other dependency; the azure_host matcher classes *.search.windows.net.
+        "AZURE_AI_SEARCH_ENDPOINT": "https://contract.search.windows.net",
         # Telemetry off: the exporter and QuickPulse ping Azure from
         # background threads, which has nothing to do with the contract and
         # drowns the report in cassette misses.
@@ -114,6 +112,42 @@ def app():
     from app import app as fastapi_app
 
     return fastapi_app
+
+
+# ── Close starlette_testclient's leaked lifespan streams ───────────────────
+#
+# schemathesis drives ASGI apps through starlette_testclient.TestClient,
+# whose __enter__ creates two in-memory stream pairs for the lifespan
+# channel and whose __exit__ closes the portal but NEVER the streams —
+# every example leaked a pair into the ResourceWarning gate (probe:
+# 26/26 creation stacks at _testclient.py __enter__; zero from the app).
+# Closing them after the original __exit__ is closing the leak at its
+# owner layer, not silencing the gate. MemoryObject*Stream.close() is
+# synchronous and idempotent, so it is safe after the portal is gone.
+def _patch_testclient_stream_leak():
+    import starlette_testclient
+
+    _orig_exit = starlette_testclient.TestClient.__exit__
+
+    def _exit(self, *args):
+        try:
+            return _orig_exit(self, *args)
+        finally:
+            for stapled in (
+                getattr(self, "stream_send", None),
+                getattr(self, "stream_receive", None),
+            ):
+                for half in (
+                    getattr(stapled, "send_stream", None),
+                    getattr(stapled, "receive_stream", None),
+                ):
+                    if half is not None:
+                        half.close()
+
+    starlette_testclient.TestClient.__exit__ = _exit
+
+
+_patch_testclient_stream_leak()
 
 
 # ── VCR: the only boundary that is faked ───────────────────────────────────
@@ -241,8 +275,10 @@ def _host_class(host):
 
 
 def _normalize_path(path):
-    # Account and container names are deployment config, not contract shape.
-    return re.sub(r"/dbs/[^/]+/colls/[^/]+", "/dbs/_/colls/_", path or "")
+    # Account, container and Foundry-project names are deployment config,
+    # not contract shape.
+    path = re.sub(r"/dbs/[^/]+/colls/[^/]+", "/dbs/_/colls/_", path or "")
+    return re.sub(r"/api/projects/[^/]+", "/api/projects/_", path)
 
 
 def _azure_host_matcher(r1, r2):
@@ -317,7 +353,12 @@ def vcr_config():
         # every fuzzed variant would miss its cassette. azure_host/azure_path
         # (registered in pytest_recording_configure) compare service class and
         # normalized path shape, so replay works on placeholder config.
-        "match_on": ["method", "scheme", "azure_host", "port", "azure_path"],
+        # "query" is REQUIRED: Foundry lists agents with cursor pagination
+        # (?after=...) — without query matching, every page request got served
+        # the same first page and the SDK cursor-looped forever (init_team
+        # hung 14+ min deserializing the same 69KB page). Cursors are stable
+        # because record and replay read the same tape.
+        "match_on": ["method", "scheme", "azure_host", "port", "azure_path", "query"],
         "allow_playback_repeats": True,
         # localhost is NOT ignored: the app's outbound localhost calls (MCP
         # server :9000, Inspector proxy :16277) must be recorded and replayed

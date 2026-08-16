@@ -47,7 +47,7 @@ updates:
     commit-message:
       prefix: "build(deps)"
     target-branch: "main"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     labels:
       - "dependencies"
       - "auto-merge"
@@ -64,7 +64,7 @@ updates:
     commit-message:
       prefix: "build(deps)"
     target-branch: "main"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     labels:
       - "dependencies"
       - "auto-merge"
