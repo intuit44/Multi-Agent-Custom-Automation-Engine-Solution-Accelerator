@@ -24,9 +24,16 @@ Not in ``testpaths``: this is a separate pytest session on purpose.
     # replay (offline, the normal mode — fails if a call has no cassette)
     uv run --project src/backend pytest src/tests/contract -q
 
-    # record (needs the real src/backend/.env + az login)
+    # record (needs the real src/backend/.env + az login). Delete the cassette
+    # first, then use new_episodes — NEVER once: with the SHARED cassette the
+    # first test creates the file and `once` write-protects it for every test
+    # after, so the rest of the "recording" silently runs as replay and their
+    # outbound calls never get taped (231 CannotOverwrite inits in one run).
+    # new_episodes serves what is already taped and appends what is missing.
+    rm -f src/tests/contract/cassettes/*/chat_flow.yaml
     uv run --project src/backend pytest src/tests/contract -q \
-        --record-mode=once --contract-live
+        --record-mode=new_episodes --contract-live
+    uv run --project src/backend python src/tests/contract/lint_cassette.py
 """
 
 import os
