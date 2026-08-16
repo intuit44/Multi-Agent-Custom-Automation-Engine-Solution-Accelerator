@@ -30,6 +30,7 @@ from common.models.messages_af import (
     InputTask,
     Plan,
     PlanStatus,
+    ResumePlanRequest,
     TeamAgent,
     TeamConfiguration,
     TeamSelectionRequest,
@@ -40,6 +41,11 @@ from common.utils.utils_af import (
     find_first_available_team,
     rai_success,
     rai_validate_team_config,
+)
+from v4.common.models.mcp_connection_models import (
+    McpReadResourceRequest,
+    MCPServerEntry,
+    MCPServerUpdateRequest,
 )
 from v4.common.services.plan_service import PlanService
 from v4.common.services.team_service import TeamService
@@ -91,7 +97,13 @@ def _extract_auth_with_token(request: Request) -> tuple:
 
 app_v4 = APIRouter(
     prefix="/api/v4",
-    responses={404: {"description": "Not found"}},
+    responses={
+        # FastAPI answers 400 "There was an error parsing the body" on
+        # malformed JSON for EVERY body-taking route — framework behavior,
+        # so the contract must declare it (schemathesis: UndefinedStatusCode).
+        400: {"description": "Malformed request body"},
+        404: {"description": "Not found"},
+    },
 )
 
 
@@ -4261,7 +4273,7 @@ async def notify_session_reauth(session_id: str, request: Request):
 @app_v4.post("/resume_plan")
 async def resume_plan(
     background_tasks: BackgroundTasks,
-    payload: dict,
+    payload: ResumePlanRequest,
     request: Request,
 ):
     """
@@ -4274,7 +4286,7 @@ async def resume_plan(
     run, which would create a duplicate plan.
     """
     user_id, tenant_id, user_access_token = _extract_auth_with_token(request)
-    plan_id = payload.get("plan_id", "")
+    plan_id = payload.plan_id
     if not plan_id:
         raise HTTPException(status_code=400, detail="plan_id is required")
 
@@ -5591,14 +5603,17 @@ async def discover_mcp_capabilities(
 
 
 @app_v4.post("/mcp/resources/read")
-async def read_mcp_resource(request: Request, user_id: str = Query(None)):
+async def read_mcp_resource(
+    body: McpReadResourceRequest,
+    user_id: str = Query(None),
+):
     """
     Read MCP UI Resource by URI.
 
     Supports MCP Protocol 2025-11-25 with ui:// scheme for widgets.
 
     Args:
-        request: FastAPI request with JSON body {"uri": "ui://..."}
+        body: JSON body with {"uri": "ui://..."}
         user_id: Optional user ID for auth context
 
     Returns:
@@ -5607,17 +5622,9 @@ async def read_mcp_resource(request: Request, user_id: str = Query(None)):
     try:
         from v4.common.services.mcp_resource_service import get_mcp_resource_service
 
-        # Parse request body
-        body = await request.json()
-        uri = body.get("uri")
+        uri = body.uri
 
-        if not uri:
-            raise HTTPException(status_code=400, detail="Missing 'uri' in request body")
-
-        # Get MCP resource service
         mcp_service = get_mcp_resource_service()
-
-        # Read resource from MCP server
         resource = await mcp_service.read_resource(uri)
 
         if not resource:
@@ -5717,18 +5724,14 @@ async def list_mcp_servers(request: Request):
 
 
 @app_v4.post("/mcp/connections/servers")
-async def register_mcp_server(request: Request):
+async def register_mcp_server(entry: MCPServerEntry, request: Request):
     """
     Register a new MCP server in the catalog.
 
     Body: MCPServerEntry fields (server_name, display_name, endpoint, etc.)
     """
     try:
-        from v4.common.models.mcp_connection_models import MCPServerEntry
         from v4.common.services.mcp_connections_service import MCPConnectionsService
-
-        body = await request.json()
-        entry = MCPServerEntry(**body)
 
         user_id, tenant_id = _extract_auth(request)
         entry.added_by = get_authenticated_user_details(
@@ -5762,7 +5765,9 @@ async def register_mcp_server(request: Request):
 
 
 @app_v4.put("/mcp/connections/servers/{server_id}")
-async def update_mcp_server(server_id: str, request: Request):
+async def update_mcp_server(
+    server_id: str, body: MCPServerUpdateRequest, request: Request
+):
     """
     Update an existing MCP server in the catalog.
 
@@ -5773,8 +5778,6 @@ async def update_mcp_server(server_id: str, request: Request):
     try:
         from v4.common.services.mcp_connections_service import MCPConnectionsService
 
-        body = await request.json()
-
         user_id, tenant_id = _extract_auth(request)
 
         svc = await MCPConnectionsService.get_instance()
@@ -5783,10 +5786,7 @@ async def update_mcp_server(server_id: str, request: Request):
         if not existing:
             raise HTTPException(status_code=404, detail="Server not found")
 
-        # Apply provided fields onto the existing entry. Never allow the body to
-        # change the document identity / partition metadata.
-        protected = {"id", "pk", "doc_type", "created_at"}
-        update_data = {k: v for k, v in body.items() if k not in protected}
+        update_data = body.model_dump(exclude_unset=True)
         existing = existing.model_copy(update=update_data)
 
         result = await svc.upsert_server(existing)
