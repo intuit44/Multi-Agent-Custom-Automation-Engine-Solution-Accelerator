@@ -74,6 +74,16 @@ async def lifespan(app: FastAPI):
         except Exception as ib_e:
             logger.warning(f"Inspector bridge cleanup warning (non-fatal): {ib_e}")
 
+        # Close the memory-store CosmosClient. close_all() (close + unbind)
+        # existed all along — nothing ever called it, so the client's aiohttp
+        # session died unclosed at GC (contract-suite ResourceWarning gate).
+        try:
+            from common.database.database_factory import DatabaseFactory
+
+            await DatabaseFactory.close_all()
+        except Exception as db_e:
+            logger.warning(f"DatabaseFactory cleanup warning (non-fatal): {db_e}")
+
     except ImportError as ie:
         logger.error(f"❌ Could not import agent_registry: {ie}")
     except Exception as e:
