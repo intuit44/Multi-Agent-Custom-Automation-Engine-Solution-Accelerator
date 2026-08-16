@@ -38,9 +38,9 @@ _POISON_BODY_MARKERS = (
 )
 
 _SECRET_PATTERNS = (
-    re.compile(r"Bearer eyJ", re.IGNORECASE),  # unredacted JWT
+    re.compile(r"Bearer\s+eyJ", re.IGNORECASE),  # unredacted JWT
     re.compile(
-        r'"(client_secret|primaryMasterKey|secondaryMasterKey)"\s*:\s*"(?!\[REDACTED\])[^"]{8,}'
+        r'"(client_secret|primaryMasterKey|secondaryMasterKey)"\s*:\s*"(?!\[REDACTED\])[^\"]{8,}'
     ),
 )
 
