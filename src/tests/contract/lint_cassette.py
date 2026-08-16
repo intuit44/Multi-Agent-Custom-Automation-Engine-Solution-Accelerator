@@ -66,7 +66,7 @@ def main() -> int:
         code = i["response"]["status"]["code"]
         tally[(host, code)] += 1
 
-        if code in (401, 403) or code >= 500:
+        if code in (401, 403, 429) or code >= 500:
             poison.append(f"{code} {i['request']['method']} {uri}")
 
         resp_body = i["response"].get("body", {}).get("string") or ""
