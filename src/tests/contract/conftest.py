@@ -30,7 +30,7 @@ Not in ``testpaths``: this is a separate pytest session on purpose.
     # after, so the rest of the "recording" silently runs as replay and their
     # outbound calls never get taped (231 CannotOverwrite inits in one run).
     # new_episodes serves what is already taped and appends what is missing.
-    rm src/tests/contract/cassettes/*/chat_flow.yaml
+    rm -f src/tests/contract/cassettes/*/chat_flow.yaml
     uv run --project src/backend pytest src/tests/contract -q \
         --record-mode=new_episodes --contract-live
     uv run --project src/backend python src/tests/contract/lint_cassette.py
