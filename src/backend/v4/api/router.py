@@ -4,7 +4,7 @@ import logging
 import os
 import uuid
 from contextlib import AsyncExitStack
-from typing import Any, Optional, cast
+from typing import Annotated, Any, Optional, cast
 
 from azure.core.exceptions import ResourceNotFoundError
 from fastapi import (
@@ -27,6 +27,7 @@ from common.database.database_factory import DatabaseFactory
 from common.models.messages_af import (
     ChatMessageRequest,
     ChatMessageResponse,
+    InitTeamQuery,
     InputTask,
     Plan,
     PlanStatus,
@@ -46,6 +47,7 @@ from v4.common.models.mcp_connection_models import (
     McpReadResourceRequest,
     MCPServerEntry,
     MCPServerUpdateRequest,
+    OAuthCallbackQuery,
 )
 from v4.common.services.plan_service import PlanService
 from v4.common.services.team_service import TeamService
@@ -210,9 +212,10 @@ async def start_comms(
 @app_v4.get("/init_team")
 async def init_team(
     request: Request,
-    team_switched: bool = Query(False),
-):  # add team_switched: bool parameter
+    query: Annotated[InitTeamQuery, Query()],
+):
     """Initialize the user's current team of agents"""
+    team_switched = query.team_switched
 
     # Get first available team from 4 to 1 (RFP -> Retail -> Marketing -> HR)
     # Falls back to HR if no teams are available.
@@ -6069,14 +6072,18 @@ async def activate_user_mcp_connection(server_name: str, request: Request):
         raise HTTPException(status_code=500, detail="Failed to activate connection")
 
 
-@app_v4.get("/mcp/connections/oauth/callback")
-async def mcp_oauth_callback(code: str, state: str):
+@app_v4.get(
+    "/mcp/connections/oauth/callback",
+    responses={401: {"description": "Invalid or expired state token"}},
+)
+async def mcp_oauth_callback(query: Annotated[OAuthCallbackQuery, Query()]):
     """OAuth2 redirect callback.
 
     Verifies the signed state, exchanges the authorization code for a token,
     stores it in Key Vault, marks the user's connection as active, and returns
     an HTML page that closes the popup.
     """
+    code, state = query.code, query.state
     from fastapi.responses import HTMLResponse
 
     from credential_resolver import CredentialResolver
@@ -6104,7 +6111,10 @@ async def mcp_oauth_callback(code: str, state: str):
         user_id, server_name = verify_state(state)
     except ValueError as ve:
         logger.warning(f"OAuth callback rejected invalid state: {ve}")
-        return _html(f"Token de estado inválido: {ve}", ok=False, status_code=400)
+        # 401, not 400: the state is an auth artifact (signed token) and a
+        # failed verification is an authorization failure, not a malformed
+        # request — the request parsed fine, the credential in it did not.
+        return _html(f"Token de estado inválido: {ve}", ok=False, status_code=401)
 
     svc = await MCPConnectionsService.get_instance()
     server = await svc.get_server_by_name(server_name)

@@ -20,7 +20,6 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import yaml
 

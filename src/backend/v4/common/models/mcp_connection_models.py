@@ -26,7 +26,7 @@ from enum import Enum
 from typing import ClassVar, Dict, List, Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Enumerations
@@ -294,6 +294,21 @@ class MCPUserConnection(BaseModel):
         default=2592000,  # 30 days in seconds
         description="Cosmos DB TTL for auto-cleanup of stale connections",
     )
+
+
+class OAuthCallbackQuery(BaseModel):
+    """Query contract for GET /api/v4/mcp/connections/oauth/callback.
+
+    extra="ignore": OAuth providers may append additional query parameters
+    (e.g., `session_state`). We still validate that required `code` and `state`
+    are present and non-empty.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    # min_length: an empty code or state is meaningless in OAuth — declaring
+    # it in the schema keeps the contract the source of truth (empty -> 422).
+    code: str = Field(min_length=1)
+    state: str = Field(min_length=1)
 
 
 class McpReadResourceRequest(BaseModel):
