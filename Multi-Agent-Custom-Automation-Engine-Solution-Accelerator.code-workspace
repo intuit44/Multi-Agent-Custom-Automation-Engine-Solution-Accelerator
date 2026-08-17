@@ -61,5 +61,8 @@
     },
     "chatgpt.runCodexInWindowsSubsystemForLinux": true,
     "github.copilot.chat.codeGeneration.useInstructionFiles": true,
+    "[github-actions-workflow]": {
+      "editor.defaultFormatter": "redhat.vscode-yaml",
+    },
   },
 }

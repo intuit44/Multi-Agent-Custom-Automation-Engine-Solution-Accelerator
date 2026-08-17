@@ -91,4 +91,5 @@ dev = [
     "pytest-recording>=0.13.4",
     # Mock httpx requests in unit tests
     "respx>=0.23.1",
+    "types-pyyaml>=6.0.12.20260815",
 ]

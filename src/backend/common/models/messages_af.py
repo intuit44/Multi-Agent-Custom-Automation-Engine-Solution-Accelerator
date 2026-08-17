@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 # ---------------------------------------------------------------------------
 # Enumerations
@@ -336,6 +336,33 @@ class ResumePlanRequest(BaseModel):
     """Request body for POST /api/v4/resume_plan."""
 
     plan_id: str
+
+
+class InitTeamQuery(BaseModel):
+    """Query contract for GET /api/v4/init_team.
+
+    extra="forbid": an unknown query parameter is a 422, not silently
+    ignored — per-endpoint contract strictness via FastAPI's query-param
+    models (the documented pattern), never a global middleware.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    team_switched: bool = False
+
+    @field_validator("team_switched", mode="before")
+    @classmethod
+    def _query_bool_per_contract(cls, v: object) -> object:
+        """OpenAPI serializes query booleans as 'true'/'false' — pydantic's
+        lax coercion also accepted '1'/'on'/'yes' (the allow_plan defect
+        class, now on the query side). Only the contract's two values pass."""
+        if isinstance(v, bool):
+            return v
+        if v == "true":
+            return True
+        if v == "false":
+            return False
+        raise ValueError("must be 'true' or 'false'")
 
 
 class ChatMessageResponse(BaseModel):
