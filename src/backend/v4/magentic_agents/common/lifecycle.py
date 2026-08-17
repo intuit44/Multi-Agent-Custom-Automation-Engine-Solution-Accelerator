@@ -551,7 +551,13 @@ class AzureAgentBase(MCPEnabledBase):
                     exc_info=True,
                 )
 
-            # Close credential and project client
+            # Close the per-agent AgentsClient only. The credential is NOT
+            # closed here: without a user token self.creds is the process-shared
+            # Managed Identity credential (borrowed from config), and closing it
+            # kills token minting for the whole process — blob store, Foundry
+            # file uploads and download-file all fail with "HTTP transport has
+            # already been closed" once their cached tokens expire. The guarded
+            # close in super().close() handles the per-user (owned) credential.
             if self.client:
                 try:
                     await self.client.close()
@@ -562,22 +568,8 @@ class AzureAgentBase(MCPEnabledBase):
                         exc,
                         exc_info=True,
                     )
-            _creds_close = getattr(self.creds, "close", None) if self.creds else None
-            if callable(_creds_close):
-                try:
-                    result = _creds_close()
-                    if inspect.isawaitable(result):
-                        await result
-                except Exception as exc:
-                    logging.warning(
-                        "Failed to close credentials %r: %s",
-                        self.creds,
-                        exc,
-                        exc_info=True,
-                    )
 
         finally:
             await super().close()
             self.client = None
-            self.creds = None
             self.project_endpoint = None
