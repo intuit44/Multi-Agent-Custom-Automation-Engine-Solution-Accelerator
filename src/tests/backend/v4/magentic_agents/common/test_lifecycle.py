@@ -259,7 +259,8 @@ class TestMCPEnabledBase:
 
                             assert result is base
                             mock_config.get_shared_async_credential.assert_called_once_with()
-                            mock_agent_registry.register_agent.assert_called_once_with(base)
+                            mock_agent_registry.register_agent.assert_called_once_with(
+                                base)
 
     @pytest.mark.asyncio
     async def test_close_method_success(self):
@@ -589,11 +590,14 @@ class TestAzureAgentBase:
             mock_agent.close.assert_called_once()
             mock_agent_registry.unregister_agent.assert_called_once_with(base)
             mock_client.close.assert_called_once()
-            mock_creds.close.assert_called_once()
+            # Credential is never closed at this level: it may be the borrowed
+            # process-shared credential. Ownership is resolved by the guarded
+            # close in MCPEnabledBase.close (mocked here).
+            mock_creds.close.assert_not_called()
             mock_parent_close.assert_called_once()
 
             assert base.client is None
-            assert base.creds is None
+            assert base.creds is mock_creds  # nulled by the (mocked) parent close
             assert base.project_endpoint is None
 
     @pytest.mark.asyncio
@@ -627,7 +631,7 @@ class TestAzureAgentBase:
 
             mock_parent_close.assert_called_once()
             assert base.client is None
-            assert base.creds is None
+            assert base.creds is mock_creds  # nulled by the (mocked) parent close
 
     @pytest.mark.asyncio
     async def test_close_method_no_resources(self):
@@ -692,3 +696,42 @@ class TestAzureAgentBase:
 
         assert result == "inherited_result"
         mock_agent.inherited_method.assert_called_once()
+
+    # Credential ownership matrix. These run the REAL MCPEnabledBase.close
+    # (no parent patch) so the _owns_creds guard is actually exercised.
+
+    @pytest.mark.asyncio
+    async def test_close_does_not_close_borrowed_credential(self):
+        """A borrowed credential (_owns_creds=False) must survive agent close.
+
+        In prod the borrowed credential is the process-shared Managed
+        Identity instance: closing it kills token minting for the whole
+        process (blob store, Foundry uploads, download-file) with
+        'HTTP transport has already been closed' once cached tokens expire.
+        """
+        base = AzureAgentBase()
+        borrowed = AsyncMock()
+        base.creds = borrowed
+        base._owns_creds = False
+        base._stack = AsyncMock()  # post-open state so parent close runs fully
+
+        await base.close()
+
+        borrowed.close.assert_not_awaited()
+        assert base.creds is None
+
+    @pytest.mark.asyncio
+    async def test_close_closes_owned_credential_exactly_once(self):
+        """An owned per-user credential (_owns_creds=True) is closed exactly
+        once — by the guarded close in MCPEnabledBase, not additionally by
+        AzureAgentBase."""
+        base = AzureAgentBase()
+        owned = AsyncMock()
+        base.creds = owned
+        base._owns_creds = True
+        base._stack = AsyncMock()
+
+        await base.close()
+
+        owned.close.assert_awaited_once()
+        assert base.creds is None
