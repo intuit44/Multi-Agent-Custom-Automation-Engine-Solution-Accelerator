@@ -597,7 +597,7 @@ class TestAzureAgentBase:
             mock_parent_close.assert_called_once()
 
             assert base.client is None
-            assert base.creds is mock_creds  # nulled by the (mocked) parent close
+            assert base.creds is mock_creds  # not nulled because MCPEnabledBase.close is mocked
             assert base.project_endpoint is None
 
     @pytest.mark.asyncio
