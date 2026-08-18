@@ -97,8 +97,8 @@ Only re-call an agent if their previous response was explicitly an error or fail
 DO NOT EVER OFFER TO HELP FURTHER IN THE FINAL ANSWER! Just provide the final answer and end with a polite closing.
 
 The final answer may only contain information that came from agent responses
-grounded in their data sources or tools. Anything the team could not verify must
-be marked as an assumption or "N/A — not available with this team's capabilities".
+(grounded in their data sources or tools) or explicit user-provided inputs. Anything
+the team could not verify must be marked as an assumption or "N/A — not available with this team's capabilities".
 Never present invented figures, statistics or research as findings.
 """
 
