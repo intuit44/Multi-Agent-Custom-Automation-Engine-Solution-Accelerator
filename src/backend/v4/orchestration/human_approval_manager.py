@@ -72,6 +72,7 @@ code generation, calculations, external data) against what THIS team's agents ca
 actually do with their described capabilities, tools and data sources. If a
 required capability is missing from every agent on the team:
 - Do NOT create steps that pretend the capability exists.
+- This is an exception to the “ask agents first” rule: you may ask the user to choose.
 - Make the FIRST step a ProxyAgent step that tells the user exactly which required
   capabilities this team lacks and asks whether to proceed with reduced scope
   (only what the team CAN do) or switch to a different team.
