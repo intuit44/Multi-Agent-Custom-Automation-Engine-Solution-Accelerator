@@ -49,8 +49,8 @@ const fetchWithAuth = async (url: string, method: string = "GET", body: BodyInit
             // This is the ONLY place a re-auth redirect may start — never
             // preemptively before a request (a reload mid-flight loses the
             // response and resets SPA state, e.g. the Chat|Plan toggle).
+            const errorText = await response.text().catch(() => '');
             reauthSilently();
-            const errorText = await response.text();
             throw new Error(errorText || 'Session expired — re-authenticating');
         }
 
