@@ -125,8 +125,8 @@ export async function ensureFreshToken(
   // lost final result) and resets SPA state (the Chat|Plan toggle). This app's
   // EasyAuth IS configured with offline_access + token store (verified), so
   // /.auth/refresh is the reliable primary path. If the token is truly dead,
-  // the backend answers 401 and the response handler triggers reauthSilently —
-  // redirect only on real rejection, never preemptively.
+  // the backend answers 401 and the api client's standard request path (fetchWithAuth)
+  // triggers reauthSilently — redirect only on real rejection, never preemptively.
 }
 
 /**
