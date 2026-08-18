@@ -1,4 +1,4 @@
-import { headerBuilder, getApiUrl, ensureFreshToken } from './config';
+import { headerBuilder, getApiUrl, ensureFreshToken, reauthSilently } from './config';
 
 // Helper function to build URL with query parameters
 const buildUrl = (url: string, params?: Record<string, any>): string => {
@@ -43,6 +43,16 @@ const fetchWithAuth = async (url: string, method: string = "GET", body: BodyInit
         const finalUrl = `${apiUrl}${url}`;
         // Log the request details
         const response = await fetch(finalUrl, options);
+
+        if (response.status === 401) {
+            // Real rejection: token is dead and /.auth/refresh could not renew.
+            // This is the ONLY place a re-auth redirect may start — never
+            // preemptively before a request (a reload mid-flight loses the
+            // response and resets SPA state, e.g. the Chat|Plan toggle).
+            const errorText = await response.text().catch(() => '');
+            reauthSilently();
+            throw new Error(errorText || 'Session expired — re-authenticating');
+        }
 
         if (!response.ok) {
             const errorText = await response.text();

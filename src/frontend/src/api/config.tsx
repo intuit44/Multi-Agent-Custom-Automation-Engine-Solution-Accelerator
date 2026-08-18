@@ -120,18 +120,13 @@ export async function ensureFreshToken(
   }
   await _refreshInFlight;
 
-  // App Service does not always issue/store a refresh token for custom-resource
-  // scopes, so `/.auth/refresh` can return 403 and the token stays stale → the
-  // backend OBO exchange then fails with AADSTS500133. When the token is still
-  // (about to be) expired after the refresh attempt, fall back to a silent
-  // re-auth: with an active AAD session this is seamless (no password prompt).
-  const after = getUserInfoGlobal();
-  const afterExpMs = after?.expires_on ? Date.parse(after.expires_on) : 0;
-  const stillStale =
-    !after?.access_token || !afterExpMs || afterExpMs - Date.now() < 60 * 1000;
-  if (stillStale) {
-    reauthSilently();
-  }
+  // NO hard redirect here. The pre-request path must never navigate: the
+  // reload kills the in-flight request's response handler (lost plan_id /
+  // lost final result) and resets SPA state (the Chat|Plan toggle). This app's
+  // EasyAuth IS configured with offline_access + token store (verified), so
+  // /.auth/refresh is the reliable primary path. If the token is truly dead,
+  // the backend answers 401 and the api client's standard request path (fetchWithAuth)
+  // triggers reauthSilently — redirect only on real rejection, never preemptively.
 }
 
 /**
@@ -139,7 +134,7 @@ export async function ensureFreshToken(
  * Used only when the token is effectively expired and `/.auth/refresh` could not
  * renew it. Guarded so it cannot loop (at most once per 2 min).
  */
-function reauthSilently(): void {
+export function reauthSilently(): void {
   try {
     // EasyAuth's /.auth/login/aad only exists when the app is served behind Azure
     // App Service / Container Apps. On localhost it 404s, so the hard redirect
