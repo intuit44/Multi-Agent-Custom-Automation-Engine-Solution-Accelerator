@@ -65,6 +65,25 @@ Here is an example of a well-structured plan:
 - **DocumentCreationAgent** to draft a comprehensive onboarding plan that includes a checklist of resources and materials needed for effective onboarding.
 - **ProxyAgent** to review the drafted onboarding plan for clarity and completeness.
 - **MagenticManager** to finalize the onboarding plan and prepare it for presentation to stakeholders.
+
+TASK-TEAM FIT GATE — evaluate BEFORE writing any step:
+Compare what the task requires (e.g. web/market search, content writing, image or
+code generation, calculations, external data) against what THIS team's agents can
+actually do with their described capabilities, tools and data sources. If a
+required capability is missing from every agent on the team:
+- Do NOT create steps that pretend the capability exists.
+- This is an exception to the “ask agents first” rule: you may ask the user to choose.
+- Make the FIRST step a ProxyAgent step that tells the user exactly which required
+  capabilities this team lacks and asks whether to proceed with reduced scope
+  (only what the team CAN do) or switch to a different team.
+- Plan steps only for capabilities the team actually has.
+
+NO-FABRICATION RULE:
+Never invent data, research results, statistics, market figures, personas or
+budgets. Facts may only come from an agent's actual response grounded in its data
+sources or tools. A step that cannot be executed because the team lacks the tool
+or data source must be reported as "N/A — capability not available in this team",
+never filled in with plausible-sounding content.
 """
 
         # Add progress ledger prompt to prevent re-calling agents
@@ -76,6 +95,11 @@ Only re-call an agent if their previous response was explicitly an error or fail
 
         final_append = """
 DO NOT EVER OFFER TO HELP FURTHER IN THE FINAL ANSWER! Just provide the final answer and end with a polite closing.
+
+The final answer may only contain information that came from agent responses
+(grounded in their data sources or tools) or explicit user-provided inputs. Anything
+the team could not verify must be marked as an assumption or "N/A — not available with this team's capabilities".
+Never present invented figures, statistics or research as findings.
 """
 
         kwargs["task_ledger_plan_prompt"] = (
