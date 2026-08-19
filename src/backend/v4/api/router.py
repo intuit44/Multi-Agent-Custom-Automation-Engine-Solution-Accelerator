@@ -390,6 +390,144 @@ async def process_request(
     }
 
 
+# Hard ceiling on a Router-composed roster. Magentic broadcasts every turn to
+# every participant, so cost and round count grow with the roster; a task that
+# genuinely needs more is a task that needs splitting.
+_COMPOSED_TEAM_MAX_AGENTS = 4
+
+
+async def _team_from_router_roster(
+    roster: list, description: str, user_id: str, memory_store: Any
+) -> TeamConfiguration:
+    """Turn the Model Router's ``run_plan`` roster into a persisted team.
+
+    Reuses the SAME validator and persistence as the upload path
+    (``TeamService.validate_and_parse_team_config`` / ``save_team_configuration``)
+    — the roster is just another team-config source. Persisted because
+    ``plan.team_id`` is resolved later by the in-plan chat lane and
+    ``resume_plan``; an unpersisted team would 404 there.
+
+    Factory constraints are re-checked HERE, in code (the prompt orients the
+    Router; it guarantees nothing): supported deployment, reasoning XOR coding
+    tools, no RAG (no index to point at), reserved/duplicate names dropped,
+    ProxyAgent appended (the human-in-the-loop clarification channel the
+    factory special-cases by name). The team NAME is fixed: it becomes the
+    Magentic manager's Foundry agent name (``sanitize(team.name)`` in
+    ``init_orchestration``), and a per-task name would publish a new manager
+    definition per request — version sprawl.
+    """
+    from common.config.app_config import config
+
+    try:
+        supported = json.loads(config.SUPPORTED_MODELS)
+    except (TypeError, ValueError):
+        supported = []
+    deployment = config.AZURE_OPENAI_DEPLOYMENT_NAME
+    if supported and deployment not in supported:
+        deployment = str(supported[0])
+
+    agents: list[dict] = []
+    seen: set[str] = set()
+    for raw in roster:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip()
+        # isidentifier(): no spaces/punctuation — the name becomes a Foundry
+        # agent name and the Magentic participant key.
+        if not name or not name.isidentifier():
+            continue
+        lowered = name.lower()
+        # ProxyAgent is appended below with its real semantics; a Router-made
+        # one would silently replace the clarification channel.
+        if lowered in seen or lowered == "proxyagent":
+            continue
+        coding_tools = bool(raw.get("coding_tools"))
+        # The factory raises on reasoning+coding_tools; keep the concrete,
+        # verifiable capability (producing a file) over "reasoning harder".
+        use_reasoning = bool(raw.get("use_reasoning")) and not coding_tools
+        seen.add(lowered)
+        agents.append(
+            {
+                "input_key": "",
+                "type": "",
+                "name": name,
+                "deployment_name": deployment,
+                "icon": "",
+                "system_message": str(raw.get("system_message") or "").strip(),
+                "description": str(raw.get("description") or "").strip(),
+                # No composed team has a Search index; use_rag without
+                # index_name yields SearchConfig=None in the factory — an agent
+                # that believes it has a knowledge base and does not.
+                "use_rag": False,
+                "use_mcp": bool(raw.get("use_mcp")),
+                "use_bing": False,
+                "use_reasoning": use_reasoning,
+                "index_name": "",
+                "coding_tools": coding_tools,
+            }
+        )
+        if len(agents) >= _COMPOSED_TEAM_MAX_AGENTS:
+            break
+
+    if not agents:
+        raise ValueError("router roster contained no usable agents")
+
+    agents.append(
+        {
+            "input_key": "",
+            "type": "",
+            "name": "ProxyAgent",
+            "deployment_name": "",
+            "icon": "",
+            "system_message": "",
+            "description": "",
+            "use_rag": False,
+            "use_mcp": False,
+            "use_bing": False,
+            "use_reasoning": False,
+            "index_name": "",
+            "coding_tools": False,
+        }
+    )
+
+    team_service = TeamService(memory_store)
+    team = await team_service.validate_and_parse_team_config(
+        {
+            "name": "Auto Team",
+            # hidden: composed per request — not an entry in the UI picker
+            # (_merge_teams_for_direct_response skips hidden the same way).
+            "status": "hidden",
+            "deployment_name": deployment,
+            "description": (
+                f"Team composed by the Model Router for: {description[:200]}"
+            ),
+            "agents": agents,
+            "starting_tasks": [
+                {
+                    "id": "task-1",
+                    "name": "Requested task",
+                    "prompt": description[:500],
+                    "created": "",
+                    "creator": "",
+                    "logo": "",
+                }
+            ],
+        },
+        user_id,
+    )
+    await team_service.save_team_configuration(team)
+    logger.info(
+        "Composed team '%s' (%s) from router roster: %s",
+        team.name,
+        team.team_id,
+        [
+            f"{a.name}(code={a.coding_tools},mcp={a.use_mcp},reason={a.use_reasoning})"
+            for a in team.agents
+        ],
+    )
+    return team
+
+
 async def _create_plan_and_start(
     *,
     background_tasks: BackgroundTasks,
@@ -400,6 +538,7 @@ async def _create_plan_and_start(
     session_id: str,
     history: Optional[list] = None,
     persist_user_task: bool = False,
+    composed_agents: Optional[list] = None,
 ) -> str:
     """Create a Plan and kick off the Magentic orchestration as a BackgroundTask.
 
@@ -407,24 +546,47 @@ async def _create_plan_and_start(
     (the Model Router routing a turn to the formal multi-agent Plan). Returns the
     new ``plan_id``; the orchestration runs after return and streams to PlanPage
     over WebSocket. Raises HTTPException (404 no team / 400 RAI / 500 create).
+
+    ``composed_agents`` is the roster the Model Router proposed in the same
+    ``run_plan`` call that escalated the turn. When present and usable, the
+    team is composed from it (sanitized + persisted) instead of requiring a
+    manually selected team — the roster must exist BEFORE the Magentic graph
+    is built, because the graph freezes its participants at ``build()``.
     """
     try:
         memory_store = await DatabaseFactory.get_database(
             user_id=user_id, tenant_id=tenant_id
         )
-        user_current_team = await memory_store.get_current_team(user_id=user_id)
-        team_id: str | None = user_current_team.team_id if user_current_team else None
-        if not team_id:
-            raise HTTPException(
-                status_code=404,
-                detail="No team configured. Please select a team first.",
+        team: Optional[TeamConfiguration] = None
+        if composed_agents:
+            try:
+                team = await _team_from_router_roster(
+                    composed_agents, description, user_id, memory_store
+                )
+            except Exception as compose_err:
+                # A malformed roster must never block the request — fall back
+                # to the user's selected team (the pre-existing behavior).
+                logger.warning(
+                    "Router roster rejected (%s); using the selected team",
+                    compose_err,
+                )
+        if team is None:
+            user_current_team = await memory_store.get_current_team(user_id=user_id)
+            selected_team_id: str | None = (
+                user_current_team.team_id if user_current_team else None
             )
-        team = await memory_store.get_team_by_id(team_id=team_id)
-        if not team:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Team configuration '{team_id}' not found or access denied",
-            )
+            if not selected_team_id:
+                raise HTTPException(
+                    status_code=404,
+                    detail="No team configured. Please select a team first.",
+                )
+            team = await memory_store.get_team_by_id(team_id=selected_team_id)
+            if not team:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Team configuration '{selected_team_id}' not found or access denied",
+                )
+        team_id: str | None = team.team_id
     except HTTPException:
         raise
     except Exception as e:
@@ -1529,8 +1691,12 @@ class _HostedPlanSignal:
 
     type = "plan_signal"
 
-    def __init__(self, task: str) -> None:
+    def __init__(self, task: str, agents: Optional[list] = None) -> None:
         self.task = task
+        # Roster the Router proposed in the same run_plan call (None → the
+        # user's selected team). Sanitized downstream in
+        # _team_from_router_roster, never trusted as-is.
+        self.agents = agents
 
 
 class _HostedFunctionCall:
@@ -1675,7 +1841,16 @@ _DIRECT_RESPONSES_API_VERSION = "2025-03-01-preview"
 # live), so this is HOW the router hands a code/file task down to the Responses
 # execution layer. Everything else (Toolbox, agents via FoundryMCPServer's
 # agent_invoke) is attached dynamically IN that layer, not here.
-def _capability(name: str, description: str, arg: str, arg_desc: str) -> dict:
+def _capability(
+    name: str,
+    description: str,
+    arg: str,
+    arg_desc: str,
+    extra_properties: Optional[dict] = None,
+) -> dict:
+    properties: dict = {arg: {"type": "string", "description": arg_desc}}
+    if extra_properties:
+        properties.update(extra_properties)
     return {
         "type": "function",
         "function": {
@@ -1683,7 +1858,7 @@ def _capability(name: str, description: str, arg: str, arg_desc: str) -> dict:
             "description": description,
             "parameters": {
                 "type": "object",
-                "properties": {arg: {"type": "string", "description": arg_desc}},
+                "properties": properties,
                 "required": [arg],
             },
         },
@@ -1779,6 +1954,69 @@ _ROUTER_FUNCTIONS = [
         "task",
         "The full, self-contained objective for the multi-agent plan, as the user "
         "expressed it.",
+        extra_properties={
+            # The Router composes the roster in the SAME call that escalates —
+            # no second model round-trip. The backend sanitizes and materializes
+            # it (factory constraints re-checked in code) before the Magentic
+            # graph is built; the roster is frozen at build().
+            "agents": {
+                "type": "array",
+                "description": (
+                    "The minimal team of specialist agents for this plan — 1 to "
+                    "4 entries, fewer is better; derive them from the request "
+                    "itself. Specialists are REUSED by name across plans, so "
+                    "write system_message as reusable role instructions (what "
+                    "the specialist is and does), never one-task orders. Do not "
+                    "include a proxy/manager/orchestrator entry. Omit this field "
+                    "only if the user explicitly asks to use their currently "
+                    "selected team."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": (
+                                "PascalCase, ending in 'Agent', unique in the "
+                                "roster (e.g. DataAgent)."
+                            ),
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "One line: what this specialist is for.",
+                        },
+                        "system_message": {
+                            "type": "string",
+                            "description": (
+                                "Reusable role instructions for the specialist."
+                            ),
+                        },
+                        "coding_tools": {
+                            "type": "boolean",
+                            "description": (
+                                "true ONLY if it must run code or produce real "
+                                "downloadable files (scripts, spreadsheets, "
+                                "packages, charts)."
+                            ),
+                        },
+                        "use_mcp": {
+                            "type": "boolean",
+                            "description": (
+                                "true ONLY if it needs external systems or live data."
+                            ),
+                        },
+                        "use_reasoning": {
+                            "type": "boolean",
+                            "description": (
+                                "Deep multi-step analysis. Never together with "
+                                "coding_tools."
+                            ),
+                        },
+                    },
+                    "required": ["name", "description", "system_message"],
+                },
+            }
+        },
     ),
     # NOTE: there is NO "respond directly" capability. Answering the user is not a
     # capability — it is the DEFAULT. When the router picks none of the above, the
@@ -2161,7 +2399,16 @@ class _RouterChatClient:
             # Signal only: the Plan runs via process_request's orchestration path
             # (BackgroundTask + WebSocket + PlanPage), NOT inline on this SSE turn.
             # The SSE handler turns this signal into plan creation + plan_created.
-            yield _HostedUpdate([_HostedPlanSignal(task)])
+            # The roster the Router proposed rides along; the backend sanitizes
+            # and materializes it before the graph is built.
+            _roster = _args.get("agents")
+            yield _HostedUpdate(
+                [
+                    _HostedPlanSignal(
+                        task, agents=_roster if isinstance(_roster, list) else None
+                    )
+                ]
+            )
         elif _router_answered:
             # No capability AND the router already streamed its own answer above
             # (its selected model, with history for memory). Nothing more to run.
@@ -3520,6 +3767,10 @@ async def chat_message_stream(
                                 # Same context the router already recovered this
                                 # turn — cross the boundary instead of dropping it.
                                 history=_history,
+                                # Roster composed by the Router in the same
+                                # run_plan call; None falls back to the
+                                # user's selected team.
+                                composed_agents=getattr(content, "agents", None),
                             )
                             yield _sse_event(
                                 {

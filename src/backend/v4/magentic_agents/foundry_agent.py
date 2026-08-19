@@ -388,6 +388,15 @@ class FoundryAgentTemplate(AzureAgentBase):
                     # Code Interpreter is server-side in Foundry portal.
                     # Must use AzureAIClient to access it — ResponsesClient
                     # cannot reach server-side tools configured in the portal.
+                    #
+                    # Agents from agent_teams/*.json are pre-configured in the
+                    # portal manually. Agents composed dynamically by the Router
+                    # (coding_tools=True) are new: publish them with
+                    # CodeInterpreterTool NOW so AzureAIClient finds the tool
+                    # server-side. _register_in_foundry reuse-first: if the
+                    # agent already exists in Foundry the publish is skipped.
+                    if not self._ephemeral:
+                        await self._register_in_foundry(with_code_interpreter=True)
                     self.logger.info(
                         "Using AzureAIClient for '%s' (server-side Code Interpreter).",
                         self.agent_name,

@@ -10,7 +10,7 @@ from agent_framework import Agent, MCPStreamableHTTPTool
 from agent_framework.azure import AzureOpenAIResponsesClient
 from agent_framework_azure_ai import AzureAIClient, AzureAIProjectAgentOptions
 from azure.ai.agents.aio import AgentsClient
-from azure.ai.projects.models import PromptAgentDefinition
+from azure.ai.projects.models import CodeInterpreterTool, PromptAgentDefinition, Tool
 
 from common.config.app_config import config
 from common.database.database_base import DatabaseBase
@@ -282,12 +282,22 @@ class MCPEnabledBase:
         )
         return responses_client
 
-    async def _register_in_foundry(self) -> None:
+    async def _register_in_foundry(
+        self,
+        *,
+        with_code_interpreter: bool = False,
+    ) -> None:
         """Persist agent definition in Azure AI Foundry via create_version.
 
         This ensures the agent is visible in the Foundry portal and VS Code
-        extension, even when using AzureOpenAIResponsesClient for execution.
-        Called from subclasses that use the responses client path.
+        extension, regardless of whether execution uses AzureOpenAIResponsesClient
+        (runtime tools) or AzureAIClient (published/server-side tools).
+        Called from subclasses that need to publish/refresh an agent definition.
+        ``with_code_interpreter=True`` declares CodeInterpreterTool in the
+        published definition so AzureAIClient(use_latest_version=True) finds
+        the tool server-side. Agents composed dynamically by the Model Router
+        (coding_tools=True) are never pre-configured in the Foundry portal, so
+        the tool must be declared at first publish time.
 
         Behavior:
           - Default: if agent already exists in Foundry, reuse it (skip publish).
@@ -355,9 +365,14 @@ class MCPEnabledBase:
                 return
 
             # Only reaches here if agent does NOT exist in Foundry or MACAE_FORCE_AGENT_PUBLISH=1
+            tools_to_publish: list[Tool] | None = (
+                [CodeInterpreterTool()] if with_code_interpreter else None
+            )
             self.logger.warning(
-                "⚠️ Agent '%s' does NOT exist in Foundry OR force_republish=True. Creating NEW version...",
+                "⚠️ Agent '%s' does NOT exist in Foundry OR force_republish=True. "
+                "Creating NEW version (tools=%s)...",
                 self.agent_name,
+                "CodeInterpreter" if with_code_interpreter else "none",
             )
             agent_def = await self.project_client.agents.create_version(
                 agent_name=self.agent_name,
@@ -365,13 +380,15 @@ class MCPEnabledBase:
                 definition=PromptAgentDefinition(
                     model=self.model_deployment_name or "",
                     instructions=self.agent_instructions or "",
+                    tools=tools_to_publish,
                 ),
             )
             self.logger.info(
-                "🆕 CREATED NEW agent version '%s' in Foundry (id=%s, version=%s)",
+                "🆕 CREATED NEW agent version '%s' in Foundry (id=%s, version=%s, tools=%s)",
                 self.agent_name,
                 agent_def.id,
                 agent_def.version,
+                "CodeInterpreter" if with_code_interpreter else "none",
             )
             _FOUNDRY_REGISTERED_AGENT_NAMES.add(self.agent_name)
         except Exception as exc:
