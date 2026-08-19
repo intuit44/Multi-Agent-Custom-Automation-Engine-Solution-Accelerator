@@ -10,7 +10,15 @@ from agent_framework import Agent, MCPStreamableHTTPTool
 from agent_framework.azure import AzureOpenAIResponsesClient
 from agent_framework_azure_ai import AzureAIClient, AzureAIProjectAgentOptions
 from azure.ai.agents.aio import AgentsClient
-from azure.ai.projects.models import CodeInterpreterTool, PromptAgentDefinition, Tool
+from azure.ai.projects.models import (
+    BingGroundingSearchConfiguration,
+    BingGroundingSearchToolParameters,
+    BingGroundingTool,
+    CodeInterpreterTool,
+    MCPTool,
+    PromptAgentDefinition,
+    Tool,
+)
 
 from common.config.app_config import config
 from common.database.database_base import DatabaseBase
@@ -23,6 +31,32 @@ from v4.magentic_agents.models.agent_models import MCPConfig
 # Cache Foundry registrations per process so ephemeral runtime agents do not
 # recreate the same persisted agent on every request.
 _FOUNDRY_REGISTERED_AGENT_NAMES: set[str] = set()
+
+# name -> fingerprint of the definition this process last published/verified.
+# Composed agents are REUSED BY NAME across requests but their Router-written
+# instructions/tools vary per request: reuse must be decided by comparing
+# definitions, not by name alone (name-only reuse froze the FIRST published
+# toolset forever; force-publish minted a version per run — both wrong).
+_FOUNDRY_PUBLISHED_FINGERPRINTS: dict[str, str] = {}
+
+
+def _definition_fingerprint(model: str, instructions: str, tools) -> str:
+    """Canonical identity of an agent definition for publish-on-diff.
+
+    Tools reduce to type (plus server_url for MCP — the one field whose drift
+    matters, e.g. localhost vs public endpoint); accepts both local Tool
+    models and definitions read back from Foundry (dict-like either way).
+    """
+    parts: list[str] = []
+    for tool in tools or []:
+        if hasattr(tool, "get"):
+            tool_type = str(tool.get("type", "") or "")
+            server_url = str(tool.get("server_url", "") or "")
+        else:
+            tool_type = str(getattr(tool, "type", "") or "")
+            server_url = str(getattr(tool, "server_url", "") or "")
+        parts.append(f"mcp:{server_url}" if tool_type == "mcp" else tool_type)
+    return f"{model}\n{instructions}\n" + "|".join(sorted(parts))
 
 
 class MCPEnabledBase:
@@ -282,30 +316,25 @@ class MCPEnabledBase:
         )
         return responses_client
 
-    async def _register_in_foundry(
-        self,
-        *,
-        with_code_interpreter: bool = False,
-    ) -> None:
+    async def _register_in_foundry(self) -> None:
         """Persist agent definition in Azure AI Foundry via create_version.
 
-        This ensures the agent is visible in the Foundry portal and VS Code
-        extension, regardless of whether execution uses AzureOpenAIResponsesClient
-        (runtime tools) or AzureAIClient (published/server-side tools).
-        Called from subclasses that need to publish/refresh an agent definition.
-        ``with_code_interpreter=True`` declares CodeInterpreterTool in the
-        published definition so AzureAIClient(use_latest_version=True) finds
-        the tool server-side. Agents composed dynamically by the Model Router
-        (coding_tools=True) are never pre-configured in the Foundry portal, so
-        the tool must be declared at first publish time.
+        Assembles the tool list from the agent’s own config so the published
+        definition carries exactly the tools the factory declared:
+
+          * ``enable_code_interpreter`` → ``CodeInterpreterTool()``
+          * ``mcp_cfg`` (has url + name)  → ``MCPTool(server_label, server_url)``
+          * ``AZURE_BING_CONNECTION_NAME`` on config → ``BingGroundingTool``
+
+        Azure AI Search already has its own create path
+        (``_create_azure_search_enabled_client``); it is not duplicated here.
 
         Behavior:
-          - Default: if agent already exists in Foundry, reuse it (skip publish).
-            This prevents version bloat on every backend restart.
-          - With env var MACAE_FORCE_AGENT_PUBLISH=1: ALWAYS publish a new
-            version with current local instructions. Use after editing
-            data/agent_teams/*.json system_messages so changes propagate.
-            Unset after one successful run to prevent accumulating versions.
+          - Default: if the agent already exists in Foundry, reuse it (skip
+            publish). Prevents version bloat on every backend restart.
+          - ``MACAE_FORCE_AGENT_PUBLISH=1``: always publish a new version.
+            Use after editing ``data/agent_teams/*.json`` system_messages.
+            Unset after one successful run.
         """
         if not self.project_client or not self.agent_name:
             return
@@ -316,9 +345,67 @@ class MCPEnabledBase:
             "yes",
         )
 
-        if self.agent_name in _FOUNDRY_REGISTERED_AGENT_NAMES and not force_republish:
+        # ── Desired definition (tools + fingerprint) ────────────────────────
+        # Assembled BEFORE any reuse decision: composed agents share names
+        # across requests while the Router varies instructions/tools per
+        # request, so "already exists" alone can never justify reuse.
+        tools_to_publish: list[Tool] = []
+        if getattr(self, "enable_code_interpreter", False):
+            tools_to_publish.append(CodeInterpreterTool())
+        _mcp = getattr(self, "mcp_cfg", None)
+        if _mcp and getattr(_mcp, "url", ""):
+            tools_to_publish.append(
+                MCPTool(
+                    server_label=getattr(_mcp, "name", "mcp") or "mcp",
+                    # The published tool executes in FOUNDRY's runtime, not on
+                    # this host: it must carry the publicly reachable endpoint
+                    # (dev localhost is unreachable from Azure — same rule as
+                    # the chat lane's direct attach). Client-side runtime MCP
+                    # keeps using the local URL.
+                    server_url=config.MACAE_MCP_PUBLIC_ENDPOINT or _mcp.url,
+                    # No allowed_tools filter: these are exact-name lists (a
+                    # literal "*" matches nothing); omitting the field allows
+                    # every tool the server exposes. Magentic runs have no
+                    # human channel for per-call tool approvals — anything but
+                    # "never" hangs the run.
+                    require_approval="never",
+                )
+            )
+        if getattr(self, "enable_bing", False):
+            _bing_conn = getattr(config, "AZURE_BING_CONNECTION_NAME", "") or ""
+            if _bing_conn:
+                tools_to_publish.append(
+                    BingGroundingTool(
+                        bing_grounding=BingGroundingSearchToolParameters(
+                            search_configurations=[
+                                BingGroundingSearchConfiguration(
+                                    project_connection_id=_bing_conn
+                                )
+                            ]
+                        )
+                    )
+                )
+            else:
+                self.logger.warning(
+                    "Agent '%s' requested Bing grounding but "
+                    "AZURE_BING_CONNECTION_NAME is not configured — "
+                    "publishing without web search.",
+                    self.agent_name,
+                )
+
+        desired_fp = _definition_fingerprint(
+            self.model_deployment_name or "",
+            self.agent_instructions or "",
+            tools_to_publish,
+        )
+
+        if (
+            not force_republish
+            and _FOUNDRY_PUBLISHED_FINGERPRINTS.get(self.agent_name) == desired_fp
+        ):
             self.logger.info(
-                "✅ Agent '%s' already registered in Foundry (cached for this process). NO creating new version.",
+                "✅ Agent '%s' already published with this exact definition "
+                "(process cache). NO new version.",
                 self.agent_name,
             )
             return
@@ -336,7 +423,6 @@ class MCPEnabledBase:
                         break
 
             if existing_agent is not None and not force_republish:
-                _FOUNDRY_REGISTERED_AGENT_NAMES.add(self.agent_name)
                 _versions = getattr(existing_agent, "versions", None)
                 _latest = (
                     getattr(_versions, "latest", None)
@@ -353,26 +439,76 @@ class MCPEnabledBase:
                     if _latest is not None
                     else "unknown"
                 )
-                self.logger.info(
-                    "✅ Agent '%s' ALREADY EXISTS in Foundry (id=%s, latest_version=%s, version_id=%s). "
-                    "REUSING existing agent - NO NEW VERSION CREATED. "
-                    "Set MACAE_FORCE_AGENT_PUBLISH=1 only if you need to update instructions.",
-                    self.agent_name,
-                    getattr(existing_agent, "id", "unknown"),
-                    _version_str,
-                    _version_id,
-                )
-                return
 
-            # Only reaches here if agent does NOT exist in Foundry or MACAE_FORCE_AGENT_PUBLISH=1
-            tools_to_publish: list[Tool] | None = (
-                [CodeInterpreterTool()] if with_code_interpreter else None
+                # ── Publish-on-diff ─────────────────────────────────────────
+                # Reuse ONLY when the published definition matches what THIS
+                # composition needs; a changed definition publishes a new
+                # version so the Router's current instructions/tools actually
+                # apply (name-only reuse silently kept stale definitions).
+                published_def = getattr(_latest, "definition", None)
+                if published_def is None and _latest is not None:
+                    try:
+                        _ver = await self.project_client.agents.get_version(
+                            self.agent_name, str(_version_str)
+                        )
+                        published_def = getattr(_ver, "definition", None)
+                    except Exception as ver_exc:
+                        self.logger.debug(
+                            "Could not fetch version definition for '%s': %s",
+                            self.agent_name,
+                            ver_exc,
+                        )
+                if published_def is None:
+                    # Unreadable published definition: reuse conservatively —
+                    # publishing blind here would mint a version on every
+                    # restart, the exact sprawl this path exists to prevent.
+                    _FOUNDRY_REGISTERED_AGENT_NAMES.add(self.agent_name)
+                    self.logger.warning(
+                        "⚠️ Agent '%s' exists (version=%s) but its definition "
+                        "could not be read for comparison — REUSING as-is.",
+                        self.agent_name,
+                        _version_str,
+                    )
+                    return
+
+                published_fp = _definition_fingerprint(
+                    str(getattr(published_def, "model", "") or ""),
+                    str(getattr(published_def, "instructions", "") or ""),
+                    getattr(published_def, "tools", None) or [],
+                )
+                if published_fp == desired_fp:
+                    _FOUNDRY_REGISTERED_AGENT_NAMES.add(self.agent_name)
+                    _FOUNDRY_PUBLISHED_FINGERPRINTS[self.agent_name] = desired_fp
+                    self.logger.info(
+                        "✅ Agent '%s' ALREADY EXISTS in Foundry with an IDENTICAL "
+                        "definition (id=%s, latest_version=%s, version_id=%s). "
+                        "REUSING - NO NEW VERSION CREATED.",
+                        self.agent_name,
+                        getattr(existing_agent, "id", "unknown"),
+                        _version_str,
+                        _version_id,
+                    )
+                    return
+                self.logger.info(
+                    "♻️ Agent '%s' exists (version=%s) but the definition CHANGED "
+                    "(instructions/tools/model) — publishing a new version so this "
+                    "composition's definition actually applies.",
+                    self.agent_name,
+                    _version_str,
+                )
+
+            tool_names = (
+                ", ".join(
+                    str(t.get("type", "?")) if hasattr(t, "get") else str(t)
+                    for t in tools_to_publish
+                )
+                or "none"
             )
             self.logger.warning(
-                "⚠️ Agent '%s' does NOT exist in Foundry OR force_republish=True. "
-                "Creating NEW version (tools=%s)...",
+                "⚠️ Publishing agent '%s' (new name, changed definition, or "
+                "force_republish). Creating NEW version (tools=%s)...",
                 self.agent_name,
-                "CodeInterpreter" if with_code_interpreter else "none",
+                tool_names,
             )
             agent_def = await self.project_client.agents.create_version(
                 agent_name=self.agent_name,
@@ -380,7 +516,7 @@ class MCPEnabledBase:
                 definition=PromptAgentDefinition(
                     model=self.model_deployment_name or "",
                     instructions=self.agent_instructions or "",
-                    tools=tools_to_publish,
+                    tools=tools_to_publish or None,
                 ),
             )
             self.logger.info(
@@ -388,9 +524,10 @@ class MCPEnabledBase:
                 self.agent_name,
                 agent_def.id,
                 agent_def.version,
-                "CodeInterpreter" if with_code_interpreter else "none",
+                tool_names,
             )
             _FOUNDRY_REGISTERED_AGENT_NAMES.add(self.agent_name)
+            _FOUNDRY_PUBLISHED_FINGERPRINTS[self.agent_name] = desired_fp
         except Exception as exc:
             self.logger.warning(
                 "Could not register agent '%s' in Foundry: %s",

@@ -47,6 +47,7 @@ class FoundryAgentTemplate(AzureAgentBase):
         model_deployment_name: str,
         project_endpoint: str,
         enable_code_interpreter: bool = False,
+        enable_bing: bool = False,
         mcp_config: MCPConfig | None = None,
         search_config: SearchConfig | None = None,
         team_service: TeamService | None = None,
@@ -79,6 +80,9 @@ class FoundryAgentTemplate(AzureAgentBase):
         )
 
         self.enable_code_interpreter = enable_code_interpreter
+        # Read by _register_in_foundry: publishes BingGroundingTool in the
+        # agent definition (server-side) when the roster asked for web search.
+        self.enable_bing = enable_bing
         self.search = search_config
         self.logger = logging.getLogger(__name__)
 
@@ -396,7 +400,7 @@ class FoundryAgentTemplate(AzureAgentBase):
                     # server-side. _register_in_foundry reuse-first: if the
                     # agent already exists in Foundry the publish is skipped.
                     if not self._ephemeral:
-                        await self._register_in_foundry(with_code_interpreter=True)
+                        await self._register_in_foundry()
                     self.logger.info(
                         "Using AzureAIClient for '%s' (server-side Code Interpreter).",
                         self.agent_name,

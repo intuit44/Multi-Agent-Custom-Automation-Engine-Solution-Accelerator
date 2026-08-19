@@ -442,9 +442,13 @@ async def _team_from_router_roster(
         if lowered in seen or lowered == "proxyagent":
             continue
         coding_tools = bool(raw.get("coding_tools"))
-        # The factory raises on reasoning+coding_tools; keep the concrete,
-        # verifiable capability (producing a file) over "reasoning harder".
-        use_reasoning = bool(raw.get("use_reasoning")) and not coding_tools
+        use_bing = bool(raw.get("use_bing"))
+        # The factory raises on reasoning combined with bing/coding tools;
+        # keep the concrete, verifiable capabilities (files, live web) over
+        # "reasoning harder".
+        use_reasoning = (
+            bool(raw.get("use_reasoning")) and not coding_tools and not use_bing
+        )
         seen.add(lowered)
         agents.append(
             {
@@ -460,7 +464,7 @@ async def _team_from_router_roster(
                 # that believes it has a knowledge base and does not.
                 "use_rag": False,
                 "use_mcp": bool(raw.get("use_mcp")),
-                "use_bing": False,
+                "use_bing": use_bing,
                 "use_reasoning": use_reasoning,
                 "index_name": "",
                 "coding_tools": coding_tools,
@@ -521,7 +525,7 @@ async def _team_from_router_roster(
         team.name,
         team.team_id,
         [
-            f"{a.name}(code={a.coding_tools},mcp={a.use_mcp},reason={a.use_reasoning})"
+            f"{a.name}(code={a.coding_tools},mcp={a.use_mcp},bing={a.use_bing},reason={a.use_reasoning})"
             for a in team.agents
         ],
     )
@@ -2003,6 +2007,14 @@ _ROUTER_FUNCTIONS = [
                             "type": "boolean",
                             "description": (
                                 "true ONLY if it needs external systems or live data."
+                            ),
+                        },
+                        "use_bing": {
+                            "type": "boolean",
+                            "description": (
+                                "true ONLY if it needs LIVE public web information "
+                                "(current prices, news, market data). Never "
+                                "together with use_reasoning."
                             ),
                         },
                         "use_reasoning": {
