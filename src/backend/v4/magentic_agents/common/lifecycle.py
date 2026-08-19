@@ -43,10 +43,30 @@ _FOUNDRY_PUBLISHED_FINGERPRINTS: dict[str, str] = {}
 def _definition_fingerprint(model: str, instructions: str, tools) -> str:
     """Canonical identity of an agent definition for publish-on-diff.
 
-    Tools reduce to type (plus server_url for MCP — the one field whose drift
-    matters, e.g. localhost vs public endpoint); accepts both local Tool
-    models and definitions read back from Foundry (dict-like either way).
+    Tools reduce to type (plus the minimal config that affects execution).
+    Accepts both local Tool models and definitions read back from Foundry
+    (dict-like either way).
     """
+
+    def _bing_conn_id(t: Any) -> str:
+        # Object model: BingGroundingTool(bing_grounding=...)
+        bg = getattr(t, "bing_grounding", None)
+        if bg is not None:
+            scs = getattr(bg, "search_configurations", None) or []
+            if scs:
+                return str(getattr(scs[0], "project_connection_id", "") or "")
+        # Dict-like model: try common shapes
+        if hasattr(t, "get"):
+            direct = str(t.get("project_connection_id", "") or "")
+            if direct:
+                return direct
+            bgd = t.get("bing_grounding") or {}
+            if hasattr(bgd, "get"):
+                scs = bgd.get("search_configurations") or []
+                if scs and hasattr(scs[0], "get"):
+                    return str(scs[0].get("project_connection_id", "") or "")
+        return ""
+
     parts: list[str] = []
     for tool in tools or []:
         if hasattr(tool, "get"):
@@ -55,7 +75,17 @@ def _definition_fingerprint(model: str, instructions: str, tools) -> str:
         else:
             tool_type = str(getattr(tool, "type", "") or "")
             server_url = str(getattr(tool, "server_url", "") or "")
-        parts.append(f"mcp:{server_url}" if tool_type == "mcp" else tool_type)
+
+        if tool_type == "mcp":
+            parts.append(f"mcp:{server_url}")
+            continue
+
+        bing_conn = _bing_conn_id(tool)
+        if bing_conn:
+            parts.append(f"{tool_type}:{bing_conn}")
+        else:
+            parts.append(tool_type)
+
     return f"{model}\n{instructions}\n" + "|".join(sorted(parts))
 
 
