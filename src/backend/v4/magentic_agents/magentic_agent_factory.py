@@ -150,6 +150,7 @@ class MagenticAgentFactory:
             use_reasoning=use_reasoning,
             model_deployment_name=deployment_name,
             enable_code_interpreter=getattr(agent_obj, "coding_tools", False),
+            enable_bing=getattr(agent_obj, "use_bing", False),
             project_endpoint=config.AZURE_AI_PROJECT_ENDPOINT,
             mcp_config=mcp_config,
             search_config=search_config,
