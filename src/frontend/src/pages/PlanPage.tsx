@@ -1051,9 +1051,12 @@ const PlanPage: React.FC = () => {
               collectedFiles.push(f);
             },
             fileIds,
-            // Chat position: this message may never become a plan. Plans are
-            // born ONLY through the explicit selector branch above.
-            allowPlan: false,
+            // Chat position: the Model Router may escalate to a formal Plan
+            // (run_plan) when the request genuinely needs multi-agent
+            // orchestration — and it composes the roster in that same
+            // decision (team by intent, no manual selection required). The
+            // selector branch above remains the explicit path.
+            allowPlan: true,
             onOAuthConsentRequest: (consentLink) => {
               // NOTE: no 'noopener' — with it window.open() returns null (per
               // spec), so popup.closed polling never runs and the auto-retry
