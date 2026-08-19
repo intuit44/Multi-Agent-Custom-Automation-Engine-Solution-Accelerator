@@ -290,9 +290,9 @@ class MCPEnabledBase:
         """Persist agent definition in Azure AI Foundry via create_version.
 
         This ensures the agent is visible in the Foundry portal and VS Code
-        extension, even when using AzureOpenAIResponsesClient for execution.
-        Called from subclasses that use the responses client path.
-
+        extension, regardless of whether execution uses AzureOpenAIResponsesClient
+        (runtime tools) or AzureAIClient (published/server-side tools).
+        Called from subclasses that need to publish/refresh an agent definition.
         ``with_code_interpreter=True`` declares CodeInterpreterTool in the
         published definition so AzureAIClient(use_latest_version=True) finds
         the tool server-side. Agents composed dynamically by the Model Router
