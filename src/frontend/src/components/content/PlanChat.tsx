@@ -1,14 +1,17 @@
-import React, { useEffect } from "react";
-import { PlanChatProps, MPlanData } from "../../models/plan";
-import InlineToaster from "../toast/InlineToaster";
-import { AgentMessageData } from "@/models";
-import renderUserPlanMessage from "./streaming/StreamingUserPlanMessage";
-import RenderPlanResponse from "./streaming/StreamingPlanResponse";
-import { renderPlanExecutionMessage, renderThinkingState } from "./streaming/StreamingPlanState";
-import ContentNotFound from "../NotFound/ContentNotFound";
-import PlanChatBody from "./PlanChatBody";
-import RenderAgentMessages from "./streaming/StreamingAgentMessage";
-import StreamingBufferMessage from "./streaming/StreamingBufferMessage";
+import React, { useEffect } from 'react';
+import { PlanChatProps, MPlanData } from '../../models/plan';
+import InlineToaster from '../toast/InlineToaster';
+import { AgentMessageData, AgentMessageType } from '@/models';
+import renderUserPlanMessage from './streaming/StreamingUserPlanMessage';
+import RenderPlanResponse from './streaming/StreamingPlanResponse';
+import {
+  renderPlanExecutionMessage,
+  renderThinkingState,
+} from './streaming/StreamingPlanState';
+import ContentNotFound from '../NotFound/ContentNotFound';
+import PlanChatBody from './PlanChatBody';
+import RenderAgentMessages from './streaming/StreamingAgentMessage';
+import StreamingBufferMessage from './streaming/StreamingBufferMessage';
 
 interface SimplifiedPlanChatProps extends PlanChatProps {
   onPlanReceived?: (planData: MPlanData) => void;
@@ -27,7 +30,11 @@ interface SimplifiedPlanChatProps extends PlanChatProps {
   /** True when parent attempted to load a plan and failed (404 case). */
   notFound?: boolean;
   attachedFiles?: Array<{ name: string; file_id: string }>;
-  generatedFiles?: Array<{ file_id: string; filename: string; download_url: string }>;
+  generatedFiles?: Array<{
+    file_id: string;
+    filename: string;
+    download_url: string;
+  }>;
   onFileSelect?: (file: File) => void;
   onRemoveFile?: (file_id: string) => void;
   onRemoveGeneratedFile?: (file_id: string) => void;
@@ -115,18 +122,39 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
   const afterBuffer =
     bufferAt > 0 ? agentMessages.filter((m) => m.timestamp > bufferAt) : [];
 
-  const goal = (planData?.plan?.initial_goal || '').trim();
+  const syntheticTask =
+    initialTask && initialTask.trim() && initialTask !== 'Task submitted'
+      ? initialTask.trim()
+      : planApprovalRequest?.user_request?.trim() &&
+          planApprovalRequest.user_request !== 'Plan approval required'
+        ? planApprovalRequest.user_request.trim()
+        : planApprovalRequest?.context?.task?.trim() &&
+            planApprovalRequest.context.task !== 'Plan approval required'
+          ? planApprovalRequest.context.task.trim()
+          : planData?.plan?.initial_goal?.trim() &&
+              planData.plan.initial_goal !== 'Task submitted'
+            ? planData.plan.initial_goal.trim()
+            : '';
+
   const requestAlreadyInHistory =
-    goal.length > 0 &&
-    agentMessages.some((m) => (m.content || '').trim() === goal);
+    syntheticTask.length > 0 &&
+    agentMessages.some(
+      (m) =>
+        m.agent_type === AgentMessageType.HUMAN_AGENT &&
+        m.content.trim() === syntheticTask
+    );
 
   if (notFound) {
-    return <ContentNotFound subtitle="The requested page could not be found." />;
+    return (
+      <ContentNotFound subtitle="The requested page could not be found." />
+    );
   }
 
   if (!planData)
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      <div
+        style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}
+      >
         <InlineToaster />
         <div
           ref={messagesContainerRef}
@@ -136,7 +164,7 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
             padding: '32px 0',
             maxWidth: '800px',
             margin: '0 auto',
-            width: '100%'
+            width: '100%',
           }}
         >
           {renderThinkingState(waitingForPlan)}
@@ -174,12 +202,13 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
       </div>
     );
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100vh',
-
-    }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100vh',
+      }}
+    >
       {/* Messages Container */}
       <InlineToaster />
       <div
@@ -190,7 +219,7 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
           padding: '32px 0',
           maxWidth: '800px',
           margin: '0 auto',
-          width: '100%'
+          width: '100%',
         }}
       >
         {/* Conversation that already existed when the plan started */}

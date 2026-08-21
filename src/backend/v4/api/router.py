@@ -5760,7 +5760,9 @@ async def get_plan_by_id(
                                     "agent": "human"
                                     if role == "user"
                                     else metadata.get("agent", "assistant"),
-                                    "agent_type": "human" if role == "user" else "ai",
+                                    "agent_type": "Human_Agent"
+                                    if role == "user"
+                                    else "AI_Agent",
                                     "timestamp": msg.get("timestamp"),
                                     "content": msg.get("content", ""),
                                     "steps": [],
