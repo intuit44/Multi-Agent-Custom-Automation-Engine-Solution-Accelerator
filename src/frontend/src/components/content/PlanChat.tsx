@@ -122,9 +122,27 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
   const afterBuffer =
     bufferAt > 0 ? agentMessages.filter((m) => m.timestamp > bufferAt) : [];
 
-  const requestAlreadyInHistory = agentMessages.some(
-    (m) => m.agent_type === AgentMessageType.HUMAN_AGENT
-  );
+  const syntheticTask =
+    initialTask && initialTask.trim() && initialTask !== 'Task submitted'
+      ? initialTask.trim()
+      : planApprovalRequest?.user_request?.trim() &&
+          planApprovalRequest.user_request !== 'Plan approval required'
+        ? planApprovalRequest.user_request.trim()
+        : planApprovalRequest?.context?.task?.trim() &&
+            planApprovalRequest.context.task !== 'Plan approval required'
+          ? planApprovalRequest.context.task.trim()
+          : planData?.plan?.initial_goal?.trim() &&
+              planData.plan.initial_goal !== 'Task submitted'
+            ? planData.plan.initial_goal.trim()
+            : '';
+
+  const requestAlreadyInHistory =
+    syntheticTask.length > 0 &&
+    agentMessages.some(
+      (m) =>
+        m.agent_type === AgentMessageType.HUMAN_AGENT &&
+        m.content.trim() === syntheticTask
+    );
 
   if (notFound) {
     return (
