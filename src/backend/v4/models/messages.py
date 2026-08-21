@@ -83,6 +83,13 @@ class PlanApprovalRequest:
     status: PlanStatus
     context: dict | None = None
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "plan": self.plan.model_dump(),
+            "status": self.status,
+            "context": self.context or {},
+        }
+
 
 @dataclass(slots=True)
 class PlanApprovalResponse:
