@@ -2118,10 +2118,22 @@ class _RouterChatClient:
         self._image_api_version = config._get_optional(
             "IMAGE_GENERATION_API_VERSION", "2025-04-01-preview"
         )
-        self._toolbox_label = config.CHAT_TOOLBOX_NAME
-        self._toolbox_url = (
-            f"{project}/toolboxes/{config.CHAT_TOOLBOX_NAME}/mcp?api-version=v1"
-        )
+        # ONE definition of how this project reaches a Foundry toolbox: name,
+        # pinned version, URL shape and the preview gate. Both the attach below
+        # and anything else that needs a toolbox read it from here — the same
+        # contract written twice is what made the bridge answer 401 while this
+        # path worked.
+        self._toolboxes: list[tuple[str, str]] = []
+        for _spec in (config.CHAT_TOOLBOXES or "").split(","):
+            _spec = _spec.strip()
+            if not _spec:
+                continue
+            _name, _, _version = _spec.partition(":")
+            _name, _version = _name.strip(), _version.strip()
+            _segment = f"/versions/{_version}" if _version else ""
+            self._toolboxes.append(
+                (_name, f"{project}/toolboxes/{_name}{_segment}/mcp?api-version=v1")
+            )
         # ca-mcp (MacaeMcpServer) DIRECT endpoint — attached without the Foundry
         # Toolbox proxy so the x-ms-client-principal-id identity header reaches
         # ca-mcp. Must be reachable by the Azure model service (public); see
@@ -2649,6 +2661,26 @@ class _RouterChatClient:
             ]
         )
 
+    def _toolbox_tools(self, bearer: str) -> list[dict[str, Any]]:
+        """MCP attach entries for every declared Foundry toolbox.
+
+        `Foundry-Features` is not optional: the toolbox endpoint is preview-
+        gated and answers 401 without it, however valid the token is.
+        """
+        return [
+            {
+                "type": "mcp",
+                "server_label": label,
+                "server_url": url,
+                "require_approval": "never",
+                "headers": {
+                    "Authorization": f"Bearer {bearer}",
+                    "Foundry-Features": "Toolboxes=V1Preview",
+                },
+            }
+            for label, url in self._toolboxes
+        ]
+
     async def _execute_responses(
         self,
         prompt: str,
@@ -2748,31 +2780,9 @@ class _RouterChatClient:
                     },
                 ]
             else:
-                tools = [
-                    {
-                        "type": "mcp",
-                        "server_label": self._toolbox_label,
-                        "server_url": self._toolbox_url,
-                        "require_approval": "never",
-                        "headers": {
-                            "Authorization": f"Bearer {bearer}",
-                            "Foundry-Features": "Toolboxes=V1Preview",
-                        },
-                    },
-                ]
+                tools = self._toolbox_tools(bearer)
         else:
-            tools = [
-                {
-                    "type": "mcp",
-                    "server_label": self._toolbox_label,
-                    "server_url": self._toolbox_url,
-                    "require_approval": "never",
-                    "headers": {
-                        "Authorization": f"Bearer {bearer}",
-                        "Foundry-Features": "Toolboxes=V1Preview",
-                    },
-                }
-            ]
+            tools = self._toolbox_tools(bearer)
         instructions = _HOSTED_ORCHESTRATOR_INSTRUCTIONS
         if use_code_interpreter:
             tools.append({"type": "code_interpreter", "container": {"type": "auto"}})
