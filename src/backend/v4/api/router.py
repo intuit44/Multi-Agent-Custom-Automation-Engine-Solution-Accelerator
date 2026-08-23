@@ -2130,6 +2130,8 @@ class _RouterChatClient:
                 continue
             _name, _, _version = _spec.partition(":")
             _name, _version = _name.strip(), _version.strip()
+            if not _name:
+                continue
             _segment = f"/versions/{_version}" if _version else ""
             self._toolboxes.append(
                 (_name, f"{project}/toolboxes/{_name}{_segment}/mcp?api-version=v1")
