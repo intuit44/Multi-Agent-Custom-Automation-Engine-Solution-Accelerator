@@ -368,7 +368,24 @@ class MCPEnabledBase:
 
           * ``enable_code_interpreter`` → ``CodeInterpreterTool()``
           * ``mcp_cfg`` (has url + name)  → ``MCPTool(server_label, server_url)``
-          * ``AZURE_BING_CONNECTION_NAME`` on config → ``BingGroundingTool``
+          * ``use_bing`` + ``AZURE_BING_CONNECTION_NAME`` → ``BingGroundingTool``
+          * ``enable_file_search`` + ``AZURE_FILE_SEARCH_VECTOR_STORE_IDS``
+            → ``FileSearchTool``
+          * ``enable_web_search`` → ``WebSearchTool()``
+          * ``enable_image_generation`` → ``ImageGenTool()``
+          * ``enable_azure_functions`` → no-op (requires a full
+            ``AzureFunctionDefinition``; logs a warning and skips)
+          * ``enable_sharepoint`` + ``AZURE_SHAREPOINT_CONNECTION_NAME``
+            → ``SharepointPreviewTool``
+          * ``enable_browser_automation`` +
+            ``AZURE_BROWSER_AUTOMATION_CONNECTION_NAME``
+            → ``BrowserAutomationPreviewTool``
+          * ``enable_fabric`` + ``AZURE_FABRIC_CONNECTION_NAME``
+            → ``MicrosoftFabricPreviewTool``
+          * ``enable_bing_custom_search`` +
+            ``AZURE_BING_CUSTOM_SEARCH_CONNECTION_NAME`` /
+            ``AZURE_BING_CUSTOM_SEARCH_INSTANCE_NAME``
+            → ``BingCustomSearchTool``
 
         Azure AI Search already has its own create path
         (``_create_azure_search_enabled_client``); it is not duplicated here.
