@@ -138,11 +138,7 @@ const PlanChat: React.FC<SimplifiedPlanChatProps> = ({
 
   const requestAlreadyInHistory =
     syntheticTask.length > 0 &&
-    agentMessages.some(
-      (m) =>
-        m.agent_type === AgentMessageType.HUMAN_AGENT &&
-        m.content.trim() === syntheticTask
-    );
+    agentMessages.some((m) => m.agent_type === AgentMessageType.HUMAN_AGENT);
 
   if (notFound) {
     return (

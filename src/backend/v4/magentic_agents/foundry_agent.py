@@ -48,6 +48,14 @@ class FoundryAgentTemplate(AzureAgentBase):
         project_endpoint: str,
         enable_code_interpreter: bool = False,
         enable_bing: bool = False,
+        enable_file_search: bool = False,
+        enable_web_search: bool = False,
+        enable_image_generation: bool = False,
+        enable_azure_functions: bool = False,
+        enable_sharepoint: bool = False,
+        enable_browser_automation: bool = False,
+        enable_fabric: bool = False,
+        enable_bing_custom_search: bool = False,
         mcp_config: MCPConfig | None = None,
         search_config: SearchConfig | None = None,
         team_service: TeamService | None = None,
@@ -80,9 +88,15 @@ class FoundryAgentTemplate(AzureAgentBase):
         )
 
         self.enable_code_interpreter = enable_code_interpreter
-        # Read by _register_in_foundry: publishes BingGroundingTool in the
-        # agent definition (server-side) when the roster asked for web search.
         self.enable_bing = enable_bing
+        self.enable_file_search = enable_file_search
+        self.enable_web_search = enable_web_search
+        self.enable_image_generation = enable_image_generation
+        self.enable_azure_functions = enable_azure_functions
+        self.enable_sharepoint = enable_sharepoint
+        self.enable_browser_automation = enable_browser_automation
+        self.enable_fabric = enable_fabric
+        self.enable_bing_custom_search = enable_bing_custom_search
         self.search = search_config
         self.logger = logging.getLogger(__name__)
 
