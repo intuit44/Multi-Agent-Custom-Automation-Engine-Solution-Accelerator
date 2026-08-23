@@ -187,9 +187,8 @@ class AppConfig:
         # version pins the URL segment so a new toolbox version never changes
         # behaviour behind your back. Omitting ":Version" resolves to latest.
         # Defaults to CHAT_TOOLBOX_NAME so existing deployments keep working.
-        self.CHAT_TOOLBOXES = self._get_optional(
-            "CHAT_TOOLBOXES", self.CHAT_TOOLBOX_NAME
-        )
+        _raw_toolboxes = (self._get_optional("CHAT_TOOLBOXES", "") or "").strip()
+        self.CHAT_TOOLBOXES = _raw_toolboxes or self.CHAT_TOOLBOX_NAME
         # Model Router front-door: chat is entered through the deployed Model
         # Router (chat/completions), which routes to the best model per request
         # and signals — via a function tool — when a task needs the Responses
