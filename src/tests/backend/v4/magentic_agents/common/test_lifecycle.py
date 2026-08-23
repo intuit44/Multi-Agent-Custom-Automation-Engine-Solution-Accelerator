@@ -2,6 +2,7 @@
 
 import logging
 import sys
+from types import SimpleNamespace
 from unittest.mock import Mock, patch, AsyncMock
 import pytest
 
@@ -71,7 +72,11 @@ sys.modules["common.utils.utils_agents"].get_database_team_agent_id = AsyncMock(
 )
 
 # Import the module under test
-from backend.v4.magentic_agents.common.lifecycle import MCPEnabledBase, AzureAgentBase  # noqa: E402
+from backend.v4.magentic_agents.common.lifecycle import (  # noqa: E402
+    MCPEnabledBase,
+    AzureAgentBase,
+    _definition_fingerprint,
+)
 
 
 class TestMCPEnabledBase:
@@ -735,3 +740,55 @@ class TestAzureAgentBase:
 
         owned.close.assert_awaited_once()
         assert base.creds is None
+
+
+class TestDefinitionFingerprint:
+    def test_mcp_tool_fingerprint_matches_for_object_and_dict_shapes(self):
+        model = "gpt-4o"
+        instructions = "test instructions"
+
+        object_tool = SimpleNamespace(
+            type="mcp",
+            server_url="https://mcp.example.com",
+            allowed_tools=["tool_b", "tool_a"],
+            project_connection_id="conn-1",
+        )
+        dict_tool = {
+            "type": "mcp",
+            "server_url": "https://mcp.example.com",
+            "allowed_tools": ["tool_a", "tool_b"],
+            "project_connection_id": "conn-1",
+        }
+
+        object_fp = _definition_fingerprint(model, instructions, [object_tool])
+        dict_fp = _definition_fingerprint(model, instructions, [dict_tool])
+
+        assert object_fp == dict_fp
+
+    def test_bing_grounding_fingerprint_matches_for_object_and_dict_shapes(self):
+        model = "gpt-4o"
+        instructions = "test instructions"
+
+        object_tool = SimpleNamespace(
+            type="bing_grounding",
+            bing_grounding=SimpleNamespace(
+                search_configurations=[
+                    SimpleNamespace(project_connection_id="conn-2"),
+                    SimpleNamespace(project_connection_id="conn-1"),
+                ]
+            ),
+        )
+        dict_tool = {
+            "type": "bing_grounding",
+            "bing_grounding": {
+                "search_configurations": [
+                    {"project_connection_id": "conn-1"},
+                    {"project_connection_id": "conn-2"},
+                ]
+            },
+        }
+
+        object_fp = _definition_fingerprint(model, instructions, [object_tool])
+        dict_fp = _definition_fingerprint(model, instructions, [dict_tool])
+
+        assert object_fp == dict_fp

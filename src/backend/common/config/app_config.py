@@ -182,6 +182,13 @@ class AppConfig:
             "CHAT_ORCHESTRATOR_MODEL", "o4-mini"
         )
         self.CHAT_TOOLBOX_NAME = self._get_optional("CHAT_TOOLBOX_NAME", "Toolbox")
+        # A Foundry project can expose SEVERAL toolboxes, each with its own
+        # version. Declare them here as "Name:Version,Name:Version" — the
+        # version pins the URL segment so a new toolbox version never changes
+        # behaviour behind your back. Omitting ":Version" resolves to latest.
+        # Defaults to CHAT_TOOLBOX_NAME so existing deployments keep working.
+        _raw_toolboxes = (self._get_optional("CHAT_TOOLBOXES", "") or "").strip()
+        self.CHAT_TOOLBOXES = _raw_toolboxes or self.CHAT_TOOLBOX_NAME
         # Model Router front-door: chat is entered through the deployed Model
         # Router (chat/completions), which routes to the best model per request
         # and signals — via a function tool — when a task needs the Responses

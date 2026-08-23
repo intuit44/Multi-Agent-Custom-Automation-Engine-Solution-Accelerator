@@ -92,6 +92,9 @@ class ExternalMCPSession:
         self._initialized: bool = False
         self.server_info: Dict[str, Any] = {}
         self.extra_headers: Dict[str, str] = {}
+
+        if "/toolboxes/" in self.server_url:
+            self.extra_headers["Foundry-Features"] = "Toolboxes=V1Preview"
         self.connected_at: float = time.time()
 
     async def initialize(self) -> Dict[str, Any]:

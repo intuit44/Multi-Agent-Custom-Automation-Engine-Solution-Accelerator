@@ -57,48 +57,96 @@ _FOUNDRY_PUBLISHED_FINGERPRINTS: dict[str, str] = {}
 def _definition_fingerprint(model: str, instructions: str, tools) -> str:
     """Canonical identity of an agent definition for publish-on-diff.
 
-    Tools reduce to type (plus the minimal config that affects execution).
-    Accepts both local Tool models and definitions read back from Foundry
-    (dict-like either way).
+    A tool reduces to its ``type`` plus its EXECUTION IDENTITY: the minimal
+    set of values that decide WHICH resource the tool works against. Tools
+    with no resource behind them (code_interpreter, web_search, image_gen)
+    reduce to the bare type — they cannot drift.
+
+    Both shapes must yield the SAME string: locally built SDK models
+    (attributes) and definitions read back from Foundry (dict-like). An
+    extractor that only understands one shape makes published_fp differ from
+    desired_fp forever, publishing a version on every single run.
     """
 
-    def _bing_conn_id(t: Any) -> str:
-        # Object model: BingGroundingTool(bing_grounding=...)
-        bg = getattr(t, "bing_grounding", None)
-        if bg is not None:
-            scs = getattr(bg, "search_configurations", None) or []
-            if scs:
-                return str(getattr(scs[0], "project_connection_id", "") or "")
-        # Dict-like model: try common shapes
-        if hasattr(t, "get"):
-            direct = str(t.get("project_connection_id", "") or "")
-            if direct:
-                return direct
-            bgd = t.get("bing_grounding") or {}
-            if hasattr(bgd, "get"):
-                scs = bgd.get("search_configurations") or []
-                if scs and hasattr(scs[0], "get"):
-                    return str(scs[0].get("project_connection_id", "") or "")
-        return ""
+    def _get(obj: Any, key: str) -> Any:
+        """Read one field from either shape."""
+        if obj is None:
+            return None
+        if hasattr(obj, "get"):
+            return obj.get(key)
+        return getattr(obj, key, None)
+
+    def _ids(seq: Any, key: str = "project_connection_id") -> list[str]:
+        """Connection ids from a list whose items may be objects, dicts or
+        plain strings. Sorted: order is not part of the identity."""
+        out: list[str] = []
+        for item in seq or []:
+            if isinstance(item, str):
+                out.append(item)
+                continue
+            val = _get(item, key)
+            if val:
+                out.append(str(val))
+        return sorted(out)
+
+    def _identity(tool: Any, tool_type: str) -> list[str]:
+        """The values that decide which resource this tool talks to."""
+        if tool_type == "mcp":
+            # allowed_tools narrows what the server may run: same URL with a
+            # different subset is a different agent.
+            return [
+                str(_get(tool, "server_url") or ""),
+                *sorted(str(a) for a in (_get(tool, "allowed_tools") or [])),
+                str(_get(tool, "project_connection_id") or ""),
+            ]
+        if tool_type == "file_search":
+            return sorted(str(v) for v in (_get(tool, "vector_store_ids") or []))
+        if tool_type == "azure_ai_search":
+            res = _get(tool, "azure_ai_search")
+            vals: list[str] = []
+            for idx in _get(res, "indexes") or []:
+                vals.append(
+                    ":".join(
+                        str(_get(idx, k) or "")
+                        for k in (
+                            "project_connection_id",
+                            "index_name",
+                            "query_type",
+                            "top_k",
+                        )
+                    )
+                )
+            return sorted(vals)
+        if tool_type == "bing_grounding":
+            params = _get(tool, "bing_grounding")
+            return _ids(_get(params, "search_configurations"))
+        if tool_type == "bing_custom_search_preview":
+            params = _get(tool, "bing_custom_search_preview")
+            vals = []
+            for cfg in _get(params, "search_configurations") or []:
+                vals.append(
+                    f"{_get(cfg, 'project_connection_id') or ''}"
+                    f":{_get(cfg, 'instance_name') or ''}"
+                )
+            return sorted(vals)
+        if tool_type == "sharepoint_grounding_preview":
+            params = _get(tool, "sharepoint_grounding_preview")
+            return _ids(_get(params, "project_connections"))
+        if tool_type == "fabric_dataagent_preview":
+            params = _get(tool, "fabric_dataagent_preview")
+            return _ids(_get(params, "project_connections"))
+        if tool_type == "browser_automation_preview":
+            params = _get(tool, "browser_automation_preview")
+            conn = _get(params, "connection")
+            return [str(_get(conn, "project_connection_id") or "")]
+        # code_interpreter, web_search, image_generation, ...: no resource.
+        return []
 
     parts: list[str] = []
     for tool in tools or []:
-        if hasattr(tool, "get"):
-            tool_type = str(tool.get("type", "") or "")
-            server_url = str(tool.get("server_url", "") or "")
-        else:
-            tool_type = str(getattr(tool, "type", "") or "")
-            server_url = str(getattr(tool, "server_url", "") or "")
-
-        if tool_type == "mcp":
-            parts.append(f"mcp:{server_url}")
-            continue
-
-        bing_conn = _bing_conn_id(tool)
-        if bing_conn:
-            parts.append(f"{tool_type}:{bing_conn}")
-        else:
-            parts.append(tool_type)
+        tool_type = str(_get(tool, "type") or "")
+        identity = [v for v in _identity(tool, tool_type) if v]
+        parts.append(f"{tool_type}:{'|'.join(identity)}" if identity else tool_type)
 
     return f"{model}\n{instructions}\n" + "|".join(sorted(parts))
 
