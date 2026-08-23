@@ -126,6 +126,26 @@ class AppConfig:
         self.AZURE_BING_CONNECTION_NAME = self._get_optional(
             "AZURE_BING_CONNECTION_NAME"
         )
+        self.AZURE_SHAREPOINT_CONNECTION_NAME = self._get_optional(
+            "AZURE_SHAREPOINT_CONNECTION_NAME"
+        )
+        self.AZURE_BROWSER_AUTOMATION_CONNECTION_NAME = self._get_optional(
+            "AZURE_BROWSER_AUTOMATION_CONNECTION_NAME"
+        )
+        self.AZURE_FABRIC_CONNECTION_NAME = self._get_optional(
+            "AZURE_FABRIC_CONNECTION_NAME"
+        )
+        self.AZURE_BING_CUSTOM_SEARCH_CONNECTION_NAME = self._get_optional(
+            "AZURE_BING_CUSTOM_SEARCH_CONNECTION_NAME"
+        )
+        # Custom Search instance name (Bing Custom Search portal config name)
+        self.AZURE_BING_CUSTOM_SEARCH_INSTANCE_NAME = self._get_optional(
+            "AZURE_BING_CUSTOM_SEARCH_INSTANCE_NAME"
+        )
+        # Comma-separated vector store IDs for FileSearch tool
+        self.AZURE_FILE_SEARCH_VECTOR_STORE_IDS = self._get_optional(
+            "AZURE_FILE_SEARCH_VECTOR_STORE_IDS"
+        )
         self.SUPPORTED_MODELS = self._get_optional("SUPPORTED_MODELS")
         # Frontend settings
         self.FRONTEND_SITE_NAME = self._get_optional(

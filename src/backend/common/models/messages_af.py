@@ -206,6 +206,14 @@ class TeamAgent(BaseModel):
     use_bing: bool = False
     use_reasoning: bool = False
     coding_tools: bool = False
+    use_file_search: bool = False
+    use_web_search: bool = False
+    use_image_generation: bool = False
+    use_azure_functions: bool = False
+    use_sharepoint: bool = False
+    use_browser_automation: bool = False
+    use_fabric: bool = False
+    use_bing_custom_search: bool = False
 
 
 class StartingTask(BaseModel):

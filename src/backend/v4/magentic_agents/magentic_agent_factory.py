@@ -151,6 +151,18 @@ class MagenticAgentFactory:
             model_deployment_name=deployment_name,
             enable_code_interpreter=getattr(agent_obj, "coding_tools", False),
             enable_bing=getattr(agent_obj, "use_bing", False),
+            enable_file_search=getattr(agent_obj, "use_file_search", False),
+            enable_web_search=getattr(agent_obj, "use_web_search", False),
+            enable_image_generation=getattr(agent_obj, "use_image_generation", False),
+            enable_azure_functions=getattr(agent_obj, "use_azure_functions", False),
+            enable_sharepoint=getattr(agent_obj, "use_sharepoint", False),
+            enable_browser_automation=getattr(
+                agent_obj, "use_browser_automation", False
+            ),
+            enable_fabric=getattr(agent_obj, "use_fabric", False),
+            enable_bing_custom_search=getattr(
+                agent_obj, "use_bing_custom_search", False
+            ),
             project_endpoint=config.AZURE_AI_PROJECT_ENDPOINT,
             mcp_config=mcp_config,
             search_config=search_config,
