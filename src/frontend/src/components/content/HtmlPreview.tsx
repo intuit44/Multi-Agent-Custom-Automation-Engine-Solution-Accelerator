@@ -89,7 +89,9 @@ export const HtmlPreview: React.FC<HtmlPreviewProps> = ({
       iframeRef.current &&
       ev.source === iframeRef.current.contentWindow
     ) {
-      const natural = Math.max(MIN_HEIGHT, ev.data.height as number);
+      const next = Number(ev.data.height);
+      if (!Number.isFinite(next)) return;
+      const natural = Math.max(MIN_HEIGHT, next);
       setHeight(natural);
     }
   }, []);
