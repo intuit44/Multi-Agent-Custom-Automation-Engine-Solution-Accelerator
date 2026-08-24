@@ -17,6 +17,7 @@ import React, {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
@@ -43,6 +44,12 @@ function wrapWithHeightReporter(html: string): string {
   else{report();}
   // re-report after images / fonts settle
   window.addEventListener('load',report);
+  // Re-post on timers: a warm renderer can fire DOMContentLoaded BEFORE the
+  // parent has attached its message listener (bites on the SECOND open of
+  // the same doc — faster load, message lost, stuck at min height). Timed
+  // re-posts make the height report self-healing regardless of who wins.
+  setTimeout(report,150);
+  setTimeout(report,600);
 })();
 </script>`;
   // Insert before </body> if present, otherwise append
@@ -96,7 +103,11 @@ export const HtmlPreview: React.FC<HtmlPreviewProps> = ({
     }
   }, []);
 
-  useEffect(() => {
+  // useLayoutEffect, NOT useEffect: it runs synchronously right after the
+  // commit that inserts the iframe, BEFORE the browser can deliver any task
+  // (the child's postMessage arrives as a task). A passive effect runs after
+  // paint and can lose the first height message to a fast-loading srcdoc.
+  useLayoutEffect(() => {
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, [handleMessage]);
