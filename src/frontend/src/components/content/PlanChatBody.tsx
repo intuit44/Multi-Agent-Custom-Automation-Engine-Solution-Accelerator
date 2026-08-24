@@ -17,12 +17,14 @@ import {
   Attach20Regular,
   Dismiss20Regular,
   ArrowDownload20Regular,
+  Eye20Regular,
   Image20Regular,
   DocumentRegular,
   FolderRegular,
   MoreHorizontal20Regular,
 } from '@fluentui/react-icons';
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useCallback } from 'react';
+import { HtmlPreview, useHtmlPreview } from './HtmlPreview';
 
 interface SimplifiedPlanChatProps extends PlanChatProps {
   planData: any;
@@ -46,6 +48,143 @@ interface SimplifiedPlanChatProps extends PlanChatProps {
   /** Hidden while inside an existing plan (in-plan messages never create plans). */
   showPlanLaneToggle?: boolean;
 }
+
+// ─── HTML file card: download link + optional live Preview for .html files ───
+
+interface HtmlFileCardProps {
+  file: { file_id: string; filename: string; download_url: string };
+  onRemove?: (file_id: string) => void;
+}
+
+const HtmlFileCard: React.FC<HtmlFileCardProps> = ({ file, onRemove }) => {
+  const isHtml = file.filename.toLowerCase().endsWith('.html');
+  const previewCtx = useHtmlPreview();
+  const [showPreview, setShowPreview] = useState(false);
+  const [htmlContent, setHtmlContent] = useState<string | null>(null);
+  const [loadingHtml, setLoadingHtml] = useState(false);
+
+  const handlePreviewToggle = useCallback(async () => {
+    let content = htmlContent;
+    if (content === null) {
+      setLoadingHtml(true);
+      try {
+        const res = await fetch(resolveApiUrl(file.download_url));
+        content = await res.text();
+      } catch {
+        content = '<p style="color:red">Failed to load preview.</p>';
+      } finally {
+        setLoadingHtml(false);
+      }
+      setHtmlContent(content);
+    }
+    // With a provider mounted the preview opens in the RIGHT PANEL — never
+    // inline here: this card lives in the composer, directly above ChatInput,
+    // and an inline iframe swallows the input. Inline is the fallback only.
+    if (previewCtx) {
+      previewCtx.open({
+        id: `file:${file.file_id}`,
+        title: file.filename,
+        html: content ?? '',
+      });
+      return;
+    }
+    setShowPreview((v) => !v);
+  }, [htmlContent, file.download_url, file.file_id, file.filename, previewCtx]);
+
+  return (
+    <div>
+      {/* Download card row */}
+      <div
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '10px',
+          padding: '10px 14px',
+          backgroundColor: 'var(--colorBrandBackground2)',
+          borderRadius: '8px',
+          fontSize: '13px',
+          fontWeight: 500,
+          color: 'var(--colorNeutralForeground1)',
+          border: '1px solid var(--colorBrandStroke1)',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+        }}
+      >
+        <a
+          href={resolveApiUrl(file.download_url)}
+          download={file.filename}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            color: 'inherit',
+            textDecoration: 'none',
+          }}
+        >
+          <ArrowDownload20Regular
+            style={{ color: 'var(--colorBrandForeground1)' }}
+          />
+          <span
+            style={{
+              maxWidth: '200px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {file.filename}
+          </span>
+        </a>
+        {isHtml && (
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<Eye20Regular />}
+            onClick={handlePreviewToggle}
+            style={{ minWidth: 'auto', padding: '2px 6px' }}
+          >
+            {showPreview ? 'Hide' : 'Preview'}
+          </Button>
+        )}
+        {onRemove && (
+          <Button
+            appearance="transparent"
+            icon={<Dismiss20Regular />}
+            size="small"
+            aria-label={`Discard ${file.filename}`}
+            onClick={() => onRemove(file.file_id)}
+            style={{
+              minWidth: 'auto',
+              padding: '4px',
+              height: '20px',
+              width: '20px',
+            }}
+          />
+        )}
+      </div>
+      {/* Inline preview (only for .html) */}
+      {isHtml && showPreview && (
+        <div style={{ marginTop: '8px' }}>
+          {loadingHtml ? (
+            <span
+              style={{
+                fontSize: '12px',
+                color: 'var(--colorNeutralForeground3)',
+              }}
+            >
+              Loading…
+            </span>
+          ) : (
+            htmlContent !== null && (
+              <HtmlPreview html={htmlContent} title={file.filename} />
+            )
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
   planData,
@@ -224,72 +363,11 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
             {generatedFiles.map((f) => (
-              <a
+              <HtmlFileCard
                 key={f.file_id}
-                href={resolveApiUrl(f.download_url)}
-                download={f.filename}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  padding: '10px 14px',
-                  backgroundColor: 'var(--colorBrandBackground2)',
-                  borderRadius: '8px',
-                  fontSize: '13px',
-                  fontWeight: 500,
-                  textDecoration: 'none',
-                  color: 'var(--colorNeutralForeground1)',
-                  border: '1px solid var(--colorBrandStroke1)',
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                  transition: 'all 0.2s ease',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor =
-                    'var(--colorBrandBackgroundHover)';
-                  e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
-                  e.currentTarget.style.transform = 'translateY(-1px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor =
-                    'var(--colorBrandBackground2)';
-                  e.currentTarget.style.boxShadow =
-                    '0 1px 2px rgba(0,0,0,0.05)';
-                  e.currentTarget.style.transform = 'translateY(0)';
-                }}
-              >
-                <ArrowDownload20Regular
-                  style={{ color: 'var(--colorBrandForeground1)' }}
-                />
-                <span
-                  style={{
-                    maxWidth: '200px',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {f.filename}
-                </span>
-                {onRemoveGeneratedFile && (
-                  <Button
-                    appearance="transparent"
-                    icon={<Dismiss20Regular />}
-                    size="small"
-                    aria-label={`Discard ${f.filename}`}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onRemoveGeneratedFile(f.file_id);
-                    }}
-                    style={{
-                      minWidth: 'auto',
-                      padding: '4px',
-                      height: '20px',
-                      width: '20px',
-                    }}
-                  />
-                )}
-              </a>
+                file={f}
+                onRemove={onRemoveGeneratedFile}
+              />
             ))}
           </div>
         </div>

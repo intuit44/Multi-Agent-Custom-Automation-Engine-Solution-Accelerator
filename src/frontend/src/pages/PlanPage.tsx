@@ -37,6 +37,10 @@ import { apiService } from '../api/apiService';
 import { ChatService } from '../services/ChatService';
 import { usePlanCancellationAlert } from '../hooks/usePlanCancellationAlert';
 import PlanCancellationDialog from '../components/common/PlanCancellationDialog';
+import {
+  HtmlPreviewProvider,
+  PreviewRightSlot,
+} from '../components/content/HtmlPreview';
 import '../styles/PlanPage.css';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import {
@@ -1221,8 +1225,9 @@ const PlanPage: React.FC = () => {
   }
 
   return (
-    <CoralShellColumn>
-      <CoralShellRow>
+    <HtmlPreviewProvider>
+      <CoralShellColumn>
+        <CoralShellRow>
         {/* ✅ RESTORED: PlanPanelLeft for navigation */}
         <PlanPanelLeft
           reloadTasks={reloadLeftList}
@@ -1291,25 +1296,33 @@ const PlanPage: React.FC = () => {
           )}
         </Content>
 
-        {isPlanMode && (
-          <React.Suspense fallback={null}>
-            <PlanPanelRight
-              planData={planData}
-              loading={loading}
-              planApprovalRequest={planApprovalRequest}
-            />
-          </React.Suspense>
-        )}
-      </CoralShellRow>
+        {/* Right slot: an open HTML preview takes it; otherwise the plan
+            panel (plan mode) or nothing (chat mode) — the preview is the
+            canvas seed and must never inflate the composer above ChatInput. */}
+        <PreviewRightSlot
+          fallback={
+            isPlanMode ? (
+              <React.Suspense fallback={null}>
+                <PlanPanelRight
+                  planData={planData}
+                  loading={loading}
+                  planApprovalRequest={planApprovalRequest}
+                />
+              </React.Suspense>
+            ) : null
+          }
+        />
+        </CoralShellRow>
 
-      {/* Plan Cancellation Confirmation Dialog */}
-      <PlanCancellationDialog
-        isOpen={showCancellationDialog}
-        onConfirm={handleConfirmCancellation}
-        onCancel={handleCancelDialog}
-        loading={cancellingPlan}
-      />
-    </CoralShellColumn>
+        {/* Plan Cancellation Confirmation Dialog */}
+        <PlanCancellationDialog
+          isOpen={showCancellationDialog}
+          onConfirm={handleConfirmCancellation}
+          onCancel={handleCancelDialog}
+          loading={cancellingPlan}
+        />
+      </CoralShellColumn>
+    </HtmlPreviewProvider>
   );
 };
 
