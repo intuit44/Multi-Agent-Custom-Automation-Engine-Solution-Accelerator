@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import rehypePrism from 'rehype-prism';
 import { Body1, Tag, makeStyles, tokens } from '@fluentui/react-components';
 import { TaskService } from '@/services';
+import { HtmlCodeToggle } from '../HtmlPreview';
 import {
   ArrowDownloadRegular,
   CopyRegular,
@@ -318,6 +319,41 @@ export const markdownComponents = {
       }}
     />
   ),
+  // For ```html blocks, show a Code/Preview toggle with sandboxed iframe.
+  code: ({ node, className, children, ...props }: any) => {
+    const isBlock = !props.inline;
+    const lang = (className || '').replace('language-', '');
+    if (isBlock && lang === 'html') {
+      // The raw source must come from the hast node, NOT String(children):
+      // rehype-prism has already replaced children with highlight <span>
+      // elements, and String() over React elements yields "[object Object]".
+      const hastText = (n: any): string =>
+        n?.type === 'text'
+          ? n.value || ''
+          : ((n?.children as any[]) || []).map(hastText).join('');
+      const rawHtml = hastText(node).replace(/\n$/, '');
+      const codeBlock = (
+        <pre
+          style={{
+            maxWidth: '100%',
+            boxSizing: 'border-box',
+            overflowX: 'auto',
+            borderRadius: '8px',
+          }}
+        >
+          <code className={className} {...props}>
+            {children}
+          </code>
+        </pre>
+      );
+      return <HtmlCodeToggle code={rawHtml} codeBlock={codeBlock} />;
+    }
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    );
+  },
   img: ({ node, ...props }: any) => <GeneratedImage {...props} />,
   a: ({ node, children, href, ...props }: any) => (
     <a
