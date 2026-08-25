@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import { AgentMessageData, AgentMessageType } from '@/models';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -319,11 +319,18 @@ export const markdownComponents = {
       }}
     />
   ),
-  // For ```html blocks, show a Code/Preview toggle with sandboxed iframe.
+  // A NAMED fence (or any ```html fence) is a generated FILE: it goes to the
+  // artifact panel as a chip instead of dumping the whole code into the
+  // message. Unnamed non-html fences stay inline as prose snippets.
   code: ({ node, className, children, ...props }: any) => {
     const isBlock = !props.inline;
     const lang = (className || '').replace('language-', '');
-    if (isBlock && lang === 'html') {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    const fenceNames = useContext(FenceNamesContext);
+    const startLine = node?.position?.start?.line as number | undefined;
+    const filename =
+      isBlock && startLine != null ? fenceNames?.get(startLine) : undefined;
+    if (isBlock && (lang === 'html' || filename)) {
       // The raw source must come from the hast node, NOT String(children):
       // rehype-prism has already replaced children with highlight <span>
       // elements, and String() over React elements yields "[object Object]".
@@ -331,7 +338,7 @@ export const markdownComponents = {
         n?.type === 'text'
           ? n.value || ''
           : ((n?.children as any[]) || []).map(hastText).join('');
-      const rawHtml = hastText(node).replace(/\n$/, '');
+      const raw = hastText(node).replace(/\n$/, '');
       const codeBlock = (
         <pre
           style={{
@@ -346,7 +353,14 @@ export const markdownComponents = {
           </code>
         </pre>
       );
-      return <HtmlCodeToggle code={rawHtml} codeBlock={codeBlock} />;
+      return (
+        <HtmlCodeToggle
+          code={raw}
+          codeBlock={codeBlock}
+          filename={filename}
+          lang={lang || 'txt'}
+        />
+      );
     }
     return (
       <code className={className} {...props}>
@@ -375,18 +389,55 @@ export const markdownComponents = {
   ),
 };
 
+// Filename map for the fences of ONE message: fence start line → the filename
+// the model wrote just above it (heading/bold "templates/index.html" style).
+// The code renderer reads its own start line from the hast node and looks the
+// name up here — that name IS the artifact identity for the panel.
+const FenceNamesContext = React.createContext<Map<number, string> | null>(
+  null
+);
+
+const FILENAME_RE = /([\w@-][\w@./-]*\.[A-Za-z0-9]{1,8})/;
+
+function extractFenceNames(md: string): Map<number, string> {
+  const names = new Map<number, string>();
+  const lines = md.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*(```|~~~)\S*/.test(lines[i])) continue;
+    // Look upward past blank lines for a short "title" line with a filename.
+    for (let j = i - 1, seen = 0; j >= 0 && seen < 3; j--) {
+      const line = lines[j].trim();
+      if (!line) continue;
+      seen++;
+      if (line.length > 120) break; // prose paragraph, not a file title
+      const m = line.match(FILENAME_RE);
+      if (m) {
+        names.set(i + 1, m[1]); // remark positions are 1-based
+        break;
+      }
+      break; // only the nearest non-blank line counts as the title
+    }
+  }
+  return names;
+}
+
 // Isolated, memoized Markdown. Re-parses (and re-highlights) ONLY when its
 // content string changes. This is the key fix: appending a streaming token to
 // the last message no longer re-parses the Markdown of every previous message.
-const AgentMarkdown = React.memo(({ content }: { content: string }) => (
-  <ReactMarkdown
-    remarkPlugins={[remarkGfm]}
-    rehypePlugins={[rehypePrism]}
-    components={markdownComponents}
-  >
-    {content}
-  </ReactMarkdown>
-));
+const AgentMarkdown = React.memo(({ content }: { content: string }) => {
+  const fenceNames = React.useMemo(() => extractFenceNames(content), [content]);
+  return (
+    <FenceNamesContext.Provider value={fenceNames}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypePrism]}
+        components={markdownComponents}
+      >
+        {content}
+      </ReactMarkdown>
+    </FenceNamesContext.Provider>
+  );
+});
 AgentMarkdown.displayName = 'AgentMarkdown';
 
 interface AgentMessageItemProps {

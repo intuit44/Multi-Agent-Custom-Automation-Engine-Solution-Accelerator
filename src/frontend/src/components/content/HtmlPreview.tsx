@@ -21,9 +21,20 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Button } from '@fluentui/react-components';
+import {
+  Button,
+  Menu,
+  MenuItem,
+  MenuList,
+  MenuPopover,
+  MenuTrigger,
+} from '@fluentui/react-components';
+import ReactMarkdown from 'react-markdown';
+import rehypePrism from 'rehype-prism';
 import { apiClient } from '../../api/apiClient';
 import {
+  ArrowDownload20Regular,
+  ChevronDown20Regular,
   Code20Regular,
   Dismiss20Regular,
   Eye20Regular,
@@ -300,68 +311,201 @@ export const HtmlPreview: React.FC<HtmlPreviewProps> = ({
   );
 };
 
-// ─── Right-panel preview: one destination for every HTML source ─────────────
-// The preview does NOT belong in the composer (a 600px iframe above ChatInput
-// swallows the input) nor inline in a bubble when a side slot exists. This
-// context routes any source — generated .html file, ```html code block — to
-// the SAME right-hand panel slot PlanPanelRight uses. Components fall back to
-// their inline preview when no provider is mounted, so they stay standalone.
+// ─── Artifact registry: every generated file, one panel ─────────────────────
+// A generated file (a named code fence in a message, a generated_file from the
+// SSE) is an ARTIFACT with identity = its filename. The registry keeps the
+// latest content per identity, so when the model re-emits the same file with a
+// correction, the SAME entry updates — the panel shows the living file. The
+// right-hand panel is the single viewer: HTML renders in the isolated-origin
+// iframe, code renders with prism, and a dropdown lists every artifact of the
+// conversation so twenty files never occupy the chat UI.
 
-interface PreviewDoc {
+export interface Artifact {
+  /** Identity — the filename. Re-emitting it UPDATES this entry. */
   id: string;
   title: string;
-  html: string;
+  lang: string;
+  /** Latest full content; empty until fetched for downloadUrl-only files. */
+  content: string;
+  downloadUrl?: string;
+  updatedAt: number;
 }
 
-interface HtmlPreviewContextValue {
-  active: PreviewDoc | null;
-  open: (doc: PreviewDoc) => void;
-  /** Live update (streaming): applied only while `id` is the active doc. */
-  update: (id: string, html: string) => void;
+interface ArtifactContextValue {
+  artifacts: Artifact[];
+  activeId: string | null;
+  upsert: (a: Omit<Artifact, 'updatedAt'>) => void;
+  open: (id: string) => void;
   close: () => void;
 }
 
-const HtmlPreviewContext = createContext<HtmlPreviewContextValue | null>(null);
+const HtmlPreviewContext = createContext<ArtifactContextValue | null>(null);
 
 export const useHtmlPreview = () => useContext(HtmlPreviewContext);
 
 export const HtmlPreviewProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [active, setActive] = useState<PreviewDoc | null>(null);
-  const open = useCallback((doc: PreviewDoc) => setActive(doc), []);
-  const close = useCallback(() => setActive(null), []);
-  const update = useCallback((id: string, html: string) => {
-    setActive((cur) => (cur && cur.id === id ? { ...cur, html } : cur));
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  const upsert = useCallback((a: Omit<Artifact, 'updatedAt'>) => {
+    setArtifacts((prev) => {
+      const i = prev.findIndex((x) => x.id === a.id);
+      if (i >= 0) {
+        const cur = prev[i];
+        const nextDownload = a.downloadUrl ?? cur.downloadUrl;
+        // Empty content never CLOBBERS fetched content: downloadUrl feeders
+        // re-register with content:'' on every list change.
+        const nextContent = a.content !== '' ? a.content : cur.content;
+        // Bail out on no-op updates: chips re-register on every render tick
+        // during streaming and an unconditional new array would render-loop.
+        if (cur.content === nextContent && cur.downloadUrl === nextDownload) {
+          return prev;
+        }
+        const next = prev.slice();
+        next[i] = {
+          ...cur,
+          ...a,
+          content: nextContent,
+          downloadUrl: nextDownload,
+          updatedAt: Date.now(),
+        };
+        return next;
+      }
+      return [...prev, { ...a, updatedAt: Date.now() }];
+    });
   }, []);
+
+  const open = useCallback((id: string) => setActiveId(id), []);
+  const close = useCallback(() => setActiveId(null), []);
+
+  const value = React.useMemo(
+    () => ({ artifacts, activeId, upsert, open, close }),
+    [artifacts, activeId, upsert, open, close]
+  );
   return (
-    <HtmlPreviewContext.Provider value={{ active, open, update, close }}>
+    <HtmlPreviewContext.Provider value={value}>
       {children}
     </HtmlPreviewContext.Provider>
   );
 };
 
-/** The right-slot panel. Renders `fallback` (e.g. PlanPanelRight) when no
- *  preview is open, so the slot keeps its normal occupant. */
+const IMAGE_EXT = /\.(png|jpe?g|webp|gif|svg)$/i;
+
+/** Prism-highlighted code body for non-HTML artifacts. */
+const ArtifactCodeView: React.FC<{ lang: string; content: string }> = ({
+  lang,
+  content,
+}) => {
+  // Fence length must exceed any backtick run inside the content.
+  const fence = React.useMemo(() => {
+    const runs: string[] = content.match(/`+/g) || [];
+    const longest = runs.reduce((m, s) => Math.max(m, s.length), 0);
+    return '`'.repeat(Math.max(4, longest + 1));
+  }, [content]);
+  return (
+    <ReactMarkdown
+      rehypePlugins={[rehypePrism]}
+      components={{
+        pre: ({ node: _n, ...props }: any) => (
+          <pre
+            {...props}
+            style={{
+              maxWidth: '100%',
+              boxSizing: 'border-box',
+              overflowX: 'auto',
+              borderRadius: '8px',
+              margin: 0,
+            }}
+          />
+        ),
+      }}
+    >
+      {`${fence}${lang}\n${content}\n${fence}`}
+    </ReactMarkdown>
+  );
+};
+
+/** The right-slot artifact panel. Renders `fallback` (e.g. PlanPanelRight)
+ *  when nothing is open, so the slot keeps its normal occupant. */
 export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
   fallback = null,
 }) => {
   const ctx = useHtmlPreview();
-  // Debounce srcDoc updates: every srcDoc change reloads the iframe document,
-  // so streaming token-by-token would thrash it. 300ms keeps it live.
-  const [html, setHtml] = useState('');
-  const activeId = ctx?.active?.id;
-  const activeHtml = ctx?.active?.html ?? '';
-  useEffect(() => {
-    setHtml(activeHtml); // new doc: render immediately
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId]);
-  useEffect(() => {
-    const t = setTimeout(() => setHtml(activeHtml), 300);
-    return () => clearTimeout(t);
-  }, [activeHtml]);
+  const active = ctx?.artifacts.find((a) => a.id === ctx.activeId) || null;
 
-  if (!ctx?.active) return <>{fallback}</>;
+  // Debounce content: streaming updates the active artifact per tick; the
+  // HTML iframe reloads per srcDoc change, so give it 300ms of quiet.
+  const [content, setContent] = useState('');
+  const activeContent = active?.content ?? '';
+  const activeKey = active?.id ?? '';
+  useEffect(() => {
+    setContent(activeContent); // artifact switch: render immediately
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeKey]);
+  useEffect(() => {
+    const t = setTimeout(() => setContent(activeContent), 300);
+    return () => clearTimeout(t);
+  }, [activeContent]);
+
+  // downloadUrl-only artifact opened without content yet: fetch it once.
+  const upsert = ctx?.upsert;
+  useEffect(() => {
+    if (!active || !upsert) return;
+    if (active.content || !active.downloadUrl) return;
+    if (IMAGE_EXT.test(active.title)) return; // images render via <img>
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(active.downloadUrl as string);
+        const text = await res.text();
+        if (!cancelled) {
+          upsert({
+            id: active.id,
+            title: active.title,
+            lang: active.lang,
+            content: text,
+            downloadUrl: active.downloadUrl,
+          });
+        }
+      } catch {
+        /* stays download-only */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [active, upsert]);
+
+  if (!ctx || !active) return <>{fallback}</>;
+
+  const isHtml =
+    active.lang === 'html' || /\.html?$/i.test(active.title);
+  const isImage = IMAGE_EXT.test(active.title);
+
+  const handleDownload = () => {
+    const a = document.createElement('a');
+    let objectUrl: string | null = null;
+
+    if (active.downloadUrl) {
+      a.href = active.downloadUrl;
+    } else {
+      objectUrl = URL.createObjectURL(
+        new Blob([active.content], { type: 'text/plain' })
+      );
+      a.href = objectUrl;
+    }
+
+    a.download = active.title;
+    a.click();
+
+    if (objectUrl) {
+      const urlToRevoke = objectUrl;
+      setTimeout(() => URL.revokeObjectURL(urlToRevoke), 0);
+    }
+  };
+
   return (
     <div
       style={{
@@ -376,22 +520,53 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
         style={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '8px 12px',
+          gap: '4px',
+          padding: '6px 8px',
           borderBottom: '1px solid var(--colorNeutralStroke1)',
         }}
       >
-        <span
-          style={{
-            fontSize: '13px',
-            fontWeight: 600,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {ctx.active.title}
-        </span>
+        {/* Selector: every artifact of the conversation in ONE dropdown */}
+        <Menu>
+          <MenuTrigger disableButtonEnhancement>
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<ChevronDown20Regular />}
+              style={{
+                flex: 1,
+                justifyContent: 'flex-start',
+                overflow: 'hidden',
+              }}
+            >
+              <span
+                style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontWeight: 600,
+                }}
+              >
+                {active.title}
+              </span>
+            </Button>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              {ctx.artifacts.map((a) => (
+                <MenuItem key={a.id} onClick={() => ctx.open(a.id)}>
+                  {a.title}
+                </MenuItem>
+              ))}
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={<ArrowDownload20Regular />}
+          aria-label={`Download ${active.title}`}
+          onClick={handleDownload}
+        />
         <Button
           appearance="subtle"
           size="small"
@@ -401,72 +576,117 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
         />
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '8px' }}>
-        <HtmlPreview html={html} title={ctx.active.title} />
+        {isImage && active.downloadUrl ? (
+          <img
+            src={active.downloadUrl}
+            alt={active.title}
+            style={{ maxWidth: '100%' }}
+          />
+        ) : isHtml ? (
+          <HtmlPreview html={content} title={active.title} />
+        ) : content ? (
+          <ArtifactCodeView lang={active.lang} content={content} />
+        ) : (
+          <div
+            style={{
+              padding: '16px',
+              fontSize: '12px',
+              color: 'var(--colorNeutralForeground3)',
+            }}
+          >
+            {active.downloadUrl ? 'Loading…' : 'Empty file.'}
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
-/** Toggle between raw-code view and live HTML preview. */
+/** File chip for generated code blocks.
+ *
+ * A NAMED fence (the model writes "**app.py**" above the block) or any
+ * ```html fence is a FILE, not prose: it registers in the artifact panel and
+ * the message shows a compact chip instead of the full dump. Re-emitting the
+ * same filename UPDATES the same artifact — the correction flow. Unnamed
+ * non-html fences stay inline (conversational snippets), and without a
+ * provider everything falls back to the old inline behavior. */
 interface HtmlCodeToggleProps {
   code: string;
-  /** The already-rendered <pre><code> element to show in code mode. */
+  /** The already-rendered <pre><code> element for inline fallbacks. */
   codeBlock: React.ReactNode;
+  filename?: string;
+  lang?: string;
 }
 
 export const HtmlCodeToggle: React.FC<HtmlCodeToggleProps> = ({
   code,
   codeBlock,
+  filename,
+  lang = 'html',
 }) => {
-  const [showPreview, setShowPreview] = useState(false);
+  const [showInline, setShowInline] = useState(false);
   const ctx = useHtmlPreview();
-  const id = useId();
-  const isActiveInPanel = ctx?.active?.id === id;
+  const reactId = useId();
+  const isFile = Boolean(filename) || lang === 'html';
+  const id = filename || `snippet-${reactId}.${lang || 'txt'}`;
+  const title =
+    filename || (lang === 'html' ? 'snippet.html' : `snippet.${lang}`);
+  const isActive = ctx?.activeId === id;
+  const upsert = ctx?.upsert;
 
-  // Streaming: while this block is the panel's active doc, push new tokens to
-  // it (the panel debounces the actual iframe reload).
+  // Registration + correction-by-identity: every content change lands on the
+  // SAME entry (the provider bails out on no-op updates).
   useEffect(() => {
-    if (isActiveInPanel) ctx?.update(id, code);
-  }, [code, isActiveInPanel, ctx, id]);
-
-  const onPreview = () => {
-    if (ctx) {
-      ctx.open({ id, title: 'HTML', html: code });
-    } else {
-      setShowPreview(true);
+    if (upsert && isFile) {
+      upsert({ id, title, lang: lang || '', content: code });
     }
-  };
+  }, [upsert, isFile, id, title, lang, code]);
+
+  if (!ctx || !isFile) {
+    // Standalone / unnamed snippet: previous inline behavior.
+    if (lang !== 'html') return <>{codeBlock}</>;
+    return (
+      <div>
+        <div style={{ display: 'flex', gap: '4px', marginBottom: '4px' }}>
+          <Button
+            appearance={showInline ? 'primary' : 'subtle'}
+            size="small"
+            icon={<Eye20Regular />}
+            onClick={() => setShowInline((v) => !v)}
+          >
+            Preview
+          </Button>
+        </div>
+        {showInline ? <HtmlPreview html={code} /> : codeBlock}
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <div
-        style={{
-          display: 'flex',
-          gap: '4px',
-          marginBottom: '4px',
-        }}
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '8px',
+        padding: '6px 10px',
+        margin: '2px 0',
+        border: '1px solid var(--colorNeutralStroke1)',
+        borderRadius: '8px',
+        background: 'var(--colorNeutralBackground2)',
+        fontSize: '13px',
+      }}
+    >
+      <Code20Regular />
+      <span style={{ fontWeight: 600 }}>{title}</span>
+      <span style={{ color: 'var(--colorNeutralForeground3)' }}>{lang}</span>
+      <Button
+        appearance={isActive ? 'primary' : 'secondary'}
+        size="small"
+        icon={<Eye20Regular />}
+        onClick={() => (isActive ? ctx.close() : ctx.open(id))}
       >
-        <Button
-          appearance={showPreview || isActiveInPanel ? 'subtle' : 'primary'}
-          size="small"
-          icon={<Code20Regular />}
-          onClick={() => {
-            setShowPreview(false);
-            if (isActiveInPanel) ctx?.close();
-          }}
-        >
-          Code
-        </Button>
-        <Button
-          appearance={showPreview || isActiveInPanel ? 'primary' : 'subtle'}
-          size="small"
-          icon={<Eye20Regular />}
-          onClick={onPreview}
-        >
-          Preview
-        </Button>
-      </div>
-      {showPreview && !ctx ? <HtmlPreview html={code} /> : codeBlock}
-    </div>
+        {isActive ? 'Abierto' : 'Abrir'}
+      </Button>
+    </span>
   );
 };
