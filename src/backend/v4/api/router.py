@@ -20,6 +20,7 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from opentelemetry import trace
+from pydantic import BaseModel
 
 import v4.models.messages as messages
 from auth.auth_utils import get_authenticated_user_details
@@ -928,6 +929,39 @@ def _file_response(data: bytes, filename: str):
             "Cache-Control": "private, max-age=86400, immutable",
         },
     )
+
+
+class HtmlPreviewRequest(BaseModel):
+    """Model-generated HTML to publish as an isolated-origin preview."""
+
+    html: str
+    title: str = ""
+
+
+@app_v4.post("/chat/preview")
+async def create_html_preview(request: Request, body: HtmlPreviewRequest):
+    """Publish model-generated HTML on the Blob origin and return its SAS URL.
+
+    The preview iframe needs a REAL origin (location/history/hash routing and
+    storage all dead in an opaque srcdoc origin). The storage account is that
+    origin: distinct from frontend and backend in dev and prod, no cookies or
+    ambient credentials — ``allow-same-origin`` there never means MACAE.
+    """
+    user_id, _tenant_id = _extract_auth(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Missing user identity")
+    if len(body.html) > 2_000_000:
+        raise HTTPException(status_code=413, detail="Preview HTML too large")
+
+    from v4.common.services.generated_file_store import GeneratedFileStore
+
+    blob_name = f"preview_{uuid.uuid4().hex}.html"
+    url = await GeneratedFileStore.get_instance().save_preview_html(
+        blob_name, body.html
+    )
+    if not url:
+        raise HTTPException(status_code=502, detail="Preview publish failed")
+    return {"url": url}
 
 
 @app_v4.get("/chat/download-file/{file_id}")

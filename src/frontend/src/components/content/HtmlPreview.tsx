@@ -22,6 +22,7 @@ import React, {
   useState,
 } from 'react';
 import { Button } from '@fluentui/react-components';
+import { apiClient } from '../../api/apiClient';
 import {
   Code20Regular,
   Dismiss20Regular,
@@ -31,6 +32,74 @@ import {
 const MIN_HEIGHT = 120;
 const MAX_HEIGHT = 600;
 const EXPAND_HEIGHT = 1200;
+
+/** Storage shim injected as the FIRST script in every sandboxed document.
+ *
+ * Opaque-origin iframes (sandbox="allow-scripts" without allow-same-origin)
+ * throw SecurityError on ANY sessionStorage/localStorage access.  That aborts
+ * the user's script at line 1, before ANY event-listeners are registered —
+ * SPA navigation, form persistence, everything is dead even though HTML/CSS
+ * render fine.
+ *
+ * This shim runs first, replaces both storage globals with Map-backed
+ * in-memory equivalents ONLY when the real APIs throw.  The user's script
+ * then runs without errors, click-listeners register and SPA navigation
+ * works.  Values persist for the iframe's lifetime (reset on reload), which
+ * is correct for a sandboxed preview.
+ */
+const STORAGE_SHIM = `<script>
+(function(){
+  function MemStorage(){
+    var s=Object.create(null);
+    return {
+      getItem:function(k){return Object.prototype.hasOwnProperty.call(s,k)?s[k]:null;},
+      setItem:function(k,v){s[String(k)]=String(v);},
+      removeItem:function(k){delete s[k];},
+      clear:function(){s=Object.create(null);},
+      key:function(i){return Object.keys(s)[i]||null;},
+      get length(){return Object.keys(s).length;}
+    };
+  }
+  ['sessionStorage','localStorage'].forEach(function(name){
+    try{ window[name].getItem('__probe__'); }
+    catch(e){
+      try{
+        Object.defineProperty(window,name,{
+          value:MemStorage(),configurable:true,writable:true
+        });
+      }catch(_){}
+    }
+  });
+
+  // Fragment-navigation shim. In an opaque origin, clicking <a href="#/x">,
+  // location.hash= and location.replace('#/x') are ALL silently ignored
+  // (measured 2026-08-25) — a hash-routed SPA renders once and never
+  // navigates. history.pushState IS permitted and really updates
+  // location.hash, so: intercept fragment-link clicks, pushState, and fire a
+  // synthetic hashchange for the app's router. Direct location.hash
+  // assignments remain dead — location is unforgeable; that part cannot be
+  // shimmed, only <a href="#..."> navigation is covered.
+  document.addEventListener('click', function(ev){
+    if(ev.defaultPrevented) return;
+    if(ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    var a = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
+    if(!a) return;
+    var href = a.getAttribute('href') || '';
+    if(href.charAt(0) !== '#') return;
+    ev.preventDefault();
+    var oldURL = location.href;
+    try{ history.pushState(null, '', href); }catch(e){ return; }
+    try{
+      window.dispatchEvent(new HashChangeEvent('hashchange',
+        {oldURL: oldURL, newURL: location.href}));
+    }catch(e){
+      var legacy = document.createEvent('Event');
+      legacy.initEvent('hashchange', true, false);
+      window.dispatchEvent(legacy);
+    }
+  });
+})();
+</script>`;
 
 /** Wraps raw HTML so the iframe can postMessage its scroll height back. */
 function wrapWithHeightReporter(html: string): string {
@@ -52,11 +121,22 @@ function wrapWithHeightReporter(html: string): string {
   setTimeout(report,600);
 })();
 </script>`;
-  // Insert before </body> if present, otherwise append
-  if (/<\/body>/i.test(html)) {
-    return html.replace(/<\/body>/i, `${reporter}</body>`);
+
+  let result = html;
+
+  // Storage shim must be the FIRST script — inject right after <head> opening
+  // tag so it runs before any inline <script> in the user's HTML.
+  if (/<head[^>]*>/i.test(result)) {
+    result = result.replace(/(<head[^>]*>)/i, `$1${STORAGE_SHIM}`);
+  } else {
+    result = STORAGE_SHIM + result;
   }
-  return html + reporter;
+
+  // Height reporter before </body>, or appended.
+  if (/<\/body>/i.test(result)) {
+    return result.replace(/<\/body>/i, `${reporter}</body>`);
+  }
+  return result + reporter;
 }
 
 interface HtmlPreviewProps {
@@ -76,17 +156,54 @@ export const HtmlPreview: React.FC<HtmlPreviewProps> = ({
 
   const srcDoc = wrapWithHeightReporter(html);
   // Chromium (verified in THIS app, headed and headless, 2026-08-24): updating
-  // `srcdoc` on a live sandboxed iframe commits the new document (DOM readable,
-  // reporter runs) but the frame NEVER repaints — stays white. A fresh iframe
-  // whose srcdoc is set at creation paints every time. Keying the iframe by
-  // document forces that remount. Isolated pages don't reproduce it; this app
-  // tree does — do not remove without re-running the paint probe.
+  // the document on a live sandboxed iframe commits the new document (DOM
+  // readable, reporter runs) but the frame NEVER repaints — stays white. A
+  // fresh iframe whose document is set at creation paints every time. Keying
+  // the iframe by document forces that remount. Isolated pages don't reproduce
+  // it; this app tree does — do not remove without re-running the paint probe.
   const docKey = React.useMemo(() => {
     let h = 5381;
     for (let i = 0; i < srcDoc.length; i++) {
       h = ((h << 5) + h + srcDoc.charCodeAt(i)) | 0;
     }
     return `${h.toString(36)}:${srcDoc.length}`;
+  }, [srcDoc]);
+
+  // The preview document needs a REAL isolated origin — the Blob storage
+  // account (≠ frontend ≠ backend, dev and prod; no cookies, no credentials).
+  // POST /chat/preview publishes the HTML there and returns a short-lived SAS
+  // URL; on that origin the iframe carries allow-same-origin SAFELY ("same
+  // origin" = the storage origin, never MACAE) so location/history/hash
+  // routing/storage all behave like a normal page. Anything less is shim
+  // territory: an opaque origin silently ignores location.hash entirely.
+  // Fallback (backend unreachable): an object URL WITHOUT allow-same-origin —
+  // an object URL is minted on the APP origin, granting same-origin there
+  // would hand the preview the app itself.
+  const [doc, setDoc] = useState<{ url: string; isolated: boolean } | null>(
+    null
+  );
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    (async () => {
+      try {
+        const r: { url?: string } = await apiClient.post('/v4/chat/preview', {
+          html: srcDoc,
+        });
+        if (!cancelled && r?.url) {
+          setDoc({ url: r.url, isolated: true });
+          return;
+        }
+      } catch {
+        /* fall through to the sandboxed object-URL fallback */
+      }
+      objectUrl = URL.createObjectURL(new Blob([srcDoc], { type: 'text/html' }));
+      if (!cancelled) setDoc({ url: objectUrl, isolated: false });
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
   }, [srcDoc]);
 
   // Listen for height messages from this specific iframe
@@ -128,20 +245,38 @@ export const HtmlPreview: React.FC<HtmlPreviewProps> = ({
         background: '#fff',
       }}
     >
-      <iframe
-        key={docKey}
-        ref={iframeRef}
-        srcDoc={srcDoc}
-        sandbox="allow-scripts"
-        title={title}
-        style={{
-          display: 'block',
-          width: '100%',
-          height: `${cappedHeight}px`,
-          border: 0,
-          transition: 'height 0.2s ease',
-        }}
-      />
+      {doc ? (
+        <iframe
+          key={docKey}
+          ref={iframeRef}
+          src={doc.url}
+          sandbox={
+            doc.isolated
+              ? 'allow-scripts allow-same-origin'
+              : 'allow-scripts'
+          }
+          title={title}
+          style={{
+            display: 'block',
+            width: '100%',
+            height: `${cappedHeight}px`,
+            border: 0,
+            transition: 'height 0.2s ease',
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            height: `${MIN_HEIGHT}px`,
+            display: 'grid',
+            placeItems: 'center',
+            color: 'var(--colorNeutralForeground3)',
+            fontSize: '12px',
+          }}
+        >
+          Publishing preview…
+        </div>
+      )}
       {showExpand && (
         <div
           style={{
