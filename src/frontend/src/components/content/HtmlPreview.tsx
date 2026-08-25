@@ -486,15 +486,23 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
 
   const handleDownload = () => {
     const a = document.createElement('a');
+    let objectUrl: string | null = null;
+
     if (active.downloadUrl) {
       a.href = active.downloadUrl;
     } else {
-      a.href = URL.createObjectURL(
+      objectUrl = URL.createObjectURL(
         new Blob([active.content], { type: 'text/plain' })
       );
+      a.href = objectUrl;
     }
+
     a.download = active.title;
     a.click();
+
+    if (objectUrl) {
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+    }
   };
 
   return (
