@@ -45,14 +45,18 @@ logger = logging.getLogger(__name__)
 # package location explicitly so every environment loads the same code.
 credential_resolver = None
 try:
-    import sys
+    import importlib.util
 
-    _mcp_root = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
-    if _mcp_root not in sys.path:
-        sys.path.insert(0, _mcp_root)
-    from credential_resolver import credential_resolver
-except ImportError as e:
-    logger.warning(f"credential_resolver not available: {e}")
+    _resolver_path = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "credential_resolver.py")
+    )
+    _spec = importlib.util.spec_from_file_location("credential_resolver", _resolver_path)
+    if _spec and _spec.loader:
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)  # type: ignore[union-attr]
+        credential_resolver = _mod.credential_resolver
+except Exception as e:
+    logger.debug("credential_resolver not available: %s", e)
 
 logger = logging.getLogger(__name__)
 
