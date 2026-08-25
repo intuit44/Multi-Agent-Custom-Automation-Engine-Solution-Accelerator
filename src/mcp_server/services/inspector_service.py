@@ -58,8 +58,6 @@ try:
 except Exception as e:
     logger.debug("credential_resolver not available: %s", e)
 
-logger = logging.getLogger(__name__)
-
 
 def _redact(headers: Dict[str, str]) -> Dict[str, str]:
     """Redact sensitive headers for logging."""
