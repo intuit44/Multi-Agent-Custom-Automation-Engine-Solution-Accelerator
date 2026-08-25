@@ -82,6 +82,54 @@ class GeneratedFileStore:
             logger.error("Persist of generated file %s FAILED: %s", file_id, ex)
             return False
 
+    async def save_preview_html(self, blob_name: str, html: str) -> Optional[str]:
+        """Upload preview HTML and return a short-lived read-only SAS URL.
+
+        The Blob endpoint is a REAL isolated origin (``*.blob.core.windows.net``
+        ≠ frontend ≠ backend, in prod and in dev): an iframe pointed here can
+        carry ``allow-same-origin`` safely — "same origin" means THIS storage
+        origin, never the app — so location/history/hash routing/storage all
+        behave like a normal page. No cookies or credentials exist on this
+        origin; the SAS grants read on this one blob only.
+        """
+        from datetime import datetime, timedelta, timezone
+        from urllib.parse import urlparse
+
+        from azure.storage.blob import (
+            BlobSasPermissions,
+            ContentSettings,
+            generate_blob_sas,
+        )
+
+        try:
+            cc = self._svc.get_container_client(_CONTAINER)
+            await cc.upload_blob(
+                name=blob_name,
+                data=html.encode("utf-8"),
+                overwrite=True,
+                content_settings=ContentSettings(
+                    content_type="text/html; charset=utf-8"
+                ),
+            )
+            now = datetime.now(timezone.utc)
+            delegation_key = await self._svc.get_user_delegation_key(
+                key_start_time=now - timedelta(minutes=5),
+                key_expiry_time=now + timedelta(hours=1),
+            )
+            account_name = urlparse(self._svc.url).netloc.split(".")[0]
+            sas = generate_blob_sas(
+                account_name=account_name,
+                container_name=_CONTAINER,
+                blob_name=blob_name,
+                user_delegation_key=delegation_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=now + timedelta(hours=1),
+            )
+            return f"{self._svc.url.rstrip('/')}/{_CONTAINER}/{blob_name}?{sas}"
+        except Exception as ex:
+            logger.error("Preview upload/SAS for %s FAILED: %s", blob_name, ex)
+            return None
+
     async def load(self, file_id: str) -> Optional[Tuple[bytes, str]]:
         """Return (bytes, filename), or None when the blob does not exist
         (file predates the store) so the caller uses the Foundry read path."""
