@@ -403,7 +403,7 @@ function extractFenceNames(md: string): Map<number, string> {
   const names = new Map<number, string>();
   const lines = md.split('\n');
   for (let i = 0; i < lines.length; i++) {
-    if (!/^\s*(```|~~~)\w*/.test(lines[i])) continue;
+    if (!/^\s*(```|~~~)\S*/.test(lines[i])) continue;
     // Look upward past blank lines for a short "title" line with a filename.
     for (let j = i - 1, seen = 0; j >= 0 && seen < 3; j--) {
       const line = lines[j].trim();
