@@ -201,6 +201,7 @@ For development, set `MCP_ENABLE_AUTH=false` to disable authentication.
    ```python
    from core.factory import MCPToolBase, Domain
 
+
    class MyService(MCPToolBase):
        def __init__(self):
            super().__init__(Domain.MY_DOMAIN)
