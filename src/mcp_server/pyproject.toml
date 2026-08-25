@@ -48,6 +48,8 @@ dev = [
 python_version = "3.11"
 mypy_path = "."
 explicit_package_bases = true
+check_untyped_defs = true
+
 
 [project.urls]
 Homepage = "https://github.com/microsoft/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator"

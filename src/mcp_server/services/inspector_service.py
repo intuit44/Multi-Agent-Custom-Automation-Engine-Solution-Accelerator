@@ -36,23 +36,23 @@ from utils.formatters import format_success_response, format_error_response
 
 logger = logging.getLogger(__name__)
 
-# credential_resolver is optional — only used for Key Vault credential resolution
-# in connect_stdio_server. If backend dependencies aren't available, the feature
-# gracefully degrades to env-var-only resolution.
+# credential_resolver: ALWAYS this package's own module (the mcp_server root),
+# never the backend's file of the same name. The backend module is a different
+# interface (no resolve_valid_token) with backend-only imports; binding to it
+# by path order produced three behaviors per environment: AttributeError-shaped
+# 401s where it imported, silent None where it didn't, and "works" only in the
+# container where the backend path doesn't exist. Import the local twin by its
+# package location explicitly so every environment loads the same code.
 credential_resolver = None
 try:
     import sys
 
-    _backend_path = os.path.normpath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "backend")
-    )
-    if _backend_path not in sys.path:
-        sys.path.insert(0, _backend_path)
+    _mcp_root = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+    if _mcp_root not in sys.path:
+        sys.path.insert(0, _mcp_root)
     from credential_resolver import credential_resolver
 except ImportError as e:
-    logger.debug(
-        f"credential_resolver not available (backend dependencies missing): {e}"
-    )
+    logger.warning(f"credential_resolver not available: {e}")
 
 logger = logging.getLogger(__name__)
 
@@ -92,10 +92,50 @@ class ExternalMCPSession:
         self._initialized: bool = False
         self.server_info: Dict[str, Any] = {}
         self.extra_headers: Dict[str, str] = {}
+        # Per-call credential SOURCE — the resolver's design contract
+        # (managed_identity mints fresh per call, oauth_refresh rotates near
+        # expiry, static_secret reads KV). When set, every outbound request
+        # resolves Authorization at call time instead of freezing the token
+        # minted at connect time: a frozen header outlives its token (~1h)
+        # and every later call 401s while the session still looks healthy.
+        # None = direct/manual connection: whatever token the caller supplied
+        # stays verbatim, unchanged behavior.
+        self.credential_source: Optional[str] = None
+        self.audience: Optional[str] = None
+        self.secret_ref: str = ""
 
         if "/toolboxes/" in self.server_url:
             self.extra_headers["Foundry-Features"] = "Toolboxes=V1Preview"
         self.connected_at: float = time.time()
+
+    async def _refresh_auth(self) -> None:
+        """Resolve a valid Authorization header for THIS call.
+
+        No-op unless a credential_source is attached (registry-managed
+        servers). Resolution failures keep the previous header rather than
+        blocking the call — the server's 401 then reports the truth.
+        """
+        if not (self.credential_source and credential_resolver):
+            return
+        try:
+            token = await credential_resolver.resolve_valid_token(
+                credential_source=self.credential_source,
+                audience=self.audience,
+                secret_ref=self.secret_ref,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[%s] per-call token resolution failed: %s", self.server_name, exc
+            )
+            return
+        if not token:
+            return
+        # Same scheme rule as the connect paths: a secret that already carries
+        # its scheme ("App <key>") is forwarded verbatim.
+        _known_schemes = ("bearer ", "app ", "basic ", "token ")
+        self.extra_headers["Authorization"] = (
+            token if token.lower().startswith(_known_schemes) else f"Bearer {token}"
+        )
 
     async def initialize(self) -> Dict[str, Any]:
         """Perform MCP handshake with the external server."""
@@ -164,6 +204,8 @@ class ExternalMCPSession:
         """Call JSON-RPC 2.0 method on the external server."""
         if not skip_init_check and not self._initialized:
             await self.initialize()
+
+        await self._refresh_auth()
 
         request_id = str(uuid.uuid4())
         payload = {
@@ -1273,6 +1315,10 @@ class InspectorService(MCPToolBase):
                 bearer = None
                 if _cred_source == "managed_identity" and credential_resolver:
                     # Platform-minted token WINS over anything the caller passed.
+                    # Attach the SOURCE too: the session re-resolves per call,
+                    # so the minted token's ~1h lifetime never strands it.
+                    session.credential_source = "managed_identity"
+                    session.audience = _audience
                     try:
                         bearer = await credential_resolver.resolve_valid_token(
                             credential_source="managed_identity",
@@ -1355,6 +1401,12 @@ class InspectorService(MCPToolBase):
                                     secret_ref=secret_ref,
                                 )
                                 if bearer:
+                                    # oauth_refresh rotates near expiry; give
+                                    # the session the source so later calls
+                                    # keep resolving instead of freezing this
+                                    # token.
+                                    session.credential_source = _cred_source
+                                    session.secret_ref = secret_ref
                                     logger.info(
                                         f"[connect_mcp_server] Resolved token for "
                                         f"'{server_name}' from Key Vault "
@@ -1936,6 +1988,9 @@ class InspectorService(MCPToolBase):
                 # auth_type stays = what the wire sees (a Bearer); HOW we get it lives
                 # in the resolver.
                 extra_headers: Dict[str, str] = {}
+                _cred_source: Optional[str] = None
+                _audience: Optional[str] = None
+                _secret_ref: str = ""
                 if auth_type != "none" and status == "active" and credential_resolver:
                     _cred_source = server.get("credential_source") or "static_secret"
                     _audience = (
@@ -1980,6 +2035,14 @@ class InspectorService(MCPToolBase):
                 if _reg_key in sessions:
                     existing = sessions[_reg_key]
                     if existing._initialized:
+                        # Reused sessions adopt the credential SOURCE so their
+                        # calls resolve tokens per call from now on — a session
+                        # created before this code carries only the frozen
+                        # (long-expired) header.
+                        if _cred_source:
+                            existing.credential_source = _cred_source
+                            existing.audience = _audience
+                            existing.secret_ref = _secret_ref
                         return format_success_response(
                             action="Already Connected (Registry)",
                             details={
@@ -2002,6 +2065,10 @@ class InspectorService(MCPToolBase):
                 session = ExternalMCPSession(endpoint, server_name)
                 if extra_headers:
                     session.extra_headers = extra_headers
+                if _cred_source:
+                    session.credential_source = _cred_source
+                    session.audience = _audience
+                    session.secret_ref = _secret_ref
 
                 server_info = await session.initialize()
                 sessions[_reg_key] = session
