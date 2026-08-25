@@ -22,42 +22,46 @@ import asyncio
 import json
 import logging
 import os
-import uuid
 import time
-from typing import Any, Dict, List, Optional, Tuple
+import uuid
+from typing import Any
 from urllib.parse import quote
 
 import httpx
-from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.session import ClientSession
+from mcp.client.stdio import StdioServerParameters, stdio_client
 
-from core.factory import MCPToolBase, Domain
-from utils.formatters import format_success_response, format_error_response
+from core.factory import Domain, MCPToolBase
+from utils.formatters import format_error_response, format_success_response
 
 logger = logging.getLogger(__name__)
 
-# credential_resolver is optional — only used for Key Vault credential resolution
-# in connect_stdio_server. If backend dependencies aren't available, the feature
-# gracefully degrades to env-var-only resolution.
+# credential_resolver: ALWAYS this package's own module (the mcp_server root),
+# never the backend's file of the same name. The backend module is a different
+# interface (no resolve_valid_token) with backend-only imports; binding to it
+# by path order produced three behaviors per environment: AttributeError-shaped
+# 401s where it imported, silent None where it didn't, and "works" only in the
+# container where the backend path doesn't exist. Import the local twin by its
+# package location explicitly so every environment loads the same code.
 credential_resolver = None
 try:
-    import sys
+    import importlib.util
 
-    _backend_path = os.path.normpath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "backend")
+    _resolver_path = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "credential_resolver.py")
     )
-    if _backend_path not in sys.path:
-        sys.path.insert(0, _backend_path)
-    from credential_resolver import credential_resolver
-except ImportError as e:
-    logger.debug(
-        f"credential_resolver not available (backend dependencies missing): {e}"
+    _spec = importlib.util.spec_from_file_location(
+        "credential_resolver", _resolver_path
     )
+    if _spec and _spec.loader:
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)  # type: ignore[union-attr]
+        credential_resolver = _mod.credential_resolver
+except Exception as e:
+    logger.debug("credential_resolver not available: %s", e)
 
-logger = logging.getLogger(__name__)
 
-
-def _redact(headers: Dict[str, str]) -> Dict[str, str]:
+def _redact(headers: dict[str, str]) -> dict[str, str]:
     """Redact sensitive headers for logging."""
     _SENSITIVE = {
         "authorization",
@@ -88,16 +92,56 @@ class ExternalMCPSession:
         self.server_url = server_url.rstrip("/")
         self.server_name = server_name
         self.client = httpx.AsyncClient(timeout=30.0)
-        self.session_id: Optional[str] = None
+        self.session_id: str | None = None
         self._initialized: bool = False
-        self.server_info: Dict[str, Any] = {}
-        self.extra_headers: Dict[str, str] = {}
+        self.server_info: dict[str, Any] = {}
+        self.extra_headers: dict[str, str] = {}
+        # Per-call credential SOURCE — the resolver's design contract
+        # (managed_identity mints fresh per call, oauth_refresh rotates near
+        # expiry, static_secret reads KV). When set, every outbound request
+        # resolves Authorization at call time instead of freezing the token
+        # minted at connect time: a frozen header outlives its token (~1h)
+        # and every later call 401s while the session still looks healthy.
+        # None = direct/manual connection: whatever token the caller supplied
+        # stays verbatim, unchanged behavior.
+        self.credential_source: str | None = None
+        self.audience: str | None = None
+        self.secret_ref: str = ""
 
         if "/toolboxes/" in self.server_url:
             self.extra_headers["Foundry-Features"] = "Toolboxes=V1Preview"
         self.connected_at: float = time.time()
 
-    async def initialize(self) -> Dict[str, Any]:
+    async def _refresh_auth(self) -> None:
+        """Resolve a valid Authorization header for THIS call.
+
+        No-op unless a credential_source is attached (registry-managed
+        servers). Resolution failures keep the previous header rather than
+        blocking the call — the server's 401 then reports the truth.
+        """
+        if not (self.credential_source and credential_resolver):
+            return
+        try:
+            token = await credential_resolver.resolve_valid_token(
+                credential_source=self.credential_source,
+                audience=self.audience,
+                secret_ref=self.secret_ref,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[%s] per-call token resolution failed: %s", self.server_name, exc
+            )
+            return
+        if not token:
+            return
+        # Same scheme rule as the connect paths: a secret that already carries
+        # its scheme ("App <key>") is forwarded verbatim.
+        _known_schemes = ("bearer ", "app ", "basic ", "token ")
+        self.extra_headers["Authorization"] = (
+            token if token.lower().startswith(_known_schemes) else f"Bearer {token}"
+        )
+
+    async def initialize(self) -> dict[str, Any]:
         """Perform MCP handshake with the external server."""
         try:
             # Step 1: initialize
@@ -132,7 +176,7 @@ class ExternalMCPSession:
             raise
 
     async def _send_notification(
-        self, method: str, params: Optional[Dict[str, Any]] = None
+        self, method: str, params: dict[str, Any] | None = None
     ) -> None:
         """Send JSON-RPC 2.0 notification (no id, fire-and-forget)."""
         payload = {"jsonrpc": "2.0", "method": method, "params": params or {}}
@@ -158,12 +202,14 @@ class ExternalMCPSession:
     async def _call_jsonrpc(
         self,
         method: str,
-        params: Optional[Dict[str, Any]] = None,
+        params: dict[str, Any] | None = None,
         skip_init_check: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Call JSON-RPC 2.0 method on the external server."""
         if not skip_init_check and not self._initialized:
             await self.initialize()
+
+        await self._refresh_auth()
 
         request_id = str(uuid.uuid4())
         payload = {
@@ -225,10 +271,10 @@ class ExternalMCPSession:
             logger.error(f"Error calling {method} on {self.server_url}: {e}")
             raise
 
-    def _parse_sse_response(self, body: str) -> Dict[str, Any]:
+    def _parse_sse_response(self, body: str) -> dict[str, Any]:
         """Parse JSON-RPC response from SSE body."""
         for event in body.split("\n\n"):
-            data_lines: List[str] = []
+            data_lines: list[str] = []
             for line in event.splitlines():
                 if line.startswith("data:"):
                     data_lines.append(line[5:].strip())
@@ -254,31 +300,31 @@ class ExternalMCPSession:
 
         raise ValueError("No valid JSON-RPC payload found in response")
 
-    async def list_tools(self) -> List[Dict[str, Any]]:
+    async def list_tools(self) -> list[dict[str, Any]]:
         """List tools available on the external server."""
         result = await self._call_jsonrpc("tools/list")
         return result.get("tools", [])
 
     async def call_tool(
-        self, tool_name: str, arguments: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
         """Call a tool on the external server."""
         result = await self._call_jsonrpc(
             "tools/call", {"name": tool_name, "arguments": arguments}
         )
         return result
 
-    async def list_resources(self) -> List[Dict[str, Any]]:
+    async def list_resources(self) -> list[dict[str, Any]]:
         """List resources available on the external server."""
         result = await self._call_jsonrpc("resources/list")
         return result.get("resources", [])
 
-    async def read_resource(self, uri: str) -> Dict[str, Any]:
+    async def read_resource(self, uri: str) -> dict[str, Any]:
         """Read a resource from the external server."""
         result = await self._call_jsonrpc("resources/read", {"uri": uri})
         return result
 
-    async def list_prompts(self) -> List[Dict[str, Any]]:
+    async def list_prompts(self) -> list[dict[str, Any]]:
         """List prompts available on the external server."""
         result = await self._call_jsonrpc("prompts/list")
         return result.get("prompts", [])
@@ -313,9 +359,9 @@ class DirectStdioSession:
     def __init__(
         self,
         command: str,
-        args: List[str],
+        args: list[str],
         server_name: str,
-        env: Optional[Dict[str, str]] = None,
+        env: dict[str, str] | None = None,
     ):
         self.command = command
         self.args = args
@@ -323,19 +369,19 @@ class DirectStdioSession:
         self.env = env or {}
         self.server_url = f"stdio://{command}/{'+'.join(args)}"
 
-        self.session_id: Optional[str] = str(uuid.uuid4())
+        self.session_id: str | None = str(uuid.uuid4())
         self._initialized: bool = False
-        self.server_info: Dict[str, Any] = {}
-        self.extra_headers: Dict[str, str] = {}
+        self.server_info: dict[str, Any] = {}
+        self.extra_headers: dict[str, str] = {}
         self.connected_at: float = time.time()
-        self.capabilities: Dict[str, Any] = {}
+        self.capabilities: dict[str, Any] = {}
 
         # Lifecycle events — coordinate between background task and callers
         self._ready = asyncio.Event()
         self._shutdown = asyncio.Event()
-        self._bg_task: Optional[asyncio.Task] = None
-        self._session: Optional[ClientSession] = None
-        self._init_error: Optional[Exception] = None
+        self._bg_task: asyncio.Task | None = None
+        self._session: ClientSession | None = None
+        self._init_error: Exception | None = None
 
     @property
     def is_alive(self) -> bool:
@@ -354,50 +400,52 @@ class DirectStdioSession:
         request handler scopes.
         """
         try:
-            async with stdio_client(params) as transport:
-                async with ClientSession(
+            async with (
+                stdio_client(params) as transport,
+                ClientSession(
                     read_stream=transport[0],
                     write_stream=transport[1],
-                ) as session:
-                    init_result = await session.initialize()
+                ) as session,
+            ):
+                init_result = await session.initialize()
 
-                    # Extract server info
-                    si = getattr(init_result, "serverInfo", None)
-                    if si:
-                        if isinstance(si, dict):
-                            self.server_info = si
-                        elif hasattr(si, "name"):
-                            self.server_info = {
-                                "name": si.name,
-                                "version": getattr(si, "version", "unknown"),
-                            }
+                # Extract server info
+                si = getattr(init_result, "serverInfo", None)
+                if si:
+                    if isinstance(si, dict):
+                        self.server_info = si
+                    elif hasattr(si, "name"):
+                        self.server_info = {
+                            "name": si.name,
+                            "version": getattr(si, "version", "unknown"),
+                        }
 
-                    # Extract capabilities
-                    caps = getattr(init_result, "capabilities", None)
-                    if caps:
-                        if isinstance(caps, dict):
-                            self.capabilities = caps
-                        else:
-                            self.capabilities = {
-                                attr: True
-                                for attr in ["tools", "resources", "prompts"]
-                                if getattr(caps, attr, None) is not None
-                            }
+                # Extract capabilities
+                caps = getattr(init_result, "capabilities", None)
+                if caps:
+                    if isinstance(caps, dict):
+                        self.capabilities = caps
+                    else:
+                        self.capabilities = {
+                            attr: True
+                            for attr in ["tools", "resources", "prompts"]
+                            if getattr(caps, attr, None) is not None
+                        }
 
-                    self._session = session
-                    self._initialized = True
-                    self._ready.set()
+                self._session = session
+                self._initialized = True
+                self._ready.set()
 
-                    logger.info(
-                        "[DirectStdio] Connected to '%s' (%s %s) — caps=%s",
-                        self.server_name,
-                        self.server_info.get("name", "?"),
-                        self.server_info.get("version", "?"),
-                        list(self.capabilities.keys()),
-                    )
+                logger.info(
+                    "[DirectStdio] Connected to '%s' (%s %s) — caps=%s",
+                    self.server_name,
+                    self.server_info.get("name", "?"),
+                    self.server_info.get("version", "?"),
+                    list(self.capabilities.keys()),
+                )
 
-                    # Keep alive until shutdown is requested
-                    await self._shutdown.wait()
+                # Keep alive until shutdown is requested
+                await self._shutdown.wait()
 
         except Exception as e:
             self._init_error = e
@@ -411,7 +459,7 @@ class DirectStdioSession:
             self._session = None
             self._ready.set()  # unblock initialize() if waiting
 
-    async def initialize(self) -> Dict[str, Any]:
+    async def initialize(self) -> dict[str, Any]:
         """Spawn the stdio process in a background task and wait for ready."""
         # Build process environment
         process_env = {**os.environ}
@@ -448,7 +496,7 @@ class DirectStdioSession:
 
         return self.server_info
 
-    async def list_tools(self) -> List[Dict[str, Any]]:
+    async def list_tools(self) -> list[dict[str, Any]]:
         if not self._session:
             raise RuntimeError("Not connected")
         result = await self._session.list_tools()
@@ -464,8 +512,8 @@ class DirectStdioSession:
         return tools
 
     async def call_tool(
-        self, tool_name: str, arguments: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
         if not self._session:
             raise RuntimeError("Not connected")
         result = await self._session.call_tool(tool_name, arguments=arguments)
@@ -480,7 +528,7 @@ class DirectStdioSession:
             content.append(d)
         return {"content": content}
 
-    async def list_resources(self) -> List[Dict[str, Any]]:
+    async def list_resources(self) -> list[dict[str, Any]]:
         if not self._session or "resources" not in self.capabilities:
             return []
         result = await self._session.list_resources()
@@ -494,7 +542,7 @@ class DirectStdioSession:
             for r in result.resources
         ]
 
-    async def read_resource(self, uri: str) -> Dict[str, Any]:
+    async def read_resource(self, uri: str) -> dict[str, Any]:
         if not self._session:
             raise RuntimeError("Not connected")
         from pydantic import AnyUrl
@@ -508,7 +556,7 @@ class DirectStdioSession:
             contents.append(d)
         return {"contents": contents}
 
-    async def list_prompts(self) -> List[Dict[str, Any]]:
+    async def list_prompts(self) -> list[dict[str, Any]]:
         if not self._session or "prompts" not in self.capabilities:
             return []
         result = await self._session.list_prompts()
@@ -562,10 +610,10 @@ class ProxiedStdioSession:
         self,
         proxy_url: str,
         command: str,
-        args: List[str],
+        args: list[str],
         server_name: str,
-        env: Optional[Dict[str, str]] = None,
-        proxy_auth_token: Optional[str] = None,
+        env: dict[str, str] | None = None,
+        proxy_auth_token: str | None = None,
     ):
         self.proxy_url = proxy_url.rstrip("/")
         self.command = command
@@ -576,23 +624,23 @@ class ProxiedStdioSession:
         self.server_url = f"stdio://{command}/{'+'.join(args)}"
 
         self.client = httpx.AsyncClient(timeout=60.0)
-        self.session_id: Optional[str] = None
+        self.session_id: str | None = None
         self._initialized: bool = False
-        self.server_info: Dict[str, Any] = {}
-        self.extra_headers: Dict[str, str] = {}
+        self.server_info: dict[str, Any] = {}
+        self.extra_headers: dict[str, str] = {}
         self.connected_at: float = time.time()
 
         # SSE reader state
-        self._msg_endpoint: Optional[str] = None
-        self._msg_url: Optional[str] = None
-        self._sse_task: Optional[asyncio.Task] = None
-        self._response_queues: Dict[Any, asyncio.Queue] = {}
+        self._msg_endpoint: str | None = None
+        self._msg_url: str | None = None
+        self._sse_task: asyncio.Task | None = None
+        self._response_queues: dict[Any, asyncio.Queue] = {}
         self._sse_connected = asyncio.Event()
         self._sse_dead = asyncio.Event()  # set when SSE stream closes unexpectedly
         self._sse_stream = None
         self._request_id_counter = 0
         self._closing = False  # True when close() is called intentionally
-        self.capabilities: Dict[str, Any] = {}  # server capabilities from initialize
+        self.capabilities: dict[str, Any] = {}  # server capabilities from initialize
 
     @property
     def is_alive(self) -> bool:
@@ -609,8 +657,8 @@ class ProxiedStdioSession:
         self._request_id_counter += 1
         return self._request_id_counter
 
-    def _build_headers(self) -> Dict[str, str]:
-        headers: Dict[str, str] = {}
+    def _build_headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {}
         if self.proxy_auth_token:
             headers["x-mcp-proxy-auth"] = f"Bearer {self.proxy_auth_token}"
         headers.update(self.extra_headers)
@@ -719,9 +767,9 @@ class ProxiedStdioSession:
     async def _send_request(
         self,
         method: str,
-        params: Optional[Dict[str, Any]] = None,
-        request_id: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        params: dict[str, Any] | None = None,
+        request_id: int | None = None,
+    ) -> dict[str, Any]:
         """Send a JSON-RPC request and wait for the response via SSE."""
         needs_reconnect = (
             not self._msg_url
@@ -782,7 +830,7 @@ class ProxiedStdioSession:
             self._response_queues.pop(rid, None)
 
     async def _send_notification(
-        self, method: str, params: Optional[Dict[str, Any]] = None
+        self, method: str, params: dict[str, Any] | None = None
     ) -> None:
         """Send a JSON-RPC notification (no id, no response expected)."""
         if not self._msg_url:
@@ -798,7 +846,7 @@ class ProxiedStdioSession:
 
         await self.client.post(self._msg_url, json=payload, headers=headers)
 
-    async def initialize(self) -> Dict[str, Any]:
+    async def initialize(self) -> dict[str, Any]:
         """Spawn the stdio server via proxy and complete MCP handshake."""
         try:
             # Start the SSE connection and wait for sessionId
@@ -835,27 +883,27 @@ class ProxiedStdioSession:
             logger.error(f"[ProxiedStdio] Failed to initialize {self.server_name}: {e}")
             raise
 
-    async def list_tools(self) -> List[Dict[str, Any]]:
+    async def list_tools(self) -> list[dict[str, Any]]:
         result = await self._send_request("tools/list")
         return result.get("tools", [])
 
     async def call_tool(
-        self, tool_name: str, arguments: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
         return await self._send_request(
             "tools/call", {"name": tool_name, "arguments": arguments}
         )
 
-    async def list_resources(self) -> List[Dict[str, Any]]:
+    async def list_resources(self) -> list[dict[str, Any]]:
         if "resources" not in self.capabilities:
             return []
         result = await self._send_request("resources/list")
         return result.get("resources", [])
 
-    async def read_resource(self, uri: str) -> Dict[str, Any]:
+    async def read_resource(self, uri: str) -> dict[str, Any]:
         return await self._send_request("resources/read", {"uri": uri})
 
-    async def list_prompts(self) -> List[Dict[str, Any]]:
+    async def list_prompts(self) -> list[dict[str, Any]]:
         if "prompts" not in self.capabilities:
             return []
         result = await self._send_request("prompts/list")
@@ -884,7 +932,7 @@ class ProxiedStdioSession:
         logger.info(f"[ProxiedStdio] Closed session '{self.server_name}'")
 
 
-def _load_inspector_config() -> Dict[str, Any]:
+def _load_inspector_config() -> dict[str, Any]:
     """Load the mcp-inspector-config.json file if it exists."""
     config_path = os.path.join(
         os.path.dirname(__file__), "..", "..", "..", "mcp-inspector-config.json"
@@ -941,15 +989,15 @@ class RegistryBridge:
         self._client = httpx.AsyncClient(timeout=10.0)
 
     def _user_headers(
-        self, user_id: str, bearer_token: Optional[str] = None
-    ) -> Dict[str, str]:
+        self, user_id: str, bearer_token: str | None = None
+    ) -> dict[str, str]:
         """Build auth headers for requests on behalf of a user.
 
         Forwards the caller's Bearer token so the backend's
         get_authenticated_user_details can resolve a real identity
         instead of falling back to sample_user.
         """
-        headers: Dict[str, str] = {
+        headers: dict[str, str] = {
             "x-ms-client-principal-id": user_id,
             "x-ms-client-principal-name": user_id,
         }
@@ -957,7 +1005,7 @@ class RegistryBridge:
             headers["Authorization"] = f"Bearer {bearer_token}"
         return headers
 
-    async def lookup_server(self, server_name: str) -> Optional[Dict[str, Any]]:
+    async def lookup_server(self, server_name: str) -> dict[str, Any] | None:
         """Look up a server in the catalog by name."""
         try:
             resp = await self._client.get(f"{self.base}/servers")
@@ -970,7 +1018,7 @@ class RegistryBridge:
             logger.warning(f"Registry lookup failed: {e}")
             return None
 
-    async def list_catalog(self) -> List[Dict[str, Any]]:
+    async def list_catalog(self) -> list[dict[str, Any]]:
         """List all enabled servers in the catalog."""
         try:
             resp = await self._client.get(f"{self.base}/servers")
@@ -982,7 +1030,7 @@ class RegistryBridge:
 
     async def get_user_connection(
         self, user_id: str, server_name: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Get a user's connection status for a specific server."""
         try:
             resp = await self._client.get(
@@ -998,8 +1046,8 @@ class RegistryBridge:
             return None
 
     async def initiate_connection(
-        self, user_id: str, server_name: str, bearer_token: Optional[str] = None
-    ) -> Optional[Dict[str, Any]]:
+        self, user_id: str, server_name: str, bearer_token: str | None = None
+    ) -> dict[str, Any] | None:
         """Initiate / create a user connection to a cataloged server."""
         try:
             resp = await self._client.post(
@@ -1014,7 +1062,7 @@ class RegistryBridge:
 
     async def activate_connection(
         self, user_id: str, server_name: str, secret_ref: str = ""
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Mark a user connection as active (after OAuth callback)."""
         try:
             body = {}
@@ -1031,7 +1079,7 @@ class RegistryBridge:
             logger.warning(f"Connection activation failed: {e}")
             return None
 
-    async def get_user_servers(self, user_id: str) -> List[Dict[str, Any]]:
+    async def get_user_servers(self, user_id: str) -> list[dict[str, Any]]:
         """Get all servers with the user's connection status."""
         try:
             resp = await self._client.get(
@@ -1066,9 +1114,9 @@ class InspectorService(MCPToolBase):
         super().__init__(Domain.INSPECTOR)
         # Keyed by (user_id, server_name) for per-user session isolation.
         # user_id="" is the anonymous/shared namespace (dev / backward-compat).
-        self._sessions: Dict[Tuple[str, str], ExternalMCPSession] = {}
-        self._proxied_sessions: Dict[
-            Tuple[str, str], ProxiedStdioSession | DirectStdioSession
+        self._sessions: dict[tuple[str, str], ExternalMCPSession] = {}
+        self._proxied_sessions: dict[
+            tuple[str, str], ProxiedStdioSession | DirectStdioSession
         ] = {}
         self._registry = RegistryBridge()
         self._inspector_config = _load_inspector_config()
@@ -1104,14 +1152,14 @@ class InspectorService(MCPToolBase):
         registry = self._registry
         inspector_config = self._inspector_config
 
-        def _all_sessions(user_id: str = "") -> Dict[str, Any]:
+        def _all_sessions(user_id: str = "") -> dict[str, Any]:
             """Return sessions for *user_id*, keyed by server_name.
 
             When user_id is empty every session is included (anonymous /
             dev fallback).  The returned dict is keyed by plain server_name
             so all existing ``server_name in all_sess`` checks keep working.
             """
-            merged: Dict[str, Any] = {}
+            merged: dict[str, Any] = {}
             for (uid, sname), sess in sessions.items():
                 if not user_id or uid == user_id:
                     merged[sname] = sess
@@ -1273,6 +1321,10 @@ class InspectorService(MCPToolBase):
                 bearer = None
                 if _cred_source == "managed_identity" and credential_resolver:
                     # Platform-minted token WINS over anything the caller passed.
+                    # Attach the SOURCE too: the session re-resolves per call,
+                    # so the minted token's ~1h lifetime never strands it.
+                    session.credential_source = "managed_identity"
+                    session.audience = _audience
                     try:
                         bearer = await credential_resolver.resolve_valid_token(
                             credential_source="managed_identity",
@@ -1355,6 +1407,12 @@ class InspectorService(MCPToolBase):
                                     secret_ref=secret_ref,
                                 )
                                 if bearer:
+                                    # oauth_refresh rotates near expiry; give
+                                    # the session the source so later calls
+                                    # keep resolving instead of freezing this
+                                    # token.
+                                    session.credential_source = _cred_source
+                                    session.secret_ref = secret_ref
                                     logger.info(
                                         f"[connect_mcp_server] Resolved token for "
                                         f"'{server_name}' from Key Vault "
@@ -1842,7 +1900,7 @@ class InspectorService(MCPToolBase):
                 Connection result or auth instructions.
             """
             try:
-                _bearer_token: Optional[str] = None
+                _bearer_token: str | None = None
                 try:
                     from fastmcp.server.dependencies import get_http_headers
 
@@ -1935,7 +1993,10 @@ class InspectorService(MCPToolBase):
                 # static_secret / oauth_refresh come from the user's Key Vault blob).
                 # auth_type stays = what the wire sees (a Bearer); HOW we get it lives
                 # in the resolver.
-                extra_headers: Dict[str, str] = {}
+                extra_headers: dict[str, str] = {}
+                _cred_source: str | None = None
+                _audience: str | None = None
+                _secret_ref: str = ""
                 if auth_type != "none" and status == "active" and credential_resolver:
                     _cred_source = server.get("credential_source") or "static_secret"
                     _audience = (
@@ -1980,6 +2041,14 @@ class InspectorService(MCPToolBase):
                 if _reg_key in sessions:
                     existing = sessions[_reg_key]
                     if existing._initialized:
+                        # Reused sessions adopt the credential SOURCE so their
+                        # calls resolve tokens per call from now on — a session
+                        # created before this code carries only the frozen
+                        # (long-expired) header.
+                        if _cred_source:
+                            existing.credential_source = _cred_source
+                            existing.audience = _audience
+                            existing.secret_ref = _secret_ref
                         return format_success_response(
                             action="Already Connected (Registry)",
                             details={
@@ -2002,6 +2071,10 @@ class InspectorService(MCPToolBase):
                 session = ExternalMCPSession(endpoint, server_name)
                 if extra_headers:
                     session.extra_headers = extra_headers
+                if _cred_source:
+                    session.credential_source = _cred_source
+                    session.audience = _audience
+                    session.secret_ref = _secret_ref
 
                 server_info = await session.initialize()
                 sessions[_reg_key] = session
