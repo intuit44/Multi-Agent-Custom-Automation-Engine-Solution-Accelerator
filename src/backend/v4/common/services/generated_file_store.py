@@ -116,7 +116,9 @@ class GeneratedFileStore:
                 key_start_time=now - timedelta(minutes=5),
                 key_expiry_time=now + timedelta(hours=1),
             )
-            account_name = urlparse(self._svc.url).netloc.split(".")[0]
+            account_name = getattr(self._svc, "account_name", None) or urlparse(
+                self._svc.url if "://" in self._svc.url else f"https://{self._svc.url}"
+            ).netloc.split(".")[0]
             sas = generate_blob_sas(
                 account_name=account_name,
                 container_name=_CONTAINER,
