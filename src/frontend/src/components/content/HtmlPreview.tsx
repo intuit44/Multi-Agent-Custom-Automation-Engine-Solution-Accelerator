@@ -501,7 +501,8 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
     a.click();
 
     if (objectUrl) {
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+      const urlToRevoke = objectUrl;
+      setTimeout(() => URL.revokeObjectURL(urlToRevoke), 0);
     }
   };
 
