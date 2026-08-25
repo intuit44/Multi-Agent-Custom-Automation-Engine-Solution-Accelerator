@@ -16,15 +16,13 @@ import { Send } from '@/coral/imports/bundleicons';
 import {
   Attach20Regular,
   Dismiss20Regular,
-  ArrowDownload20Regular,
-  Eye20Regular,
   Image20Regular,
   DocumentRegular,
   FolderRegular,
   MoreHorizontal20Regular,
 } from '@fluentui/react-icons';
-import React, { useRef, useState, useCallback } from 'react';
-import { HtmlPreview, useHtmlPreview } from './HtmlPreview';
+import React, { useEffect, useRef, useState } from 'react';
+import { useHtmlPreview } from './HtmlPreview';
 
 interface SimplifiedPlanChatProps extends PlanChatProps {
   planData: any;
@@ -49,138 +47,69 @@ interface SimplifiedPlanChatProps extends PlanChatProps {
   showPlanLaneToggle?: boolean;
 }
 
-// ─── HTML file card: download link + optional live Preview for .html files ───
+// ─── Generated files: ONE compact dropdown; artifacts open in the panel ─────
+// Twenty generated files must never occupy the composer: the whole list is a
+// single dropdown button. Every file registers in the artifact panel by its
+// FILENAME (its identity), so re-generating a file updates the same entry.
 
-interface HtmlFileCardProps {
-  file: { file_id: string; filename: string; download_url: string };
-  onRemove?: (file_id: string) => void;
+interface GeneratedFilesMenuProps {
+  files: Array<{ file_id: string; filename: string; download_url: string }>;
 }
 
-const HtmlFileCard: React.FC<HtmlFileCardProps> = ({ file, onRemove }) => {
-  const isHtml = file.filename.toLowerCase().endsWith('.html');
-  const previewCtx = useHtmlPreview();
-  const [showPreview, setShowPreview] = useState(false);
-  const [htmlContent, setHtmlContent] = useState<string | null>(null);
-  const [loadingHtml, setLoadingHtml] = useState(false);
+const GeneratedFilesMenu: React.FC<GeneratedFilesMenuProps> = ({ files }) => {
+  const ctx = useHtmlPreview();
+  const upsert = ctx?.upsert;
 
-  const handlePreviewToggle = useCallback(async () => {
-    let content = htmlContent;
-    if (content === null) {
-      setLoadingHtml(true);
-      try {
-        const res = await fetch(resolveApiUrl(file.download_url));
-        content = await res.text();
-      } catch {
-        content = '<p style="color:red">Failed to load preview.</p>';
-      } finally {
-        setLoadingHtml(false);
-      }
-      setHtmlContent(content);
-    }
-    // With a provider mounted the preview opens in the RIGHT PANEL — never
-    // inline here: this card lives in the composer, directly above ChatInput,
-    // and an inline iframe swallows the input. Inline is the fallback only.
-    if (previewCtx) {
-      previewCtx.open({
-        id: `file:${file.file_id}`,
-        title: file.filename,
-        html: content ?? '',
-      });
-      return;
-    }
-    setShowPreview((v) => !v);
-  }, [htmlContent, file.download_url, file.file_id, file.filename, previewCtx]);
+  useEffect(() => {
+    if (!upsert) return;
+    files.forEach((f) =>
+      upsert({
+        id: f.filename,
+        title: f.filename,
+        lang: (f.filename.split('.').pop() || '').toLowerCase(),
+        content: '',
+        downloadUrl: resolveApiUrl(f.download_url),
+      })
+    );
+  }, [files, upsert]);
+
+  if (files.length === 0) return null;
+
+  if (!ctx) {
+    // Sin panel montado: enlaces de descarga simples, sin tarjetas gigantes.
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+        {files.map((f) => (
+          <a
+            key={f.file_id}
+            href={resolveApiUrl(f.download_url)}
+            download={f.filename}
+            style={{ fontSize: '13px' }}
+          >
+            {f.filename}
+          </a>
+        ))}
+      </div>
+    );
+  }
 
   return (
-    <div>
-      {/* Download card row */}
-      <div
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '10px',
-          padding: '10px 14px',
-          backgroundColor: 'var(--colorBrandBackground2)',
-          borderRadius: '8px',
-          fontSize: '13px',
-          fontWeight: 500,
-          color: 'var(--colorNeutralForeground1)',
-          border: '1px solid var(--colorBrandStroke1)',
-          boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-        }}
-      >
-        <a
-          href={resolveApiUrl(file.download_url)}
-          download={file.filename}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            color: 'inherit',
-            textDecoration: 'none',
-          }}
-        >
-          <ArrowDownload20Regular
-            style={{ color: 'var(--colorBrandForeground1)' }}
-          />
-          <span
-            style={{
-              maxWidth: '200px',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {file.filename}
-          </span>
-        </a>
-        {isHtml && (
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<Eye20Regular />}
-            onClick={handlePreviewToggle}
-            style={{ minWidth: 'auto', padding: '2px 6px' }}
-          >
-            {showPreview ? 'Hide' : 'Preview'}
-          </Button>
-        )}
-        {onRemove && (
-          <Button
-            appearance="transparent"
-            icon={<Dismiss20Regular />}
-            size="small"
-            aria-label={`Discard ${file.filename}`}
-            onClick={() => onRemove(file.file_id)}
-            style={{
-              minWidth: 'auto',
-              padding: '4px',
-              height: '20px',
-              width: '20px',
-            }}
-          />
-        )}
-      </div>
-      {/* Inline preview (only for .html) */}
-      {isHtml && showPreview && (
-        <div style={{ marginTop: '8px' }}>
-          {loadingHtml ? (
-            <span
-              style={{
-                fontSize: '12px',
-                color: 'var(--colorNeutralForeground3)',
-              }}
-            >
-              Loading…
-            </span>
-          ) : (
-            htmlContent !== null && (
-              <HtmlPreview html={htmlContent} title={file.filename} />
-            )
-          )}
-        </div>
-      )}
-    </div>
+    <Menu>
+      <MenuTrigger disableButtonEnhancement>
+        <Button size="small" appearance="secondary" icon={<FolderRegular />}>
+          {`Archivos (${files.length})`}
+        </Button>
+      </MenuTrigger>
+      <MenuPopover>
+        <MenuList>
+          {files.map((f) => (
+            <MenuItem key={f.file_id} onClick={() => ctx.open(f.filename)}>
+              {f.filename}
+            </MenuItem>
+          ))}
+        </MenuList>
+      </MenuPopover>
+    </Menu>
   );
 };
 
@@ -197,7 +126,6 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
   generatedFiles = [],
   onFileSelect,
   onRemoveFile,
-  onRemoveGeneratedFile,
   planLane = false,
   onPlanLaneChange,
   showPlanLaneToggle = false,
@@ -346,30 +274,10 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
         </div>
       )}
 
-      {/* Generated files display - Professional download cards */}
+      {/* Generated files: one compact dropdown; each entry opens in the panel */}
       {generatedFiles.length > 0 && (
-        <div style={{ marginBottom: '14px' }}>
-          <div
-            style={{
-              fontSize: '12px',
-              fontWeight: 600,
-              marginBottom: '8px',
-              color: 'var(--colorNeutralForeground3)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-            }}
-          >
-            Generated Files
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-            {generatedFiles.map((f) => (
-              <HtmlFileCard
-                key={f.file_id}
-                file={f}
-                onRemove={onRemoveGeneratedFile}
-              />
-            ))}
-          </div>
+        <div style={{ marginBottom: '10px' }}>
+          <GeneratedFilesMenu files={generatedFiles} />
         </div>
       )}
 
