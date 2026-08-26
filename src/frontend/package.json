@@ -58,6 +58,9 @@
       "last 1 safari version"
     ]
   },
+  "overrides": {
+    "dompurify": ">=3.4.13"
+  },
   "devDependencies": {
     "@types/node": "^20.19.41",
     "@types/react-redux": "^7.1.34",
