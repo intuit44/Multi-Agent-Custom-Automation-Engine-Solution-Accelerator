@@ -153,8 +153,10 @@ async def put_file(path: str, body: FilePutRequest) -> FilePutResponse:
     """Overwrite a workspace file from Monaco."""
     _dev_only()
     resolved = _resolve(path)
-    if not resolved.parent.exists():
+    if not resolved.parent.exists() or not resolved.parent.is_dir():
         raise HTTPException(status_code=400, detail="Parent directory does not exist.")
+    if resolved.exists() and not resolved.is_file():
+        raise HTTPException(status_code=400, detail="Path is a directory.")
     encoded = body.content.encode("utf-8")
     if len(encoded) > MAX_FILE_BYTES:
         raise HTTPException(
