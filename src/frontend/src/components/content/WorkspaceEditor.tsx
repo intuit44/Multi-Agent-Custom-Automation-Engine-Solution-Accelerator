@@ -76,8 +76,8 @@ function workspacePath(title: string): string {
   return title.replace(/^\/+/, '');
 }
 
-async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(resolveApiUrl(url), init);
+async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(resolveApiUrl(url), { ...init, credentials: 'include' });
   if (!res.ok) {
     const detail = await res.text().catch(() => res.statusText);
     throw new Error(`${res.status} ${detail}`);
