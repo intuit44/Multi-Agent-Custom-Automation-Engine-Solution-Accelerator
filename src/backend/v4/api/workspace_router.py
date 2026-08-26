@@ -175,9 +175,16 @@ async def get_diff(path: str) -> DiffResponse:
     resolved = _resolve(path)
     if not resolved.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
+    if not resolved.is_file():
+        raise HTTPException(status_code=400, detail="Path is a directory.")
     raw = resolved.read_bytes()
     if _is_binary(raw):
         raise HTTPException(status_code=415, detail="Binary file — no diff available.")
+    if len(raw) > MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds {MAX_FILE_BYTES // 1024} KB Monaco limit.",
+        )
     disk_content = raw.decode("utf-8", errors="replace")
     rel = str(resolved.relative_to(WORKSPACE_ROOT))
     head_content = _git_show(rel) or ""
