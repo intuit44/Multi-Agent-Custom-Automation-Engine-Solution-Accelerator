@@ -121,6 +121,10 @@ class TestRouterCoverage(unittest.TestCase):
             "v4.config.settings": Mock(),
             "v4.orchestration": Mock(),
             "v4.orchestration.orchestration_manager": Mock(),
+            "v4.api": Mock(),
+            "v4.api.workspace_router": Mock(),
+            "common.config": Mock(),
+            "common.config.app_config": Mock(),
         }
 
         # Configure Pydantic models
@@ -141,6 +145,9 @@ class TestRouterCoverage(unittest.TestCase):
         self.mock_modules["fastapi"].File = Mock
         self.mock_modules["fastapi"].UploadFile = Mock
         self.mock_modules["fastapi"].BackgroundTasks = Mock
+
+        # Configure workspace router mock
+        self.mock_modules["v4.api.workspace_router"].workspace_router = Mock()
 
         # Configure services and settings
         self.mock_modules["v4.common.services.plan_service"].PlanService = Mock
