@@ -55,11 +55,10 @@ def _dev_only() -> None:
 
 def _resolve(raw: str) -> Path:
     """Resolve *raw* relative to WORKSPACE_ROOT; reject traversal."""
-    normalized = raw.replace("\\", "/")
-    rel_path = Path(normalized)
+    rel_path = Path(raw.replace("\\", "/").strip())
 
-    # Reject absolute paths and parent traversal before joining to workspace root.
-    if rel_path.is_absolute() or ".." in rel_path.parts:
+    # Reject empty/current-dir paths, absolute paths, and parent traversal.
+    if str(rel_path) in {"", "."} or rel_path.is_absolute() or ".." in rel_path.parts:
         raise HTTPException(status_code=400, detail="Path outside workspace.")
 
     candidate = (WORKSPACE_ROOT / rel_path).resolve()
