@@ -618,7 +618,7 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
             title={active.title}
             content={content}
             lang={active.lang || undefined}
-            tab={activeTab === 'code' || activeTab === 'diff' ? activeTab : 'code'}
+            tab={activeTab as 'code' | 'diff'}
             onTabChange={(t) => setActiveTab(t)}
           />
         </div>
