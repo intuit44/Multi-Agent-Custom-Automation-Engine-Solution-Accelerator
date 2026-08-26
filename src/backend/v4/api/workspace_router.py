@@ -51,8 +51,14 @@ def _dev_only() -> None:
 
 def _resolve(raw: str) -> Path:
     """Resolve *raw* relative to WORKSPACE_ROOT; reject traversal."""
-    # FastAPI path params strip leading slash — re-add so Path resolves correctly.
-    candidate = (WORKSPACE_ROOT / raw.lstrip("/")).resolve()
+    normalized = raw.replace("\\", "/")
+    rel_path = Path(normalized)
+
+    # Reject absolute paths and parent traversal before joining to workspace root.
+    if rel_path.is_absolute() or ".." in rel_path.parts:
+        raise HTTPException(status_code=400, detail="Path outside workspace.")
+
+    candidate = (WORKSPACE_ROOT / rel_path).resolve()
     try:
         candidate.relative_to(WORKSPACE_ROOT)
     except ValueError:
