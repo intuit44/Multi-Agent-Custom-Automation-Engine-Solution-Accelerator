@@ -96,6 +96,10 @@ interface WorkspaceEditorProps {
   content: string;
   /** Monaco language override; auto-detected from title if omitted. */
   lang?: string;
+  /** Controlled active tab. When provided the parent owns tab state. */
+  tab?: EditorTab;
+  /** Called when the user switches tabs. Required when `tab` is provided. */
+  onTabChange?: (tab: EditorTab) => void;
 }
 
 // ── component ──────────────────────────────────────────────────────────────
@@ -104,11 +108,21 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
   title,
   content,
   lang,
+  tab: tabProp,
+  onTabChange,
 }) => {
   const path = workspacePath(title);
   const language = lang ?? langFromFilename(title);
 
-  const [tab, setTab] = useState<EditorTab>('code');
+  const [tabInternal, setTabInternal] = useState<EditorTab>('code');
+  const tab = tabProp ?? tabInternal;
+  const setTab = useCallback(
+    (t: EditorTab) => {
+      if (onTabChange) onTabChange(t);
+      else setTabInternal(t);
+    },
+    [onTabChange]
+  );
 
   // ── Code tab state ──
   const [editorValue, setEditorValue] = useState(content);
@@ -216,7 +230,8 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Tab bar */}
+      {/* Tab bar — only rendered when WorkspaceEditor manages tab state internally */}
+      {!tabProp && (
       <div
         style={{
           display: 'flex',
@@ -293,6 +308,7 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
           </div>
         )}
       </div>
+      )}
 
       {/* Editor area */}
       <div style={{ flex: 1, minHeight: 0 }}>
