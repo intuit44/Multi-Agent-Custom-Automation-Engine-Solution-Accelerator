@@ -184,12 +184,14 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
   const loadDiff = useCallback(async () => {
     setDiffLoading(true);
     setDiffError(null);
+    setDiffData(null);
     try {
       const data = await apiFetch<{ original: string; modified: string }>(
         `/api/v4/workspace/diff/${path}`
       );
       setDiffData(data);
     } catch (e) {
+      setDiffData(null);
       setDiffError((e as Error).message);
     } finally {
       setDiffLoading(false);
