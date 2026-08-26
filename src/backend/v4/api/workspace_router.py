@@ -21,6 +21,7 @@ Security
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -33,8 +34,11 @@ workspace_router = APIRouter(prefix="/workspace", tags=["workspace"])
 
 # ── constants ────────────────────────────────────────────────────────────────
 WORKSPACE_ROOT = Path(
-    "/workspaces/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator"
-)
+    os.getenv(
+        "MACAE_WORKSPACE_ROOT",
+        str(Path(__file__).resolve().parents[4]),
+    )
+).resolve()
 MAX_FILE_BYTES = 1 * 1024 * 1024  # 1 MB
 
 
