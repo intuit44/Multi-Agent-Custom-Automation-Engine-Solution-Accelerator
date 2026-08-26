@@ -116,6 +116,20 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const lastSaved = useRef(content);
+  const prevPath = useRef(path);
+
+  // If the user switches to a different artifact/file, reset editor state even if
+  // the previous file had unsaved edits.
+  useEffect(() => {
+    if (prevPath.current !== path) {
+      prevPath.current = path;
+      setTab('code');
+      setEditorValue(content);
+      lastSaved.current = content;
+      setDirty(false);
+      setSaveMsg(null);
+    }
+  }, [path, content]);
 
   // Keep editor in sync when artifact content updates (e.g. streaming finishes)
   // but do NOT overwrite unsaved user edits.
