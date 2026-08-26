@@ -29,8 +29,6 @@ import {
   MenuPopover,
   MenuTrigger,
 } from '@fluentui/react-components';
-import ReactMarkdown from 'react-markdown';
-import rehypePrism from 'rehype-prism';
 import { apiClient } from '../../api/apiClient';
 import {
   ArrowDownload20Regular,
@@ -39,6 +37,7 @@ import {
   Dismiss20Regular,
   Eye20Regular,
 } from '@fluentui/react-icons';
+import { WorkspaceEditor } from './WorkspaceEditor';
 
 const MIN_HEIGHT = 120;
 const MAX_HEIGHT = 600;
@@ -208,7 +207,9 @@ export const HtmlPreview: React.FC<HtmlPreviewProps> = ({
       } catch {
         /* fall through to the sandboxed object-URL fallback */
       }
-      objectUrl = URL.createObjectURL(new Blob([srcDoc], { type: 'text/html' }));
+      objectUrl = URL.createObjectURL(
+        new Blob([srcDoc], { type: 'text/html' })
+      );
       if (!cancelled) setDoc({ url: objectUrl, isolated: false });
     })();
     return () => {
@@ -262,9 +263,7 @@ export const HtmlPreview: React.FC<HtmlPreviewProps> = ({
           ref={iframeRef}
           src={doc.url}
           sandbox={
-            doc.isolated
-              ? 'allow-scripts allow-same-origin'
-              : 'allow-scripts'
+            doc.isolated ? 'allow-scripts allow-same-origin' : 'allow-scripts'
           }
           title={title}
           style={{
@@ -393,40 +392,6 @@ export const HtmlPreviewProvider: React.FC<{ children: React.ReactNode }> = ({
 
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif|svg)$/i;
 
-/** Prism-highlighted code body for non-HTML artifacts. */
-const ArtifactCodeView: React.FC<{ lang: string; content: string }> = ({
-  lang,
-  content,
-}) => {
-  // Fence length must exceed any backtick run inside the content.
-  const fence = React.useMemo(() => {
-    const runs: string[] = content.match(/`+/g) || [];
-    const longest = runs.reduce((m, s) => Math.max(m, s.length), 0);
-    return '`'.repeat(Math.max(4, longest + 1));
-  }, [content]);
-  return (
-    <ReactMarkdown
-      rehypePlugins={[rehypePrism]}
-      components={{
-        pre: ({ node: _n, ...props }: any) => (
-          <pre
-            {...props}
-            style={{
-              maxWidth: '100%',
-              boxSizing: 'border-box',
-              overflowX: 'auto',
-              borderRadius: '8px',
-              margin: 0,
-            }}
-          />
-        ),
-      }}
-    >
-      {`${fence}${lang}\n${content}\n${fence}`}
-    </ReactMarkdown>
-  );
-};
-
 /** The right-slot artifact panel. Renders `fallback` (e.g. PlanPanelRight)
  *  when nothing is open, so the slot keeps its normal occupant. */
 export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
@@ -478,11 +443,27 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
     };
   }, [active, upsert]);
 
+  // Tab state — must be declared before any early return (Rules of Hooks).
+  // Derived values (isHtml, isEditable) used in the initialiser are re-applied
+  // by the artifact-change effect below.
+  const [activeTab, setActiveTab] = useState<'preview' | 'code' | 'diff'>(
+    'preview'
+  );
+  const activeIdForTab = active?.id ?? '';
+  useEffect(() => {
+    const html = !!(
+      active?.lang === 'html' || /\.html?$/i.test(active?.title ?? '')
+    );
+    const img = IMAGE_EXT.test(active?.title ?? '');
+    setActiveTab(html ? 'preview' : img ? 'preview' : 'code');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIdForTab]);
+
   if (!ctx || !active) return <>{fallback}</>;
 
-  const isHtml =
-    active.lang === 'html' || /\.html?$/i.test(active.title);
+  const isHtml = active.lang === 'html' || /\.html?$/i.test(active.title);
   const isImage = IMAGE_EXT.test(active.title);
+  const isEditable = !isImage;
 
   const handleDownload = () => {
     const a = document.createElement('a');
@@ -509,7 +490,7 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
   return (
     <div
       style={{
-        width: '440px',
+        width: '520px',
         height: '100vh',
         display: 'flex',
         flexDirection: 'column',
@@ -525,7 +506,7 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
           borderBottom: '1px solid var(--colorNeutralStroke1)',
         }}
       >
-        {/* Selector: every artifact of the conversation in ONE dropdown */}
+        {/* Artifact selector dropdown */}
         <Menu>
           <MenuTrigger disableButtonEnhancement>
             <Button
@@ -560,6 +541,36 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
             </MenuList>
           </MenuPopover>
         </Menu>
+
+        {/* Preview / Code / Diff tab buttons */}
+        {isHtml && (
+          <Button
+            appearance={activeTab === 'preview' ? 'primary' : 'subtle'}
+            size="small"
+            onClick={() => setActiveTab('preview')}
+          >
+            Preview
+          </Button>
+        )}
+        {isEditable && (
+          <Button
+            appearance={activeTab === 'code' ? 'primary' : 'subtle'}
+            size="small"
+            onClick={() => setActiveTab('code')}
+          >
+            Code
+          </Button>
+        )}
+        {isEditable && (
+          <Button
+            appearance={activeTab === 'diff' ? 'primary' : 'subtle'}
+            size="small"
+            onClick={() => setActiveTab('diff')}
+          >
+            Diff
+          </Button>
+        )}
+
         <Button
           appearance="subtle"
           size="small"
@@ -575,29 +586,43 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
           onClick={ctx.close}
         />
       </div>
-      <div style={{ flex: 1, overflow: 'auto', padding: '8px' }}>
-        {isImage && active.downloadUrl ? (
-          <img
-            src={active.downloadUrl}
-            alt={active.title}
-            style={{ maxWidth: '100%' }}
+
+      {/* Content area */}
+      {activeTab === 'preview' && (
+        <div style={{ flex: 1, overflow: 'auto', padding: '8px' }}>
+          {isImage && active.downloadUrl ? (
+            <img
+              src={active.downloadUrl}
+              alt={active.title}
+              style={{ maxWidth: '100%' }}
+            />
+          ) : isHtml ? (
+            <HtmlPreview html={content} title={active.title} />
+          ) : (
+            <div
+              style={{
+                padding: '16px',
+                fontSize: '12px',
+                color: 'var(--colorNeutralForeground3)',
+              }}
+            >
+              {active.downloadUrl ? 'Loading…' : 'Empty file.'}
+            </div>
+          )}
+        </div>
+      )}
+
+      {(activeTab === 'code' || activeTab === 'diff') && isEditable && (
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <WorkspaceEditor
+            title={active.title}
+            content={content}
+            lang={active.lang || undefined}
+            tab={activeTab as 'code' | 'diff'}
+            onTabChange={(t) => setActiveTab(t)}
           />
-        ) : isHtml ? (
-          <HtmlPreview html={content} title={active.title} />
-        ) : content ? (
-          <ArtifactCodeView lang={active.lang} content={content} />
-        ) : (
-          <div
-            style={{
-              padding: '16px',
-              fontSize: '12px',
-              color: 'var(--colorNeutralForeground3)',
-            }}
-          >
-            {active.downloadUrl ? 'Loading…' : 'Empty file.'}
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };
