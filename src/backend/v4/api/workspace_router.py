@@ -110,9 +110,9 @@ def _validated_id(value: str, field_name: str) -> str:
     return candidate
 
 
-def _validated_segment(value: str, field_name: str) -> Path:
-    """Return a validated single path segment as Path."""
-    return Path(_validated_id(value, field_name))
+def _validated_segment(value: str, field_name: str) -> str:
+    """Return a validated single path segment."""
+    return _validated_id(value, field_name)
 
 
 def _validated_rel_path(raw: str) -> Path:
@@ -128,7 +128,7 @@ def _workspace_for(request: Request, workspace_id: str) -> Path:
     user_id = _validated_segment(_auth_user(request), "user id")
     safe_workspace_id = _validated_segment(workspace_id, "workspace id")
     root = WORKSPACE_ROOT.resolve()
-    ws = (root / user_id / safe_workspace_id).resolve()
+    ws = (root / Path(user_id) / Path(safe_workspace_id)).resolve()
     try:
         ws.relative_to(root)
     except ValueError:
