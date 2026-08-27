@@ -21,15 +21,21 @@ export interface WorkspaceCreateRequest {
 
 const BASE = '/api/v4/workspaces';
 
-async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
+  await ensureFreshToken();
+
+  const extraHeaders = init.headers
+    ? Object.fromEntries(new Headers(init.headers).entries())
+    : {};
+
+  const res = await fetch(resolveApiUrl(url), {
     ...init,
+    headers: headerBuilder({ 'Content-Type': 'application/json', ...extraHeaders }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(
-      `WorkspaceService ${init?.method ?? 'GET'} ${url}: ${res.status} ${text}`
+      `WorkspaceService ${init.method ?? 'GET'} ${url}: ${res.status} ${text}`
     );
   }
   if (res.status === 204) return undefined as unknown as T;
