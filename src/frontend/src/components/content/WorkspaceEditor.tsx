@@ -27,7 +27,11 @@ import {
   Checkmark20Regular,
 } from '@fluentui/react-icons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { resolveApiUrl } from '../../api/config';
+import {
+  ensureFreshToken,
+  headerBuilder,
+  resolveApiUrl,
+} from '../../api/config';
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -76,8 +80,16 @@ function workspacePath(title: string): string {
 }
 
 async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
+  // Same identity as every other API call (apiClient/WorkspaceService):
+  // explicit principal headers. Without them the backend dev-fallback invents
+  // a SECOND user root and the editor writes where the selector cannot see.
+  await ensureFreshToken();
   const res = await fetch(resolveApiUrl(url), {
     ...init,
+    headers: headerBuilder({
+      'Content-Type': 'application/json',
+      ...(init.headers as Record<string, string> | undefined),
+    }),
     credentials: 'include',
   });
   if (!res.ok) {

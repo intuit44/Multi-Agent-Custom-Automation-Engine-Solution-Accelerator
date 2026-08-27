@@ -73,6 +73,12 @@ const PlanPage: React.FC = () => {
   const navigate = useNavigate();
   const { showToast, dismissToast } = useInlineToaster();
 
+  // Active workspace from WorkspaceSelector — reactive so switching in the
+  // left panel immediately re-points Monaco and MCP at the new path.
+  const [activeWorkspaceOverride, setActiveWorkspaceOverride] = useState<
+    string | null
+  >(() => localStorage.getItem('macae_active_workspace_id'));
+
   // Redux hooks for plan state management
   const dispatch = useAppDispatch();
   const planData = useAppSelector(selectPlanData);
@@ -1224,98 +1230,105 @@ const PlanPage: React.FC = () => {
     );
   }
 
+  const activeWorkspaceId =
+    activeWorkspaceOverride ||
+    planData?.plan?.session_id ||
+    closedSessionId ||
+    routeSessionId ||
+    '';
+
   return (
-    <HtmlPreviewProvider
-      workspaceId={
-        planData?.plan?.session_id || closedSessionId || routeSessionId || ''
-      }
-    >
+    <HtmlPreviewProvider workspaceId={activeWorkspaceId}>
       <CoralShellColumn>
         <CoralShellRow>
-        {/* ✅ RESTORED: PlanPanelLeft for navigation */}
-        <PlanPanelLeft
-          reloadTasks={reloadLeftList}
-          onNewTaskButton={handleNewTaskButton}
-          restReload={resetReload}
-          onTeamSelect={setSelectedTeam}
-          onTeamUpload={async () => {}}
-          isHomePage={!planId && !routeSessionId}
-          selectedTeam={selectedTeam}
-          onNavigationWithAlert={handleNavigationWithAlert}
-        />
+          {/* ✅ RESTORED: PlanPanelLeft for navigation */}
+          <PlanPanelLeft
+            reloadTasks={reloadLeftList}
+            onNewTaskButton={handleNewTaskButton}
+            restReload={resetReload}
+            onTeamSelect={setSelectedTeam}
+            onTeamUpload={async () => {}}
+            isHomePage={!planId && !routeSessionId}
+            selectedTeam={selectedTeam}
+            onNavigationWithAlert={handleNavigationWithAlert}
+            onWorkspaceChange={setActiveWorkspaceOverride}
+          />
 
-        <Content>
-          {/* isPlanMode, NOT planId: once the plan closes in place the URL
+          <Content>
+            {/* isPlanMode, NOT planId: once the plan closes in place the URL
               still carries /plan/:id while planData is cleared — keyed on
               planId this guard swapped the whole chat for the plan spinner
               (no input, canvas gone). Chat mode never shows it. */}
-          {isPlanMode && (loading || !planData) ? (
-            <>
-              <div className="plan-loading-spinner">
-                <Spinner size="medium" />
-                <Text>Loading plan data...</Text>
-              </div>
-              <LoadingMessage loadingMessage={loadingMessage} iconSrc={Octo} />
-            </>
-          ) : (
-            <>
-              <ContentToolbar
-                panelTitle={
-                  isPlanMode ? 'Multi-Agent Planner' : 'Multi-Agent Chat'
-                }
-              >
-                <InspectorLink />
-              </ContentToolbar>
+            {isPlanMode && (loading || !planData) ? (
+              <>
+                <div className="plan-loading-spinner">
+                  <Spinner size="medium" />
+                  <Text>Loading plan data...</Text>
+                </div>
+                <LoadingMessage
+                  loadingMessage={loadingMessage}
+                  iconSrc={Octo}
+                />
+              </>
+            ) : (
+              <>
+                <ContentToolbar
+                  panelTitle={
+                    isPlanMode ? 'Multi-Agent Planner' : 'Multi-Agent Chat'
+                  }
+                >
+                  <InspectorLink />
+                </ContentToolbar>
 
-              <PlanChat
-                key={chatKey}
-                planData={planData}
-                loading={loading}
-                messagesContainerRef={messagesContainerRef}
-                input={input}
-                setInput={setInput}
-                agentMessages={agentMessages}
-                streamingMessageBuffer={streamingMessageBuffer}
-                showBufferingText={showBufferingText}
-                submittingChatDisableInput={submittingChatDisableInput}
-                waitingForPlan={waitingForPlan}
-                showProcessingPlanSpinner={showProcessingPlanSpinner}
-                showApprovalButtons={showApprovalButtons}
-                processingApproval={processingApproval}
-                planApprovalRequest={planApprovalRequest}
-                OnChatSubmit={handleOnchatSubmit}
-                handleApprovePlan={handleApprovePlan}
-                handleRejectPlan={handleRejectPlan}
-                attachedFiles={attachedFiles}
-                generatedFiles={generatedFiles}
-                onFileSelect={handleFileSelect}
-                onRemoveFile={removeAttachedFile}
-                onRemoveGeneratedFile={removeGeneratedFile}
-                planLane={planLane}
-                onPlanLaneChange={setPlanLane}
-                showPlanLaneToggle={!isPlanMode}
-                bufferAt={bufferAt}
-              />
-            </>
-          )}
-        </Content>
-
-        {/* Right slot: an open HTML preview takes it; otherwise the plan
-            panel (plan mode) or nothing (chat mode) — the preview is the
-            canvas seed and must never inflate the composer above ChatInput. */}
-        <PreviewRightSlot
-          fallback={
-            isPlanMode ? (
-              <React.Suspense fallback={null}>
-                <PlanPanelRight
+                <PlanChat
+                  key={chatKey}
                   planData={planData}
                   loading={loading}
+                  messagesContainerRef={messagesContainerRef}
+                  input={input}
+                  setInput={setInput}
+                  agentMessages={agentMessages}
+                  streamingMessageBuffer={streamingMessageBuffer}
+                  showBufferingText={showBufferingText}
+                  submittingChatDisableInput={submittingChatDisableInput}
+                  waitingForPlan={waitingForPlan}
+                  showProcessingPlanSpinner={showProcessingPlanSpinner}
+                  showApprovalButtons={showApprovalButtons}
+                  processingApproval={processingApproval}
                   planApprovalRequest={planApprovalRequest}
+                  OnChatSubmit={handleOnchatSubmit}
+                  handleApprovePlan={handleApprovePlan}
+                  handleRejectPlan={handleRejectPlan}
+                  attachedFiles={attachedFiles}
+                  generatedFiles={generatedFiles}
+                  onFileSelect={handleFileSelect}
+                  onRemoveFile={removeAttachedFile}
+                  onRemoveGeneratedFile={removeGeneratedFile}
+                  planLane={planLane}
+                  onPlanLaneChange={setPlanLane}
+                  showPlanLaneToggle={!isPlanMode}
+                  bufferAt={bufferAt}
                 />
-              </React.Suspense>
-            ) : null
-          }
-        />
+              </>
+            )}
+          </Content>
+
+          {/* Right slot: an open HTML preview takes it; otherwise the plan
+            panel (plan mode) or nothing (chat mode) — the preview is the
+            canvas seed and must never inflate the composer above ChatInput. */}
+          <PreviewRightSlot
+            fallback={
+              isPlanMode ? (
+                <React.Suspense fallback={null}>
+                  <PlanPanelRight
+                    planData={planData}
+                    loading={loading}
+                    planApprovalRequest={planApprovalRequest}
+                  />
+                </React.Suspense>
+              ) : null
+            }
+          />
         </CoralShellRow>
 
         {/* Plan Cancellation Confirmation Dialog */}
