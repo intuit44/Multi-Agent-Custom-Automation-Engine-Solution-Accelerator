@@ -520,7 +520,7 @@ def create_workspace(
     # Derive workspace_id from supplied name if not given
     raw_id = (body.workspace_id or body.name).strip()
     # Slugify: lowercase, replace non-alnum runs with '-', trim dashes
-    slug = re.sub(r"[^A-Za-z0-9]+", "-", raw_id).strip("-")
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", raw_id).strip("-").lower()
     if not slug:
         slug = "workspace"
     workspace_id = slug[:64]
