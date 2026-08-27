@@ -110,10 +110,23 @@ def _validated_id(value: str, field_name: str) -> str:
     return candidate
 
 
+def _validated_segment(value: str, field_name: str) -> Path:
+    """Return a validated single path segment as Path."""
+    return Path(_validated_id(value, field_name))
+
+
+def _validated_rel_path(raw: str) -> Path:
+    """Return a validated relative path (workspace-local)."""
+    rel_path = Path(raw.replace("\\", "/").strip())
+    if str(rel_path) in {"", "."} or rel_path.is_absolute() or ".." in rel_path.parts:
+        raise HTTPException(status_code=400, detail="Path outside workspace.")
+    return rel_path
+
+
 def _workspace_for(request: Request, workspace_id: str) -> Path:
     """Resolve (and lazily create) the caller's workspace directory."""
-    user_id = _validated_id(_auth_user(request), "user id")
-    safe_workspace_id = _validated_id(workspace_id, "workspace id")
+    user_id = _validated_segment(_auth_user(request), "user id")
+    safe_workspace_id = _validated_segment(workspace_id, "workspace id")
     root = WORKSPACE_ROOT.resolve()
     ws = (root / user_id / safe_workspace_id).resolve()
     try:
@@ -151,9 +164,7 @@ def _workspace_for(request: Request, workspace_id: str) -> Path:
 
 def _resolve(ws: Path, raw: str) -> Path:
     """Resolve *raw* relative to the workspace; reject traversal."""
-    rel_path = Path(raw.replace("\\", "/").strip())
-    if str(rel_path) in {"", "."} or rel_path.is_absolute() or ".." in rel_path.parts:
-        raise HTTPException(status_code=400, detail="Path outside workspace.")
+    rel_path = _validated_rel_path(raw)
     candidate = (ws / rel_path).resolve()
     try:
         rel = candidate.relative_to(ws)
