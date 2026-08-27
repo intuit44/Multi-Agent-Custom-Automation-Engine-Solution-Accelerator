@@ -127,18 +127,24 @@ def _validated_rel_path(raw: str) -> Path:
     return rel_path
 
 
+def _resolve_under(base: Path, *parts: str) -> Path:
+    """Resolve a path under base and reject escapes outside base."""
+    resolved_base = base.resolve()
+    resolved_path = (resolved_base.joinpath(*parts)).resolve()
+    try:
+        resolved_path.relative_to(resolved_base)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid workspace path.")
+    return resolved_path
+
+
 def _workspace_for(request: Request, workspace_id: str) -> Path:
     """Resolve (and lazily create) the caller's workspace directory."""
     user_id = _validated_segment(_auth_user(request), "user id")
     safe_workspace_id = _validated_segment(workspace_id, "workspace id")
     root = WORKSPACE_ROOT.resolve()
-    user_root = (root / user_id).resolve()
-    ws = (user_root / safe_workspace_id).resolve()
-    try:
-        user_root.relative_to(root)
-        ws.relative_to(user_root)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid workspace path.")
+    user_root = _resolve_under(root, user_id)
+    ws = _resolve_under(user_root, safe_workspace_id)
     if not (ws / ".git").is_dir():
         with _init_lock:
             if not (ws / ".git").is_dir():  # re-check under the lock
