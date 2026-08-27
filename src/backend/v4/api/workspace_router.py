@@ -544,9 +544,14 @@ def create_workspace(
                 ws.mkdir(parents=True, exist_ok=True)
                 # Exclude meta file from the user's git history
                 gitignore = ws / ".gitignore"
-                existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+                existing = (
+                    gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+                )
                 if _META_FILE not in existing.splitlines():
-                    gitignore.write_text(existing.rstrip("\n") + "\n" + _META_FILE + "\n", encoding="utf-8")
+                    gitignore.write_text(
+                        existing.rstrip("\n") + "\n" + _META_FILE + "\n",
+                        encoding="utf-8",
+                    )
                 for cmd in (
                     ("init", "-q"),
                     ("config", "user.name", _GIT_IDENTITY[0]),
