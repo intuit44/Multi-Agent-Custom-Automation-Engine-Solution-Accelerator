@@ -200,7 +200,8 @@ def _is_binary(data: bytes) -> bool:
     return b"\x00" in data[:8192]
 
 
-def _read_text_guarded(resolved: Path, path: str) -> bytes:
+def _read_text_guarded(ws: Path, resolved: Path, path: str) -> bytes:
+    resolved = _ensure_within_workspace(ws, resolved)
     if not resolved.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
     if not resolved.is_file():
@@ -318,7 +319,7 @@ def get_file(request: Request, workspace_id: str, path: str) -> FileResponse:
     """Read a workspace file as text."""
     ws = _workspace_for(request, workspace_id)
     resolved = _resolve(ws, path)
-    raw = _read_text_guarded(resolved, path)
+    raw = _read_text_guarded(ws, resolved, path)
     stat = resolved.stat()
     return FileResponse(
         path=path,
@@ -359,7 +360,7 @@ def get_diff(request: Request, workspace_id: str, path: str) -> DiffResponse:
     """Return git HEAD vs disk for Monaco DiffEditor."""
     ws = _workspace_for(request, workspace_id)
     resolved = _resolve(ws, path)
-    raw = _read_text_guarded(resolved, path)
+    raw = _read_text_guarded(ws, resolved, path)
     rel = str(resolved.relative_to(ws))
     show = _git(ws, "show", f"HEAD:{rel}")
     head_content = (
