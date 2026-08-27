@@ -132,9 +132,11 @@ def _workspace_for(request: Request, workspace_id: str) -> Path:
     user_id = _validated_segment(_auth_user(request), "user id")
     safe_workspace_id = _validated_segment(workspace_id, "workspace id")
     root = WORKSPACE_ROOT.resolve()
-    ws = (root / Path(user_id) / Path(safe_workspace_id)).resolve()
+    user_root = (root / user_id).resolve()
+    ws = (user_root / safe_workspace_id).resolve()
     try:
-        ws.relative_to(root)
+        user_root.relative_to(root)
+        ws.relative_to(user_root)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid workspace path.")
     if not (ws / ".git").is_dir():
