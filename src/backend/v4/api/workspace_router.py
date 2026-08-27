@@ -136,7 +136,9 @@ def _validated_segment(value: str, field_name: str) -> str:
 def _validated_rel_path(raw: str) -> Path:
     """Return a validated relative path (workspace-local)."""
     rel_path = Path(raw.replace("\\", "/").strip())
-    if str(rel_path) in {"", "."} or rel_path.is_absolute() or ".." in rel_path.parts:
+    if str(rel_path) in {"", "."} or rel_path.is_absolute():
+        raise HTTPException(status_code=400, detail="Path outside workspace.")
+    if ".." in rel_path.parts or "." in rel_path.parts or "" in rel_path.parts:
         raise HTTPException(status_code=400, detail="Path outside workspace.")
     return rel_path
 
@@ -195,9 +197,10 @@ def _workspace_for(request: Request, workspace_id: str) -> Path:
 def _resolve(ws: Path, raw: str) -> Path:
     """Resolve *raw* relative to the workspace; reject traversal."""
     rel_path = _validated_rel_path(raw)
-    candidate = (ws / rel_path).resolve()
+    ws_root = ws.resolve(strict=False)
+    candidate = (ws_root / rel_path).resolve(strict=False)
     try:
-        rel = candidate.relative_to(ws)
+        rel = candidate.relative_to(ws_root)
     except ValueError:
         raise HTTPException(status_code=400, detail="Path outside workspace.")
     if ".git" in rel.parts:
@@ -207,8 +210,8 @@ def _resolve(ws: Path, raw: str) -> Path:
 
 def _ensure_within_workspace(ws: Path, candidate: Path) -> Path:
     """Final guard for filesystem sinks: ensure candidate is within workspace."""
-    ws_resolved = ws.resolve()
-    candidate_resolved = candidate.resolve()
+    ws_resolved = ws.resolve(strict=False)
+    candidate_resolved = candidate.resolve(strict=False)
     try:
         candidate_resolved.relative_to(ws_resolved)
     except ValueError:
