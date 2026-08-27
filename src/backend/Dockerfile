@@ -23,6 +23,10 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
 FROM base
 
+# git: required by v4/api/workspace_router.py (per-workspace repos)
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /app /app
 COPY --from=builder /bin/uv /bin/uv
 

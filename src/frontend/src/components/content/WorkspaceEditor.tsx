@@ -1,24 +1,22 @@
 /**
- * WorkspaceEditor — Monaco-powered Code + Diff tabs for PreviewRightSlot.
+ * WorkspaceEditor — Monaco Code + Diff tabs bound to the per-session workspace.
  *
  * Architecture
  * ────────────
- *   Browser Monaco  ←→  PUT /api/v4/workspace/files/{path}  ←→  disk
- *   MCP filesystem  ←→  same disk path
+ *   Monaco  ←→  /api/v4/workspace/{workspaceId}/files/{path}  ←→  server-side
+ *   Git     ←→  /api/v4/workspace/{workspaceId}/commit|diff|restore   resolver:
+ *                                                    {root}/{user_id}/{workspaceId}/
  *
- * Both Monaco (user) and MCP agents write to the same physical workspace,
- * so they always share one source of truth.
+ * The editor only ever knows the workspace IDENTIFIER (today: the chat
+ * session id) — the server resolves it to a per-user data directory with its
+ * own git repo. Identical in dev and prod; never the app source tree.
  *
- * Tabs
- * ────
- *   Code  — editable Monaco; Save writes PUT /workspace/files/{path}
- *   Diff  — MonacoDiffEditor: git HEAD (original) vs current disk content
- *           loaded from GET /workspace/diff/{path}
- *
- * Availability
- * ────────────
- *   Endpoints are dev-only (backend returns 403 in prod).
- *   When unavailable the tab renders a graceful message instead of crashing.
+ * Tabs vs actions
+ * ───────────────
+ *   Tab BUTTONS render only when the parent does not control `tab` (the
+ *   panel header already renders Preview/Code/Diff). The ACTION buttons
+ *   (Save / Commit / Revert / diff reload) always render: the parent owns
+ *   tab navigation, the editor owns file actions.
  */
 
 import Editor, { DiffEditor } from '@monaco-editor/react';
@@ -26,6 +24,7 @@ import { Button, Spinner, Tooltip } from '@fluentui/react-components';
 import {
   Save20Regular,
   ArrowCounterclockwise20Regular,
+  Checkmark20Regular,
 } from '@fluentui/react-icons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { resolveApiUrl } from '../../api/config';
@@ -77,7 +76,10 @@ function workspacePath(title: string): string {
 }
 
 async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(resolveApiUrl(url), { ...init, credentials: 'include' });
+  const res = await fetch(resolveApiUrl(url), {
+    ...init,
+    credentials: 'include',
+  });
   if (!res.ok) {
     const detail = await res.text().catch(() => res.statusText);
     throw new Error(`${res.status} ${detail}`);
@@ -96,6 +98,9 @@ interface WorkspaceEditorProps {
   content: string;
   /** Monaco language override; auto-detected from title if omitted. */
   lang?: string;
+  /** Workspace identifier (the chat session id). Without it the editor is
+   *  read-only: there is no workspace to save into. */
+  workspaceId?: string | null;
   /** Controlled active tab. When provided the parent owns tab state. */
   tab?: EditorTab;
   /** Called when the user switches tabs. Required when `tab` is provided. */
@@ -108,11 +113,15 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
   title,
   content,
   lang,
+  workspaceId,
   tab: tabProp,
   onTabChange,
 }) => {
   const path = workspacePath(title);
   const language = lang ?? langFromFilename(title);
+  const base = workspaceId
+    ? `/api/v4/workspace/${encodeURIComponent(workspaceId)}`
+    : null;
 
   const [tabInternal, setTabInternal] = useState<EditorTab>('code');
   const tab = tabProp ?? tabInternal;
@@ -126,7 +135,7 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
 
   // ── Code tab state ──
   const [editorValue, setEditorValue] = useState(content);
-  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const lastSaved = useRef(content);
@@ -143,7 +152,7 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
       setDirty(false);
       setSaveMsg(null);
     }
-  }, [path, content]);
+  }, [path, content, setTab]);
 
   // Keep editor in sync when artifact content updates (e.g. streaming finishes)
   // but do NOT overwrite unsaved user edits.
@@ -162,10 +171,11 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
   }, []);
 
   const handleSave = useCallback(async () => {
-    setSaving(true);
+    if (!base) return;
+    setBusy(true);
     setSaveMsg(null);
     try {
-      await apiFetch(`/api/v4/workspace/files/${path}`, {
+      await apiFetch(`${base}/files/${path}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: editorValue }),
@@ -177,9 +187,33 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
     } catch (e) {
       setSaveMsg(`Error: ${(e as Error).message}`);
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
-  }, [editorValue, path]);
+  }, [base, editorValue, path]);
+
+  const handleCommit = useCallback(async () => {
+    if (!base) return;
+    setBusy(true);
+    setSaveMsg(null);
+    try {
+      const r = await apiFetch<{ committed: boolean; sha: string }>(
+        `${base}/commit`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: `Update ${path}` }),
+        }
+      );
+      setSaveMsg(
+        r.committed ? `Committed ${r.sha.slice(0, 7)} ✓` : 'Nothing to commit'
+      );
+      setTimeout(() => setSaveMsg(null), 3000);
+    } catch (e) {
+      setSaveMsg(`Error: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [base, path]);
 
   const handleRevert = useCallback(() => {
     setEditorValue(lastSaved.current);
@@ -196,12 +230,13 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
   const [diffError, setDiffError] = useState<string | null>(null);
 
   const loadDiff = useCallback(async () => {
+    if (!base) return;
     setDiffLoading(true);
     setDiffError(null);
     setDiffData(null);
     try {
       const data = await apiFetch<{ original: string; modified: string }>(
-        `/api/v4/workspace/diff/${path}`
+        `${base}/diff/${path}`
       );
       setDiffData(data);
     } catch (e) {
@@ -210,7 +245,7 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
     } finally {
       setDiffLoading(false);
     }
-  }, [path]);
+  }, [base, path]);
 
   useEffect(() => {
     if (tab === 'diff') loadDiff();
@@ -230,8 +265,7 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Tab bar — only rendered when WorkspaceEditor manages tab state internally */}
-      {!tabProp && (
+      {/* Action bar: tab buttons only when uncontrolled; actions always. */}
       <div
         style={{
           display: 'flex',
@@ -243,10 +277,25 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
           flexShrink: 0,
         }}
       >
-        {tabBtn('code', 'Code')}
-        {tabBtn('diff', 'Diff')}
+        {!tabProp && (
+          <>
+            {tabBtn('code', 'Code')}
+            {tabBtn('diff', 'Diff')}
+          </>
+        )}
 
-        {tab === 'code' && (
+        {!base && (
+          <span
+            style={{
+              fontSize: '11px',
+              color: 'var(--colorNeutralForeground3)',
+            }}
+          >
+            Read-only: no active workspace for this view.
+          </span>
+        )}
+
+        {tab === 'code' && base && (
           <div
             style={{
               display: 'flex',
@@ -281,17 +330,31 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
               <Button
                 appearance={dirty ? 'primary' : 'subtle'}
                 size="small"
-                icon={saving ? <Spinner size="tiny" /> : <Save20Regular />}
+                icon={busy ? <Spinner size="tiny" /> : <Save20Regular />}
                 onClick={handleSave}
-                disabled={saving || !dirty}
+                disabled={busy || !dirty}
               >
                 Save
+              </Button>
+            </Tooltip>
+            <Tooltip
+              content="Commit all workspace changes to git"
+              relationship="label"
+            >
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<Checkmark20Regular />}
+                onClick={handleCommit}
+                disabled={busy || dirty}
+              >
+                Commit
               </Button>
             </Tooltip>
           </div>
         )}
 
-        {tab === 'diff' && (
+        {tab === 'diff' && base && (
           <div style={{ marginLeft: 'auto' }}>
             <Tooltip
               content="Reload diff from git HEAD vs disk"
@@ -308,7 +371,6 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
           </div>
         )}
       </div>
-      )}
 
       {/* Editor area */}
       <div style={{ flex: 1, minHeight: 0 }}>
@@ -319,6 +381,7 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
             value={editorValue}
             onChange={handleEditorChange}
             options={{
+              readOnly: !base,
               minimap: { enabled: false },
               fontSize: 13,
               lineNumbers: 'on',
@@ -333,6 +396,17 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
 
         {tab === 'diff' && (
           <>
+            {!base && (
+              <div
+                style={{
+                  padding: '16px',
+                  fontSize: '12px',
+                  color: 'var(--colorNeutralForeground3)',
+                }}
+              >
+                No active workspace — diff unavailable.
+              </div>
+            )}
             {diffLoading && (
               <div
                 style={{
@@ -352,9 +426,7 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
                   color: 'var(--colorStatusDangerForeground1)',
                 }}
               >
-                {diffError.includes('403')
-                  ? 'Workspace diff is only available in dev mode.'
-                  : diffError}
+                {diffError}
               </div>
             )}
             {diffData && !diffLoading && (

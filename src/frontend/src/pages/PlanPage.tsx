@@ -1225,7 +1225,11 @@ const PlanPage: React.FC = () => {
   }
 
   return (
-    <HtmlPreviewProvider>
+    <HtmlPreviewProvider
+      workspaceId={
+        planData?.plan?.session_id || closedSessionId || routeSessionId || ''
+      }
+    >
       <CoralShellColumn>
         <CoralShellRow>
         {/* ✅ RESTORED: PlanPanelLeft for navigation */}
