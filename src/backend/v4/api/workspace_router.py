@@ -33,11 +33,21 @@ from common.config.app_config import config
 workspace_router = APIRouter(prefix="/workspace", tags=["workspace"])
 
 # ── constants ────────────────────────────────────────────────────────────────
+
+
+def _default_workspace_root() -> Path:
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / ".git").is_dir():  # repo root en dev
+            return parent
+    # prod (/app, sin .git): usar el ancestro más alto disponible sin IndexError.
+    # En prod el editor es dev-only (403 antes de tocar WORKSPACE_ROOT),
+    # así que este path nunca se usa realmente.
+    return here.parents[min(4, len(here.parents) - 1)]
+
+
 WORKSPACE_ROOT = Path(
-    os.getenv(
-        "MACAE_WORKSPACE_ROOT",
-        str(Path(__file__).resolve().parents[4]),
-    )
+    os.getenv("MACAE_WORKSPACE_ROOT", str(_default_workspace_root()))
 ).resolve()
 MAX_FILE_BYTES = 1 * 1024 * 1024  # 1 MB
 
