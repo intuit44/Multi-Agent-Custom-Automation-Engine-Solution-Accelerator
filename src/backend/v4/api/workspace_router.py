@@ -296,7 +296,8 @@ def list_files(request: Request, workspace_id: str) -> FileListResponse:
     for root, dirs, names in os.walk(ws):
         dirs[:] = [d for d in dirs if d != ".git"]
         for name in sorted(names):
-            full = Path(root) / name
+            candidate = Path(root) / name
+            full = _ensure_within_workspace(ws, candidate)
             stat = full.stat()
             files.append(
                 FileInfo(
