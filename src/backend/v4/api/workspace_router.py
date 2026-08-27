@@ -123,7 +123,16 @@ def _workspace_for(request: Request, workspace_id: str) -> Path:
     if not (ws / ".git").is_dir():
         with _init_lock:
             if not (ws / ".git").is_dir():  # re-check under the lock
+                try:
+                    ws.parent.resolve().relative_to(root)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid workspace path.")
                 ws.mkdir(parents=True, exist_ok=True)
+                ws = ws.resolve()
+                try:
+                    ws.relative_to(root)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid workspace path.")
                 for cmd in (
                     ("init", "-q"),
                     ("config", "user.name", _GIT_IDENTITY[0]),
