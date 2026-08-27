@@ -111,8 +111,9 @@ app_v4 = APIRouter(
 
 # Workspace file-editing (dev-only): same physical path as mcp-server-filesystem
 # so Monaco (browser) and MCP agents share one source of truth.
-from v4.api.workspace_router import workspace_router  # noqa: E402
+from v4.api.workspace_router import workspace_router, workspaces_router  # noqa: E402
 
+app_v4.include_router(workspaces_router)
 app_v4.include_router(workspace_router)
 
 

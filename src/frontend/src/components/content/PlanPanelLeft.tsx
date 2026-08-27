@@ -37,6 +37,7 @@ import { TeamConfig } from '../../models/Team';
 import TeamSelected from '../common/TeamSelected';
 import type { ChatSessionSummary } from '../../lib/types';
 import { SettingsModal } from '../settings/SettingsModal';
+import { WorkspaceSelector } from '../workspace/WorkspaceSelector';
 
 const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
   reloadTasks,
@@ -174,6 +175,9 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
           )}
         </div>
       )}
+
+      {/* Workspaces — oculto en rail */}
+      {!isRail && <WorkspaceSelector />}
 
       {/* Nueva tarea */}
       <Tooltip content="New task" relationship="label" positioning="after">
