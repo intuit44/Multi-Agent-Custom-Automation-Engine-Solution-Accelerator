@@ -33,8 +33,11 @@ Security
 - Every request resolves under {root}/{user_id}/… — a user can only ever
   touch their own workspaces.
 - workspace_id and user_id must match _SAFE_ID (no separators; a leading
-  alphanumeric forbids "." / ".." / dotfiles), and file paths are hardened
-  against traversal in _resolve.
+  alphanumeric forbids "." / ".." / dotfiles).
+- File paths are contained twice in _resolve: an os.path.normpath +
+  startswith prefix guard (the sanitizer form CodeQL's py/path-injection
+  analysis recognizes), then a symlink-collapsing resolve + relative_to
+  re-check. Do not "simplify" either away.
 - Binary files rejected (415); files over MAX_FILE_BYTES rejected (413).
 - Missing git binary is an explicit 503, never a silent no-op.
 """
@@ -55,7 +58,6 @@ from auth.auth_utils import get_authenticated_user_details
 workspace_router = APIRouter(prefix="/workspace/{workspace_id}", tags=["workspace"])
 
 # ── constants ────────────────────────────────────────────────────────────────
-_SAFE_WORKSPACE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 WORKSPACE_ROOT = Path(
     os.getenv("MACAE_WORKSPACE_ROOT", str(Path.home() / ".macae" / "workspaces"))
@@ -98,87 +100,29 @@ def _git(ws: Path, *args: str) -> "subprocess.CompletedProcess[bytes]":
         raise HTTPException(status_code=504, detail="git operation timed out.")
 
 
-def _validated_id(value: str, field_name: str) -> str:
-    candidate = value.strip()
-    if (
-        not candidate
-        or candidate in {".", ".."}
-        or "/" in candidate
-        or "\\" in candidate
-        or not _SAFE_ID.match(candidate)
-    ):
-        raise HTTPException(status_code=400, detail=f"Invalid {field_name}.")
-    return candidate
-
-
-def _validated_workspace_id(value: str) -> str:
-    """Return a validated workspace id safe for filesystem path composition."""
-    candidate = value.strip()
-    if (
-        not candidate
-        or candidate in {".", ".."}
-        or "/" in candidate
-        or "\\" in candidate
-        or not _SAFE_WORKSPACE_ID.match(candidate)
-    ):
-        raise HTTPException(status_code=400, detail="Invalid workspace id.")
-    return candidate
-
-
-def _validated_segment(value: str, field_name: str) -> str:
-    """Return a validated single path segment."""
-    candidate = _validated_id(value, field_name)
-    if field_name == "workspace id" and not _SAFE_WORKSPACE_ID.match(candidate):
-        raise HTTPException(status_code=400, detail="Invalid workspace id.")
-    return candidate
-
-
-def _validated_rel_path(raw: str) -> Path:
-    """Return a validated relative path (workspace-local)."""
-    normalized = os.path.normpath(raw.replace("\\", "/").strip())
-    rel_path = Path(normalized)
-    if normalized in {"", ".", "/"} or rel_path.is_absolute():
+def _contained(base: Path, *parts: str) -> Path:
+    """Join *parts* under *base* with the normpath + startswith containment
+    guard — the sanitizer form CodeQL recognizes as a py/path-injection
+    barrier. Callers must pre-validate parts semantically; this is the single
+    choke point every request-derived path flows through."""
+    joined = os.path.normpath(os.path.join(str(base), *parts))
+    if not joined.startswith(str(base) + os.sep):
         raise HTTPException(status_code=400, detail="Path outside workspace.")
-    if ".." in rel_path.parts or "." in rel_path.parts or "" in rel_path.parts:
-        raise HTTPException(status_code=400, detail="Path outside workspace.")
-    return rel_path
-
-
-def _resolve_under(base: Path, *parts: str) -> Path:
-    """Resolve a path under base and reject escapes outside base."""
-    resolved_base = base.resolve()
-    resolved_path = (resolved_base.joinpath(*parts)).resolve()
-    try:
-        resolved_path.relative_to(resolved_base)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid workspace path.")
-    return resolved_path
+    return Path(joined)
 
 
 def _workspace_for(request: Request, workspace_id: str) -> Path:
     """Resolve (and lazily create) the caller's workspace directory."""
-    user_id = _validated_segment(_auth_user(request), "user id")
-    safe_workspace_id = _validated_workspace_id(workspace_id)
-    root = WORKSPACE_ROOT.resolve()
-    user_root = _resolve_under(root, user_id)
-    ws = _resolve_under(user_root, safe_workspace_id)
+    user_id = _auth_user(request)
+    if not _SAFE_ID.match(user_id):
+        raise HTTPException(status_code=400, detail="Invalid user id.")
+    if not _SAFE_ID.match(workspace_id):
+        raise HTTPException(status_code=400, detail="Invalid workspace id.")
+    ws = _contained(WORKSPACE_ROOT, user_id, workspace_id)
     if not (ws / ".git").is_dir():
         with _init_lock:
             if not (ws / ".git").is_dir():  # re-check under the lock
-                try:
-                    ws.parent.resolve().relative_to(root)
-                except ValueError:
-                    raise HTTPException(
-                        status_code=400, detail="Invalid workspace path."
-                    )
                 ws.mkdir(parents=True, exist_ok=True)
-                ws = ws.resolve()
-                try:
-                    ws.relative_to(root)
-                except ValueError:
-                    raise HTTPException(
-                        status_code=400, detail="Invalid workspace path."
-                    )
                 for cmd in (
                     ("init", "-q"),
                     ("config", "user.name", _GIT_IDENTITY[0]),
@@ -197,40 +141,27 @@ def _workspace_for(request: Request, workspace_id: str) -> Path:
 
 def _resolve(ws: Path, raw: str) -> Path:
     """Resolve *raw* relative to the workspace; reject traversal."""
-    rel_path = _validated_rel_path(raw)
-    ws_root = ws.resolve(strict=False)
-    candidate = (ws_root / rel_path).resolve(strict=False)
+    rel_path = Path(raw.replace("\\", "/").strip())
+    if str(rel_path) in {"", "."} or rel_path.is_absolute() or ".." in rel_path.parts:
+        raise HTTPException(status_code=400, detail="Path outside workspace.")
+    candidate = _contained(ws, str(rel_path))
+    # Second, stronger runtime check: collapse symlinks and re-verify
+    # containment (normpath alone does not follow symlinks).
+    resolved = candidate.resolve()
     try:
-        rel = candidate.relative_to(ws_root)
+        rel = resolved.relative_to(ws)
     except ValueError:
         raise HTTPException(status_code=400, detail="Path outside workspace.")
     if ".git" in rel.parts:
         raise HTTPException(status_code=400, detail="The .git directory is managed.")
-    return candidate
-
-
-def _ensure_within_workspace(ws: Path, candidate: Path) -> Path:
-    """Final guard for filesystem sinks: ensure candidate is within workspace."""
-    try:
-        ws_resolved = ws.resolve(strict=True)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Workspace not found.")
-
-    # Resolve without requiring existence so this guard is safe for both reads and writes.
-    candidate_resolved = candidate.resolve(strict=False)
-
-    if candidate_resolved != ws_resolved and not candidate_resolved.is_relative_to(ws_resolved):
-        raise HTTPException(status_code=400, detail="Path outside workspace.")
-
-    return candidate_resolved
+    return resolved
 
 
 def _is_binary(data: bytes) -> bool:
     return b"\x00" in data[:8192]
 
 
-def _read_text_guarded(ws: Path, resolved: Path, path: str) -> bytes:
-    resolved = _ensure_within_workspace(ws, resolved)
+def _read_text_guarded(resolved: Path, path: str) -> bytes:
     if not resolved.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {path}")
     if not resolved.is_file():
@@ -325,8 +256,7 @@ def list_files(request: Request, workspace_id: str) -> FileListResponse:
     for root, dirs, names in os.walk(ws):
         dirs[:] = [d for d in dirs if d != ".git"]
         for name in sorted(names):
-            candidate = Path(root) / name
-            full = _ensure_within_workspace(ws, candidate)
+            full = Path(root) / name
             stat = full.stat()
             files.append(
                 FileInfo(
@@ -349,7 +279,7 @@ def get_file(request: Request, workspace_id: str, path: str) -> FileResponse:
     """Read a workspace file as text."""
     ws = _workspace_for(request, workspace_id)
     resolved = _resolve(ws, path)
-    raw = _read_text_guarded(ws, resolved, path)
+    raw = _read_text_guarded(resolved, path)
     stat = resolved.stat()
     return FileResponse(
         path=path,
@@ -366,11 +296,6 @@ def put_file(
     """Write a workspace file (parent directories are created inside the ws)."""
     ws = _workspace_for(request, workspace_id)
     resolved = _resolve(ws, path)
-    try:
-        resolved.relative_to(ws)
-        resolved.parent.relative_to(ws)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Path outside workspace.")
     if resolved.exists() and not resolved.is_file():
         raise HTTPException(status_code=400, detail="Path is a directory.")
     encoded = body.content.encode("utf-8")
@@ -390,7 +315,7 @@ def get_diff(request: Request, workspace_id: str, path: str) -> DiffResponse:
     """Return git HEAD vs disk for Monaco DiffEditor."""
     ws = _workspace_for(request, workspace_id)
     resolved = _resolve(ws, path)
-    raw = _read_text_guarded(ws, resolved, path)
+    raw = _read_text_guarded(resolved, path)
     rel = str(resolved.relative_to(ws))
     show = _git(ws, "show", f"HEAD:{rel}")
     head_content = (
@@ -470,7 +395,6 @@ def restore(
     """Restore one file from a ref (default HEAD) and return its content."""
     ws = _workspace_for(request, workspace_id)
     resolved = _resolve(ws, path)
-    resolved = _ensure_within_workspace(ws, resolved)
     ref = body.ref.strip() or "HEAD"
     if not _SAFE_REF.match(ref):
         raise HTTPException(status_code=400, detail="Invalid git ref.")
@@ -482,7 +406,7 @@ def restore(
             detail=f"Cannot restore {path} from {ref}: "
             + result.stderr.decode("utf-8", errors="replace"),
         )
-    raw = _read_text_guarded(ws, resolved, path)
+    raw = _read_text_guarded(resolved, path)
     stat = resolved.stat()
     return FileResponse(
         path=path,
