@@ -210,8 +210,11 @@ def _resolve(ws: Path, raw: str) -> Path:
 
 def _ensure_within_workspace(ws: Path, candidate: Path) -> Path:
     """Final guard for filesystem sinks: ensure candidate is within workspace."""
-    ws_resolved = ws.resolve(strict=False)
-    candidate_resolved = candidate.resolve(strict=False)
+    try:
+        ws_resolved = ws.resolve(strict=True)
+        candidate_resolved = candidate.resolve(strict=True)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found.")
     try:
         candidate_resolved.relative_to(ws_resolved)
     except ValueError:
