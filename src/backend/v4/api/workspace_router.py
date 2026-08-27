@@ -185,6 +185,17 @@ def _resolve(ws: Path, raw: str) -> Path:
     return candidate
 
 
+def _ensure_within_workspace(ws: Path, candidate: Path) -> Path:
+    """Final guard for filesystem sinks: ensure candidate is within workspace."""
+    ws_resolved = ws.resolve()
+    candidate_resolved = candidate.resolve()
+    try:
+        candidate_resolved.relative_to(ws_resolved)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Path outside workspace.")
+    return candidate_resolved
+
+
 def _is_binary(data: bytes) -> bool:
     return b"\x00" in data[:8192]
 
@@ -428,6 +439,7 @@ def restore(
     """Restore one file from a ref (default HEAD) and return its content."""
     ws = _workspace_for(request, workspace_id)
     resolved = _resolve(ws, path)
+    resolved = _ensure_within_workspace(ws, resolved)
     ref = body.ref.strip() or "HEAD"
     if not _SAFE_REF.match(ref):
         raise HTTPException(status_code=400, detail="Invalid git ref.")
