@@ -33,11 +33,20 @@ from common.config.app_config import config
 workspace_router = APIRouter(prefix="/workspace", tags=["workspace"])
 
 # ── constants ────────────────────────────────────────────────────────────────
+
+
+def _default_workspace_root() -> Path:
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / ".git").exists():  # repo root in dev
+            return parent
+    # In prod images (/app, no .git), fall back to the highest available ancestor.
+    # Note: the workspace editor is dev-only (403 before any endpoint uses WORKSPACE_ROOT).
+    return here.parents[min(4, len(here.parents) - 1)]
+
+
 WORKSPACE_ROOT = Path(
-    os.getenv(
-        "MACAE_WORKSPACE_ROOT",
-        str(Path(__file__).resolve().parents[4]),
-    )
+    os.getenv("MACAE_WORKSPACE_ROOT", str(_default_workspace_root()))
 ).resolve()
 MAX_FILE_BYTES = 1 * 1024 * 1024  # 1 MB
 
