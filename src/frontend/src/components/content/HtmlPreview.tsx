@@ -24,6 +24,7 @@ import React, {
 import {
   Button,
   Menu,
+  MenuDivider,
   MenuItem,
   MenuList,
   MenuPopover,
@@ -31,10 +32,12 @@ import {
 } from '@fluentui/react-components';
 import { apiClient } from '../../api/apiClient';
 import {
+  ArrowClockwise20Regular,
   ArrowDownload20Regular,
   ChevronDown20Regular,
   Code20Regular,
   Dismiss20Regular,
+  DocumentRegular,
   Eye20Regular,
 } from '@fluentui/react-icons';
 import { WorkspaceEditor } from './WorkspaceEditor';
@@ -454,6 +457,53 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
     };
   }, [active, upsert]);
 
+  // ── Workspace file browser ──
+  // The panel must show what EXISTS in the active workspace on entry — not
+  // only artifacts that passed through the chat. Same viewer, same identity:
+  // a workspace path and a chat chip with the same name are ONE artifact.
+  const wsId = ctx?.workspaceId ?? null;
+  const openArtifact = ctx?.open;
+  const [wsFiles, setWsFiles] = useState<Array<{ path: string }>>([]);
+  const loadWsFiles = useCallback(async () => {
+    if (!wsId) {
+      setWsFiles([]);
+      return;
+    }
+    try {
+      const r: { files?: Array<{ path: string }> } = await apiClient.get(
+        `/v4/workspace/${encodeURIComponent(wsId)}/files`
+      );
+      setWsFiles(r.files ?? []);
+    } catch {
+      setWsFiles([]);
+    }
+  }, [wsId]);
+  useEffect(() => {
+    loadWsFiles();
+  }, [loadWsFiles]);
+
+  const openWsFile = useCallback(
+    async (path: string) => {
+      if (!wsId || !upsert || !openArtifact) return;
+      try {
+        const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+        const f: { content?: string } = await apiClient.get(
+          `/v4/workspace/${encodeURIComponent(wsId)}/files/${encodedPath}`
+        );
+        upsert({
+          id: path,
+          title: path,
+          lang: (path.split('.').pop() || '').toLowerCase(),
+          content: f.content ?? '',
+        });
+        openArtifact(path);
+      } catch {
+        /* binario o >1MB: el backend lo rechaza y no entra al viewer */
+      }
+    },
+    [wsId, upsert, openArtifact]
+  );
+
   // Tab state — must be declared before any early return (Rules of Hooks).
   // Derived values (isHtml, isEditable) used in the initialiser are re-applied
   // by the artifact-change effect below.
@@ -470,7 +520,67 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeIdForTab]);
 
-  if (!ctx || !active) return <>{fallback}</>;
+  if (!ctx || !active) {
+    // Resting state: an explicit fallback (e.g. the plan tree) keeps priority;
+    // otherwise the slot shows the workspace files so entering a session never
+    // means hunting for chips in the chat scrollback.
+    if (fallback) return <>{fallback}</>;
+    if (!wsId || wsFiles.length === 0) return null;
+    return (
+      <div
+        style={{
+          width: '280px',
+          height: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          borderLeft: '1px solid var(--colorNeutralStroke1)',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '6px 8px',
+            borderBottom: '1px solid var(--colorNeutralStroke1)',
+          }}
+        >
+          <span style={{ flex: 1, fontSize: '13px', fontWeight: 600 }}>
+            {`Archivos (${wsFiles.length})`}
+          </span>
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<ArrowClockwise20Regular />}
+            aria-label="Refrescar archivos del workspace"
+            onClick={loadWsFiles}
+          />
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '4px' }}>
+          {wsFiles.map((f) => (
+            <Button
+              key={f.path}
+              appearance="subtle"
+              size="small"
+              icon={<DocumentRegular />}
+              style={{ width: '100%', justifyContent: 'flex-start' }}
+              onClick={() => openWsFile(f.path)}
+            >
+              <span
+                style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {f.path}
+              </span>
+            </Button>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   const isHtml = active.lang === 'html' || /\.html?$/i.test(active.title);
   const isImage = IMAGE_EXT.test(active.title);
@@ -549,6 +659,22 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
                   {a.title}
                 </MenuItem>
               ))}
+              {/* Workspace files not yet opened as artifacts — same viewer,
+                  merged by identity (path == artifact id). */}
+              {wsFiles.filter(
+                (f) => !ctx.artifacts.some((a) => a.id === f.path)
+              ).length > 0 && <MenuDivider />}
+              {wsFiles
+                .filter((f) => !ctx.artifacts.some((a) => a.id === f.path))
+                .map((f) => (
+                  <MenuItem
+                    key={`ws:${f.path}`}
+                    icon={<DocumentRegular />}
+                    onClick={() => openWsFile(f.path)}
+                  >
+                    {f.path}
+                  </MenuItem>
+                ))}
             </MenuList>
           </MenuPopover>
         </Menu>

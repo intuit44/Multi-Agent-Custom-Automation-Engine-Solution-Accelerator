@@ -109,8 +109,9 @@ app_v4 = APIRouter(
     },
 )
 
-# Workspace file-editing (dev-only): same physical path as mcp-server-filesystem
-# so Monaco (browser) and MCP agents share one source of truth.
+# Workspace endpoints: Monaco (browser) and MCP filesystem agents share one physical
+# path — {MACAE_WORKSPACE_ROOT}/{user_id}/{workspace_id}/ — so there is a single
+# source of truth per workspace regardless of which writer touches it.
 from v4.api.workspace_router import workspace_router, workspaces_router  # noqa: E402
 
 app_v4.include_router(workspaces_router)

@@ -261,6 +261,8 @@ def list_files(request: Request, workspace_id: str) -> FileListResponse:
     for root, dirs, names in os.walk(ws):
         dirs[:] = [d for d in dirs if d != ".git"]
         for name in sorted(names):
+            if name == _META_FILE:
+                continue
             full = Path(root) / name
             stat = full.stat()
             files.append(
@@ -491,6 +493,11 @@ def list_workspaces(request: Request) -> WorkspaceListResponse:
     for entry in sorted(user_root.iterdir()):
         if not entry.is_dir() or not (entry / ".git").is_dir():
             continue
+        # Only NAMED workspaces (created via create_workspace, which writes the
+        # meta file) belong in the selector; auto-created per-session spaces
+        # are reachable through the session fallback, never listed here.
+        if not (entry / _META_FILE).exists():
+            continue
         meta = _read_meta(entry)
         results.append(
             WorkspaceSummary(
@@ -520,7 +527,7 @@ def create_workspace(
     # Derive workspace_id from supplied name if not given
     raw_id = (body.workspace_id or body.name).strip()
     # Slugify: lowercase, replace non-alnum runs with '-', trim dashes
-    slug = re.sub(r"[^A-Za-z0-9]+", "-", raw_id).strip("-").lower()
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", raw_id.lower()).strip("-")
     if not slug:
         slug = "workspace"
     workspace_id = slug[:64]
@@ -535,6 +542,16 @@ def create_workspace(
         with _init_lock:
             if not (ws / ".git").is_dir():
                 ws.mkdir(parents=True, exist_ok=True)
+                # Exclude meta file from the user's git history
+                gitignore = ws / ".gitignore"
+                existing = (
+                    gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+                )
+                if _META_FILE not in existing.splitlines():
+                    gitignore.write_text(
+                        existing.rstrip("\n") + "\n" + _META_FILE + "\n",
+                        encoding="utf-8",
+                    )
                 for cmd in (
                     ("init", "-q"),
                     ("config", "user.name", _GIT_IDENTITY[0]),

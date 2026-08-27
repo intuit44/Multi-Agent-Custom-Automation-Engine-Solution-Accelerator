@@ -49,6 +49,7 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
   selectedTeam: parentSelectedTeam,
   onNavigationWithAlert,
   isLoadingTeam: _isLoadingTeam,
+  onWorkspaceChange,
 }) => {
   const { dispatchToast } = useToastController('toast');
   const navigate = useNavigate();
@@ -177,7 +178,7 @@ const PlanPanelLeft: React.FC<PlanPanelLefProps> = ({
       )}
 
       {/* Workspaces — oculto en rail */}
-      {!isRail && <WorkspaceSelector />}
+      {!isRail && <WorkspaceSelector onWorkspaceChange={onWorkspaceChange} />}
 
       {/* Nueva tarea */}
       <Tooltip content="New task" relationship="label" positioning="after">
