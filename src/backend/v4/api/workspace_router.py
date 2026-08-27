@@ -44,18 +44,23 @@ Security
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from auth.auth_utils import get_authenticated_user_details
 
+# Router for per-workspace file operations  (/workspace/{workspace_id}/…)
 workspace_router = APIRouter(prefix="/workspace/{workspace_id}", tags=["workspace"])
+# Router for workspace management  (/workspaces  and  /workspaces/{workspace_id})
+workspaces_router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 
 # ── constants ────────────────────────────────────────────────────────────────
 
@@ -414,3 +419,169 @@ def restore(
         size=stat.st_size,
         mtime=stat.st_mtime,
     )
+
+
+# ── workspace management endpoints (/workspaces) ─────────────────────────────
+
+_META_FILE = ".macae_workspace_meta.json"
+
+
+def _user_root(request: Request) -> Path:
+    """Return the {WORKSPACE_ROOT}/{user_id}/ directory (never creates it)."""
+    user_id = _auth_user(request)
+    if not _SAFE_ID.match(user_id):
+        raise HTTPException(status_code=400, detail="Invalid user id.")
+    return _contained(WORKSPACE_ROOT, user_id)
+
+
+def _read_meta(ws: Path) -> dict:
+    meta_path = ws / _META_FILE
+    if meta_path.exists():
+        try:
+            return json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _write_meta(ws: Path, meta: dict) -> None:
+    (ws / _META_FILE).write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def _count_files(ws: Path) -> int:
+    count = 0
+    for _root, dirs, files in os.walk(ws):
+        dirs[:] = [d for d in dirs if d != ".git"]
+        count += sum(1 for f in files if f != _META_FILE)
+    return count
+
+
+class WorkspaceSummary(BaseModel):
+    workspace_id: str
+    name: str
+    created_at: str  # ISO-8601
+    file_count: int
+
+
+class WorkspaceListResponse(BaseModel):
+    workspaces: list[WorkspaceSummary]
+
+
+class WorkspaceCreateRequest(BaseModel):
+    name: str
+    workspace_id: str | None = None  # client-supplied slug; server generates if omitted
+
+
+class WorkspaceCreateResponse(BaseModel):
+    workspace_id: str
+    name: str
+    created_at: str
+    file_count: int
+
+
+@workspaces_router.get("", response_model=WorkspaceListResponse)
+def list_workspaces(request: Request) -> WorkspaceListResponse:
+    """List all workspaces owned by the authenticated user."""
+    user_root = _user_root(request)
+    results: list[WorkspaceSummary] = []
+    if not user_root.exists():
+        return WorkspaceListResponse(workspaces=[])
+    for entry in sorted(user_root.iterdir()):
+        if not entry.is_dir() or not (entry / ".git").is_dir():
+            continue
+        meta = _read_meta(entry)
+        results.append(
+            WorkspaceSummary(
+                workspace_id=entry.name,
+                name=meta.get("name", entry.name),
+                created_at=meta.get(
+                    "created_at",
+                    datetime.fromtimestamp(
+                        entry.stat().st_ctime, tz=timezone.utc
+                    ).isoformat(),
+                ),
+                file_count=_count_files(entry),
+            )
+        )
+    return WorkspaceListResponse(workspaces=results)
+
+
+@workspaces_router.post("", response_model=WorkspaceCreateResponse, status_code=201)
+def create_workspace(
+    request: Request, body: WorkspaceCreateRequest
+) -> WorkspaceCreateResponse:
+    """Create (or re-open) a named workspace."""
+    user_id = _auth_user(request)
+    if not _SAFE_ID.match(user_id):
+        raise HTTPException(status_code=400, detail="Invalid user id.")
+
+    # Derive workspace_id from supplied name if not given
+    raw_id = (body.workspace_id or body.name).strip()
+    # Slugify: lowercase, replace non-alnum runs with '-', trim dashes
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", raw_id).strip("-").lower()
+    if not slug:
+        slug = "workspace"
+    workspace_id = slug[:64]
+
+    if not _SAFE_ID.match(workspace_id):
+        raise HTTPException(status_code=400, detail="Invalid workspace id.")
+
+    ws = _contained(WORKSPACE_ROOT, user_id, workspace_id)
+    now_iso = datetime.now(tz=timezone.utc).isoformat()
+
+    if not (ws / ".git").is_dir():
+        with _init_lock:
+            if not (ws / ".git").is_dir():
+                ws.mkdir(parents=True, exist_ok=True)
+                for cmd in (
+                    ("init", "-q"),
+                    ("config", "user.name", _GIT_IDENTITY[0]),
+                    ("config", "user.email", _GIT_IDENTITY[1]),
+                    ("commit", "--allow-empty", "-q", "-m", "init workspace"),
+                ):
+                    result = _git(ws, *cmd)
+                    if result.returncode != 0:
+                        raise HTTPException(
+                            status_code=500,
+                            detail="Workspace git init failed: "
+                            + result.stderr.decode("utf-8", errors="replace"),
+                        )
+                meta = {"name": body.name.strip(), "created_at": now_iso}
+                _write_meta(ws, meta)
+    else:
+        # Update name if workspace already exists
+        meta = _read_meta(ws)
+        meta["name"] = body.name.strip()
+        _write_meta(ws, meta)
+        now_iso = meta.get("created_at", now_iso)
+
+    return WorkspaceCreateResponse(
+        workspace_id=workspace_id,
+        name=body.name.strip(),
+        created_at=now_iso,
+        file_count=_count_files(ws),
+    )
+
+
+@workspaces_router.delete(
+    "/{workspace_id}",
+    status_code=204,
+    response_model=None,
+    response_class=Response,
+)
+def delete_workspace(request: Request, workspace_id: str) -> None:
+    """Delete a workspace and all its files. Irreversible."""
+    import shutil
+
+    user_id = _auth_user(request)
+    if not _SAFE_ID.match(user_id):
+        raise HTTPException(status_code=400, detail="Invalid user id.")
+    if not _SAFE_ID.match(workspace_id):
+        raise HTTPException(status_code=400, detail="Invalid workspace id.")
+    ws = _contained(WORKSPACE_ROOT, user_id, workspace_id)
+    if not ws.exists():
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    shutil.rmtree(ws)
+    return None
