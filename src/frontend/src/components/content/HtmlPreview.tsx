@@ -486,8 +486,9 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
     async (path: string) => {
       if (!wsId || !upsert || !openArtifact) return;
       try {
+        const encodedPath = path.split('/').map(encodeURIComponent).join('/');
         const f: { content?: string } = await apiClient.get(
-          `/v4/workspace/${encodeURIComponent(wsId)}/files/${path}`
+          `/v4/workspace/${encodeURIComponent(wsId)}/files/${encodedPath}`
         );
         upsert({
           id: path,
