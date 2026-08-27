@@ -333,6 +333,8 @@ export interface Artifact {
 interface ArtifactContextValue {
   artifacts: Artifact[];
   activeId: string | null;
+  /** Per-session workspace identifier (chat session id); null = no workspace. */
+  workspaceId: string | null;
   upsert: (a: Omit<Artifact, 'updatedAt'>) => void;
   open: (id: string) => void;
   close: () => void;
@@ -342,9 +344,11 @@ const HtmlPreviewContext = createContext<ArtifactContextValue | null>(null);
 
 export const useHtmlPreview = () => useContext(HtmlPreviewContext);
 
-export const HtmlPreviewProvider: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
+export const HtmlPreviewProvider: React.FC<{
+  children: React.ReactNode;
+  /** Chat session id — the workspace identifier the editor saves into. */
+  workspaceId?: string;
+}> = ({ children, workspaceId }) => {
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -380,8 +384,15 @@ export const HtmlPreviewProvider: React.FC<{ children: React.ReactNode }> = ({
   const close = useCallback(() => setActiveId(null), []);
 
   const value = React.useMemo(
-    () => ({ artifacts, activeId, upsert, open, close }),
-    [artifacts, activeId, upsert, open, close]
+    () => ({
+      artifacts,
+      activeId,
+      workspaceId: workspaceId || null,
+      upsert,
+      open,
+      close,
+    }),
+    [artifacts, activeId, workspaceId, upsert, open, close]
   );
   return (
     <HtmlPreviewContext.Provider value={value}>
@@ -618,6 +629,7 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
             title={active.title}
             content={content}
             lang={active.lang || undefined}
+            workspaceId={ctx.workspaceId}
             tab={activeTab as 'code' | 'diff'}
             onTabChange={(t) => setActiveTab(t)}
           />
