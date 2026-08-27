@@ -38,11 +38,10 @@ workspace_router = APIRouter(prefix="/workspace", tags=["workspace"])
 def _default_workspace_root() -> Path:
     here = Path(__file__).resolve()
     for parent in here.parents:
-        if (parent / ".git").is_dir():  # repo root en dev
+        if (parent / ".git").exists():  # repo root in dev
             return parent
-    # prod (/app, sin .git): usar el ancestro más alto disponible sin IndexError.
-    # En prod el editor es dev-only (403 antes de tocar WORKSPACE_ROOT),
-    # así que este path nunca se usa realmente.
+    # In prod images (/app, no .git), fall back to the highest available ancestor.
+    # Note: the workspace editor is dev-only (403 before any endpoint uses WORKSPACE_ROOT).
     return here.parents[min(4, len(here.parents) - 1)]
 
 
