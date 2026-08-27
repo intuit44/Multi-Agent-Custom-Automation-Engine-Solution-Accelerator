@@ -111,6 +111,20 @@ def _validated_id(value: str, field_name: str) -> str:
     return candidate
 
 
+def _validated_workspace_id(value: str) -> str:
+    """Return a validated workspace id safe for filesystem path composition."""
+    candidate = value.strip()
+    if (
+        not candidate
+        or candidate in {".", ".."}
+        or "/" in candidate
+        or "\\" in candidate
+        or not _SAFE_WORKSPACE_ID.match(candidate)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid workspace id.")
+    return candidate
+
+
 def _validated_segment(value: str, field_name: str) -> str:
     """Return a validated single path segment."""
     candidate = _validated_id(value, field_name)
@@ -141,7 +155,7 @@ def _resolve_under(base: Path, *parts: str) -> Path:
 def _workspace_for(request: Request, workspace_id: str) -> Path:
     """Resolve (and lazily create) the caller's workspace directory."""
     user_id = _validated_segment(_auth_user(request), "user id")
-    safe_workspace_id = _validated_segment(workspace_id, "workspace id")
+    safe_workspace_id = _validated_workspace_id(workspace_id)
     root = WORKSPACE_ROOT.resolve()
     user_root = _resolve_under(root, user_id)
     ws = _resolve_under(user_root, safe_workspace_id)
