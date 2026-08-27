@@ -318,6 +318,11 @@ def put_file(
     """Write a workspace file (parent directories are created inside the ws)."""
     ws = _workspace_for(request, workspace_id)
     resolved = _resolve(ws, path)
+    try:
+        resolved.relative_to(ws)
+        resolved.parent.relative_to(ws)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Path outside workspace.")
     if resolved.exists() and not resolved.is_file():
         raise HTTPException(status_code=400, detail="Path is a directory.")
     encoded = body.content.encode("utf-8")
