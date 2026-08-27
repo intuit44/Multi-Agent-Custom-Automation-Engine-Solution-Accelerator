@@ -97,15 +97,25 @@ def _git(ws: Path, *args: str) -> "subprocess.CompletedProcess[bytes]":
         raise HTTPException(status_code=504, detail="git operation timed out.")
 
 
+def _validated_id(value: str, field_name: str) -> str:
+    candidate = value.strip()
+    if (
+        not candidate
+        or candidate in {".", ".."}
+        or "/" in candidate
+        or "\\" in candidate
+        or not _SAFE_ID.match(candidate)
+    ):
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name}.")
+    return candidate
+
+
 def _workspace_for(request: Request, workspace_id: str) -> Path:
     """Resolve (and lazily create) the caller's workspace directory."""
-    user_id = _auth_user(request)
-    if not _SAFE_ID.match(user_id):
-        raise HTTPException(status_code=400, detail="Invalid user id.")
-    if not _SAFE_ID.match(workspace_id):
-        raise HTTPException(status_code=400, detail="Invalid workspace id.")
+    user_id = _validated_id(_auth_user(request), "user id")
+    safe_workspace_id = _validated_id(workspace_id, "workspace id")
     root = WORKSPACE_ROOT.resolve()
-    ws = (root / user_id / workspace_id).resolve()
+    ws = (root / user_id / safe_workspace_id).resolve()
     try:
         ws.relative_to(root)
     except ValueError:
