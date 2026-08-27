@@ -135,8 +135,9 @@ def _validated_segment(value: str, field_name: str) -> str:
 
 def _validated_rel_path(raw: str) -> Path:
     """Return a validated relative path (workspace-local)."""
-    rel_path = Path(raw.replace("\\", "/").strip())
-    if str(rel_path) in {"", "."} or rel_path.is_absolute():
+    normalized = os.path.normpath(raw.replace("\\", "/").strip())
+    rel_path = Path(normalized)
+    if normalized in {"", ".", "/"} or rel_path.is_absolute():
         raise HTTPException(status_code=400, detail="Path outside workspace.")
     if ".." in rel_path.parts or "." in rel_path.parts or "" in rel_path.parts:
         raise HTTPException(status_code=400, detail="Path outside workspace.")
