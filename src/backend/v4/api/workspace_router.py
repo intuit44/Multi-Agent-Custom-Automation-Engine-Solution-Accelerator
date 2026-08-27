@@ -104,7 +104,12 @@ def _workspace_for(request: Request, workspace_id: str) -> Path:
         raise HTTPException(status_code=400, detail="Invalid user id.")
     if not _SAFE_ID.match(workspace_id):
         raise HTTPException(status_code=400, detail="Invalid workspace id.")
-    ws = (WORKSPACE_ROOT / user_id / workspace_id).resolve()
+    root = WORKSPACE_ROOT.resolve()
+    ws = (root / user_id / workspace_id).resolve()
+    try:
+        ws.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid workspace path.")
     if not (ws / ".git").is_dir():
         with _init_lock:
             if not (ws / ".git").is_dir():  # re-check under the lock
