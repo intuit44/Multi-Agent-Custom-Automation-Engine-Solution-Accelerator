@@ -371,10 +371,24 @@ def commit(request: Request, workspace_id: str, body: CommitRequest) -> CommitRe
             status_code=500,
             detail="git add failed: " + add.stderr.decode("utf-8", errors="replace"),
         )
-    head = _git(ws, "rev-parse", "HEAD").stdout.decode().strip()
+    head_res = _git(ws, "rev-parse", "HEAD")
+    if head_res.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail="git rev-parse failed: "
+            + head_res.stderr.decode("utf-8", errors="replace"),
+        )
+    head = head_res.stdout.decode("utf-8", errors="replace").strip()
+
     staged = _git(ws, "diff", "--cached", "--quiet")
     if staged.returncode == 0:
         return CommitResponse(committed=False, sha=head, message="")
+    if staged.returncode != 1:
+        raise HTTPException(
+            status_code=500,
+            detail="git diff --cached failed: "
+            + staged.stderr.decode("utf-8", errors="replace"),
+        )
     message = body.message.strip() or "Update workspace"
     result = _git(ws, "commit", "-q", "-m", message)
     if result.returncode != 0:
