@@ -473,7 +473,7 @@ def restore(
             detail=f"Cannot restore {path} from {ref}: "
             + result.stderr.decode("utf-8", errors="replace"),
         )
-    raw = _read_text_guarded(resolved, path)
+    raw = _read_text_guarded(ws, resolved, path)
     stat = resolved.stat()
     return FileResponse(
         path=path,
