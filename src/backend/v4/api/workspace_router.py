@@ -55,6 +55,7 @@ from auth.auth_utils import get_authenticated_user_details
 workspace_router = APIRouter(prefix="/workspace/{workspace_id}", tags=["workspace"])
 
 # ── constants ────────────────────────────────────────────────────────────────
+_SAFE_WORKSPACE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 WORKSPACE_ROOT = Path(
     os.getenv("MACAE_WORKSPACE_ROOT", str(Path.home() / ".macae" / "workspaces"))
@@ -112,7 +113,10 @@ def _validated_id(value: str, field_name: str) -> str:
 
 def _validated_segment(value: str, field_name: str) -> str:
     """Return a validated single path segment."""
-    return _validated_id(value, field_name)
+    candidate = _validated_id(value, field_name)
+    if field_name == "workspace id" and not _SAFE_WORKSPACE_ID.match(candidate):
+        raise HTTPException(status_code=400, detail="Invalid workspace id.")
+    return candidate
 
 
 def _validated_rel_path(raw: str) -> Path:
