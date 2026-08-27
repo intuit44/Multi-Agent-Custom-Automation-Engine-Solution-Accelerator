@@ -212,13 +212,15 @@ def _ensure_within_workspace(ws: Path, candidate: Path) -> Path:
     """Final guard for filesystem sinks: ensure candidate is within workspace."""
     try:
         ws_resolved = ws.resolve(strict=True)
-        candidate_resolved = candidate.resolve(strict=True)
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="File not found.")
-    try:
-        candidate_resolved.relative_to(ws_resolved)
-    except ValueError:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+
+    # Resolve without requiring existence so this guard is safe for both reads and writes.
+    candidate_resolved = candidate.resolve(strict=False)
+
+    if candidate_resolved != ws_resolved and not candidate_resolved.is_relative_to(ws_resolved):
         raise HTTPException(status_code=400, detail="Path outside workspace.")
+
     return candidate_resolved
 
 
