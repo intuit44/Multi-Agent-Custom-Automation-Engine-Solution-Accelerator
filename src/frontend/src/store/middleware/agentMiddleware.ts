@@ -119,11 +119,15 @@ export const agentMiddleware: Middleware =
         };
 
         // 5. Llamar ChatService con streaming
+        const activeWorkspaceId = localStorage.getItem('macae_active_workspace_id');
         await ChatService.sendMessageStream(
           message,
           sessionId || state.chat.sessionId,
           callbacks,
-          fileIds
+          fileIds,
+          undefined,   // planId — no aplicable desde este carril
+          undefined,   // allowPlan — usa default
+          activeWorkspaceId,
         );
       } catch (error: any) {
         dispatch(setError(error?.message || 'Error sending message'));

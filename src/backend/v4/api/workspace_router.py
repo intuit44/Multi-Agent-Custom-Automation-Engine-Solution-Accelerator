@@ -1,56 +1,34 @@
 """
-Per-workspace file editing backed by a real Git repo — identical in dev and prod.
+Workspace HTTP layer — thin adapter over v4.common.services.workspace_service.
 
-Architecture
-------------
+This module owns ONLY the HTTP concerns: EasyAuth identity extraction,
+request/response models, and route wiring. Every filesystem/git primitive
+(workspace_for, _resolve, _git, _contained, origins, metadata) lives in the
+shared workspace_service so the agent lanes call the SAME functions with the
+user_id they already carry — one resolver, never a parallel file world.
+
     frontend (Monaco)  ──►  /workspace/{workspace_id}/...   ─┐
-    MCP filesystem / agents (future slice)                  ─┼──►  WorkspaceResolver
-                                                             │     {WORKSPACE_ROOT}/{user_id}/{workspace_id}/
+    MCP filesystem / agents (service import, no HTTP)       ─┼──►  workspace_service
     git (init / commit / log / restore)  ◄───────────────────┘
-
-The frontend only ever knows an identifier (today: the chat session_id); paths
-never cross the wire as absolute — the server resolves them under the caller's
-own workspace. Workspaces live in DATA (`MACAE_WORKSPACE_ROOT`), never in the
-application source tree or the container image: dev defaults to
-`~/.macae/workspaces`, prod points the env var at a mounted volume.
-
-Each workspace is its own Git repository, created on first touch with an
-initial empty commit so HEAD always exists (diff / log / restore never hit an
-unborn branch).
 
 Endpoints (all authenticated; user_id comes from EasyAuth headers)
 ------------------------------------------------------------------
-GET  /workspace/{ws}/files            → list of files (path, size, mtime)
+GET  /workspace/{ws}/files            → flat list (dropdown feed; capped)
+GET  /workspace/{ws}/entries?path=    → ONE directory level (lazy explorer)
 GET  /workspace/{ws}/files/{path}     → { path, content, size, mtime }
 PUT  /workspace/{ws}/files/{path}     → write (creates parent dirs inside ws)
 GET  /workspace/{ws}/diff/{path}      → git HEAD vs disk for Monaco DiffEditor
 POST /workspace/{ws}/commit           → git add -A && commit → { sha }
 GET  /workspace/{ws}/log              → last 50 commits
 POST /workspace/{ws}/restore/{path}   → git checkout {ref} -- path
-
-Security
---------
-- Every request resolves under {root}/{user_id}/… — a user can only ever
-  touch their own workspaces.
-- workspace_id and user_id must match _SAFE_ID (no separators; a leading
-  alphanumeric forbids "." / ".." / dotfiles).
-- File paths are contained twice in _resolve: an os.path.normpath +
-  startswith prefix guard (the sanitizer form CodeQL's py/path-injection
-  analysis recognizes), then a symlink-collapsing resolve + relative_to
-  re-check. Do not "simplify" either away.
-- Binary files rejected (415); files over MAX_FILE_BYTES rejected (413).
-- Missing git binary is an explicit 503, never a silent no-op.
+GET/POST/DELETE /workspaces           → named-workspace management
 """
 
 from __future__ import annotations
 
-import base64
-import json
 import os
 import re
 import shutil
-import subprocess
-import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -58,35 +36,35 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from auth.auth_utils import get_authenticated_user_details
-from common.config.app_config import config
+from v4.common.services.workspace_service import (
+    _GIT_IDENTITY,
+    _META_FILE,
+    _SAFE_ID,
+    _SAFE_REF,
+    MAX_FILE_BYTES,
+    MAX_LIST_ENTRIES,
+    WORKSPACE_ROOT,
+    _clone_into,
+    _contained,
+    _count_files,
+    _git,
+    _init_lock,
+    _link_into,
+    _read_meta,
+    _read_text_guarded,
+    _resolve,
+    _write_meta,
+    user_root_for,
+    workspace_for,
+)
 
 # Router for per-workspace file operations  (/workspace/{workspace_id}/…)
 workspace_router = APIRouter(prefix="/workspace/{workspace_id}", tags=["workspace"])
 # Router for workspace management  (/workspaces  and  /workspaces/{workspace_id})
 workspaces_router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 
-# ── constants ────────────────────────────────────────────────────────────────
 
-WORKSPACE_ROOT = Path(
-    os.getenv("MACAE_WORKSPACE_ROOT", str(Path.home() / ".macae" / "workspaces"))
-).resolve()
-MAX_FILE_BYTES = 1 * 1024 * 1024  # 1 MB
-MAX_LIST_ENTRIES = 1000
-
-# Leading alphanumeric forbids dotfiles, "." and ".." outright; no separators.
-_SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$")
-# Git refs for restore: leading alphanumeric forbids "-option" injection.
-_SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./~^-]{0,63}$")
-# Clone sources: https only (no ssh/file/git schemes, no leading dash, no spaces).
-_SAFE_REPO_URL = re.compile(r"^https://[A-Za-z0-9][A-Za-z0-9._~:/?#@!$&'()*+,;=%-]*$")
-# Linked workspaces may only point INSIDE this root (dev: the projects dir).
-LINK_ROOT = Path(os.getenv("MACAE_LINK_ROOT", "/workspaces")).resolve()
-
-_GIT_IDENTITY = ("MACAE Workspace", "workspace@macae.local")
-_init_lock = threading.Lock()
-
-
-# ── helpers ──────────────────────────────────────────────────────────────────
+# ── HTTP identity extraction (the ONLY thing this layer adds) ────────────────
 
 
 def _auth_user(request: Request) -> str:
@@ -100,100 +78,13 @@ def _auth_user(request: Request) -> str:
     return str(user_id)
 
 
-def _git(ws: Path, *args: str) -> "subprocess.CompletedProcess[bytes]":
-    try:
-        return subprocess.run(["git", *args], cwd=ws, capture_output=True, timeout=15)
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=503,
-            detail="git is not installed in this image; workspaces need it.",
-        )
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="git operation timed out.")
-
-
-def _contained(base: Path, *parts: str) -> Path:
-    """Join *parts* under *base* with the normpath + startswith containment
-    guard — the sanitizer form CodeQL recognizes as a py/path-injection
-    barrier. Callers must pre-validate parts semantically; this is the single
-    choke point every request-derived path flows through."""
-    joined = os.path.normpath(os.path.join(str(base), *parts))
-    if not joined.startswith(str(base) + os.sep):
-        raise HTTPException(status_code=400, detail="Path outside workspace.")
-    return Path(joined)
-
-
 def _workspace_for(request: Request, workspace_id: str) -> Path:
-    """Resolve (and lazily create) the caller's workspace directory."""
-    user_id = _auth_user(request)
-    if not _SAFE_ID.match(user_id):
-        raise HTTPException(status_code=400, detail="Invalid user id.")
-    if not _SAFE_ID.match(workspace_id):
-        raise HTTPException(status_code=400, detail="Invalid workspace id.")
-    ws = _contained(WORKSPACE_ROOT, user_id, workspace_id)
-    if ws.is_symlink():
-        # Linked workspace (dev): operate on the real project folder. File
-        # containment in _resolve then guards against escapes from THAT base.
-        return ws.resolve()
-    if not (ws / ".git").is_dir():
-        with _init_lock:
-            if not (ws / ".git").is_dir():  # re-check under the lock
-                ws.mkdir(parents=True, exist_ok=True)
-                for cmd in (
-                    ("init", "-q"),
-                    ("config", "user.name", _GIT_IDENTITY[0]),
-                    ("config", "user.email", _GIT_IDENTITY[1]),
-                    ("commit", "--allow-empty", "-q", "-m", "init workspace"),
-                ):
-                    result = _git(ws, *cmd)
-                    if result.returncode != 0:
-                        raise HTTPException(
-                            status_code=500,
-                            detail="Workspace git init failed: "
-                            + result.stderr.decode("utf-8", errors="replace"),
-                        )
-    return ws
+    """HTTP wrapper: extract the EasyAuth principal, delegate to the service."""
+    return workspace_for(_auth_user(request), workspace_id)
 
 
-def _resolve(ws: Path, raw: str) -> Path:
-    """Resolve *raw* relative to the workspace; reject traversal."""
-    rel_path = Path(raw.replace("\\", "/").strip())
-    if str(rel_path) in {"", "."} or rel_path.is_absolute() or ".." in rel_path.parts:
-        raise HTTPException(status_code=400, detail="Path outside workspace.")
-    candidate = _contained(ws, str(rel_path))
-    # Second, stronger runtime check: collapse symlinks and re-verify
-    # containment (normpath alone does not follow symlinks).
-    resolved = candidate.resolve()
-    try:
-        rel = resolved.relative_to(ws)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Path outside workspace.")
-    if ".git" in rel.parts:
-        raise HTTPException(status_code=400, detail="The .git directory is managed.")
-    return resolved
-
-
-def _is_binary(data: bytes) -> bool:
-    return b"\x00" in data[:8192]
-
-
-def _read_text_guarded(resolved: Path, path: str) -> bytes:
-    if not resolved.exists():
-        raise HTTPException(status_code=404, detail=f"File not found: {path}")
-    if not resolved.is_file():
-        raise HTTPException(status_code=400, detail="Path is a directory.")
-    raw = resolved.read_bytes()
-    if _is_binary(raw):
-        raise HTTPException(
-            status_code=415,
-            detail="Binary files cannot be edited in Monaco. Use the download button.",
-        )
-    if len(raw) > MAX_FILE_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File exceeds {MAX_FILE_BYTES // 1024} KB Monaco limit.",
-        )
-    return raw
+def _user_root(request: Request) -> Path:
+    return user_root_for(_auth_user(request))
 
 
 # ── models ───────────────────────────────────────────────────────────────────
@@ -521,142 +412,6 @@ def restore(
 
 
 # ── workspace management endpoints (/workspaces) ─────────────────────────────
-
-_META_FILE = ".macae_workspace_meta.json"
-
-
-def _user_root(request: Request) -> Path:
-    """Return the {WORKSPACE_ROOT}/{user_id}/ directory (never creates it)."""
-    user_id = _auth_user(request)
-    if not _SAFE_ID.match(user_id):
-        raise HTTPException(status_code=400, detail="Invalid user id.")
-    return _contained(WORKSPACE_ROOT, user_id)
-
-
-def _read_meta(ws: Path) -> dict:
-    meta_path = ws / _META_FILE
-    if meta_path.exists():
-        try:
-            return json.loads(meta_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {}
-
-
-def _write_meta(ws: Path, meta: dict) -> None:
-    (ws / _META_FILE).write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
-
-def _count_files(ws: Path) -> int:
-    count = 0
-    for _root, dirs, files in os.walk(ws):
-        dirs[:] = [d for d in dirs if d != ".git"]
-        count += sum(1 for f in files if f != _META_FILE)
-        if count >= MAX_LIST_ENTRIES:  # linked projects can be huge — cap the walk
-            return MAX_LIST_ENTRIES
-    return count
-
-
-def _exclude_meta(ws: Path) -> None:
-    """Hide the meta file via .git/info/exclude — local-only ignore that never
-    touches the user's tracked .gitignore (clone/linked workspaces are THEIR
-    repos; we do not edit their files)."""
-    exclude = ws / ".git" / "info" / "exclude"
-    current = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
-    if _META_FILE not in current:
-        exclude.parent.mkdir(parents=True, exist_ok=True)
-        joiner = "" if (not current or current.endswith("\n")) else "\n"
-        exclude.write_text(current + joiner + _META_FILE + "\n", encoding="utf-8")
-
-
-def _clone_into(ws: Path, url: str, token: str | None) -> None:
-    """Born-from-repo workspace: git clone (https only). The token travels as a
-    transient header for this one command and is never stored on disk."""
-    if not _SAFE_REPO_URL.match(url):
-        raise HTTPException(status_code=400, detail="Repo URL must be https.")
-    ws.parent.mkdir(parents=True, exist_ok=True)
-    args = ["git"]
-    if token:
-        basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-        args += ["-c", f"http.extraHeader=Authorization: Basic {basic}"]
-    args += ["clone", "-q", "--", url, str(ws)]
-    try:
-        result = subprocess.run(args, capture_output=True, timeout=180)
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=503, detail="git is not installed in this image."
-        )
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="git clone timed out.")
-    if result.returncode != 0:
-        raise HTTPException(
-            status_code=400,
-            detail="git clone failed: "
-            + result.stderr.decode("utf-8", errors="replace")[-300:],
-        )
-    _git(ws, "config", "user.name", _GIT_IDENTITY[0])
-    _git(ws, "config", "user.email", _GIT_IDENTITY[1])
-    _exclude_meta(ws)
-
-
-def _resolve_link_target(local_path: str) -> Path:
-    """Contain a user-supplied link target under LINK_ROOT — normpath +
-    startswith (the CodeQL-recognized barrier), then a symlink-collapsing
-    resolve with a re-check."""
-    candidate = os.path.normpath(os.path.join(str(LINK_ROOT), local_path.strip()))
-    # SIMPLE guard form on purpose: a compound condition (`!= root and not
-    # startswith`) breaks CodeQL's barrier recognition — proven empirically.
-    if not candidate.startswith(str(LINK_ROOT) + os.sep):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Local path must live under {LINK_ROOT}.",
-        )
-    resolved = Path(candidate).resolve()
-    if not str(resolved).startswith(str(LINK_ROOT) + os.sep):
-        raise HTTPException(status_code=400, detail="Local path escapes the link root.")
-    if not resolved.is_dir():
-        raise HTTPException(
-            status_code=400, detail=f"Local path not found: {local_path}"
-        )
-    return resolved
-
-
-def _link_into(ws: Path, local_path: str) -> Path:
-    """Linked workspace (dev only): the workspace IS an existing local folder —
-    the Claude-Desktop model. In prod the backend cannot see the user's disk;
-    repo_url (git as transport) is the equivalent there. Returns the target."""
-    if config.APP_ENV != "dev":
-        raise HTTPException(
-            status_code=400,
-            detail="local_path links are dev-only; use repo_url in prod.",
-        )
-    target = _resolve_link_target(local_path)
-    ws.parent.mkdir(parents=True, exist_ok=True)
-    if ws.exists():
-        raise HTTPException(
-            status_code=409,
-            detail="Workspace already exists; choose a different name.",
-        )
-    ws.symlink_to(target, target_is_directory=True)
-    if not (target / ".git").is_dir():
-        for cmd in (
-            ("init", "-q"),
-            ("config", "user.name", _GIT_IDENTITY[0]),
-            ("config", "user.email", _GIT_IDENTITY[1]),
-            ("commit", "--allow-empty", "-q", "-m", "init workspace"),
-        ):
-            result = _git(target, *cmd)
-            if result.returncode != 0:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Workspace git init failed: "
-                    + result.stderr.decode("utf-8", errors="replace"),
-                )
-    # Pre-existing repos keep THEIR committer identity — we set nothing.
-    _exclude_meta(target)
-    return target
 
 
 class WorkspaceSummary(BaseModel):

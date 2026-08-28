@@ -297,6 +297,7 @@ class InputTask(BaseModel):
 
     session_id: str
     description: str
+    workspace_id: Optional[str] = None
 
 
 class UserLanguage(BaseModel):
@@ -330,6 +331,9 @@ class ChatMessageRequest(BaseModel):
     file_ids: list[str] = []  # Foundry file IDs attached by the user (code_interpreter)
     # When set, message is in-plan: never create a new plan
     plan_id: Optional[str] = None
+    # Active workspace: artefacts produced by agents land in this workspace.
+    # None = no workspace selected (Blob-only fallback, previous behaviour).
+    workspace_id: Optional[str] = None
     # UI chat|plan selector. False = this message may NEVER create a plan (the
     # run_plan capability is withheld from the router). Plan position in the UI
     # does not use this flag — it calls /process_request explicitly instead.

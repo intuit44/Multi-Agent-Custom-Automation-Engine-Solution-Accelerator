@@ -39,6 +39,85 @@ from v4.models.messages import WebsocketMessageType
 from v4.orchestration.human_approval_manager import HumanApprovalMagenticManager
 
 
+async def _materialize_hosted_file_to_workspace(
+    user_id: str,
+    workspace_id: str,
+    file_id: str,
+    container_id: Optional[str],
+    filename: str,
+) -> None:
+    """Download a hosted file from a Foundry container and write it to the workspace.
+
+    Uses the process-shared credential (app MI in prod, az-login in dev).
+    Errors are logged as warnings and never propagate — file materialisation
+    is best-effort and must never break the orchestration run.
+    """
+    _log = logging.getLogger(__name__)
+    if not container_id:
+        _log.debug(
+            "_materialize_hosted_file_to_workspace: skipping file_id=%s (no container_id)",
+            file_id,
+        )
+        return
+    try:
+        import os
+        from typing import Any
+
+        from openai import AsyncOpenAI
+
+        from v4.common.services.workspace_service import (
+            _git,
+            _resolve,
+            workspace_for,
+        )
+
+        project = (config.AZURE_AI_PROJECT_ENDPOINT or "").rstrip("/")
+        account = project.split("/api/projects/")[0]
+        openai_base_url = f"{account}/openai"
+        cred = config.get_shared_async_credential()
+        token = await cred.get_token("https://ai.azure.com/.default")
+        client = AsyncOpenAI(
+            api_key=token.token,
+            base_url=openai_base_url,
+            default_query={"api-version": "2025-03-01-preview"},
+            timeout=120,
+        )
+        try:
+            name = filename
+            if not name or name == file_id:
+                info: Any = await client.containers.files.retrieve(
+                    file_id=file_id, container_id=container_id
+                )
+                path = getattr(info, "path", None) or file_id
+                name = os.path.basename(path) or filename
+            file_content = await client.containers.files.content.retrieve(
+                file_id=file_id, container_id=container_id
+            )
+            data = await file_content.aread()
+        finally:
+            await client.close()
+
+        ws = workspace_for(user_id, workspace_id)
+        dest = _resolve(ws, name or file_id)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+        rel = str(dest.relative_to(ws))
+        _git(ws, "add", rel)
+        _git(ws, "commit", "-q", "-m", f"agent: add {name or file_id}")
+        _log.info(
+            "Magentic workspace write: user=%s ws=%s file=%s",
+            user_id,
+            workspace_id,
+            name,
+        )
+    except Exception as exc:
+        _log.warning(
+            "_materialize_hosted_file_to_workspace failed file_id=%s: %s",
+            file_id,
+            exc,
+        )
+
+
 class OrchestrationManager:
     """Manager for handling orchestration logic using agent_framework Magentic workflow."""
 
@@ -404,6 +483,7 @@ class OrchestrationManager:
         input_task,
         plan_id: Optional[str] = None,
         history: Optional[list] = None,
+        workspace_id: Optional[str] = None,
     ) -> None:
         """
         Execute the Magentic workflow for the provided user and task description.
@@ -684,6 +764,42 @@ class OrchestrationManager:
                                         executor_id,
                                         e,
                                     )
+                                # Materialise any file outputs to the workspace.
+                                if workspace_id:
+                                    for _c in output_data.contents or []:
+                                        if getattr(_c, "type", None) == "hosted_file":
+                                            _fid = getattr(_c, "file_id", None)
+                                            _ap = (
+                                                getattr(
+                                                    _c, "additional_properties", None
+                                                )
+                                                or {}
+                                            )
+                                            _cid = (
+                                                _ap.get("container_id")
+                                                if isinstance(_ap, dict)
+                                                else None
+                                            )
+                                            _fname = (
+                                                (
+                                                    _ap.get("filename")
+                                                    if isinstance(_ap, dict)
+                                                    else None
+                                                )
+                                                or getattr(_c, "name", None)
+                                                or _fid
+                                                or "agent_file"
+                                            )
+                                            if _fid:
+                                                asyncio.ensure_future(
+                                                    _materialize_hosted_file_to_workspace(
+                                                        user_id=user_id,
+                                                        workspace_id=workspace_id,
+                                                        file_id=_fid,
+                                                        container_id=_cid,
+                                                        filename=_fname,
+                                                    )
+                                                )
                         # Final workflow output (list[Message] or Message)
                         elif isinstance(output_data, Message):
                             final_output = output_data.text or ""
