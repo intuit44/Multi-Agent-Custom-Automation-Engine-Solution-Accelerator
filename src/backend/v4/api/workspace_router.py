@@ -211,6 +211,20 @@ class FileListResponse(BaseModel):
     truncated: bool
 
 
+class DirEntry(BaseModel):
+    name: str
+    type: str  # "directory" | "file"
+    size: int | None = None  # files only
+    status: str | None = None  # "M" modified · "?" untracked · None clean
+
+
+class EntriesResponse(BaseModel):
+    workspace_id: str
+    path: str  # workspace-relative dir ("" = root)
+    entries: list[DirEntry]
+    truncated: bool
+
+
 class FileResponse(BaseModel):
     path: str
     content: str
@@ -290,6 +304,74 @@ def list_files(request: Request, workspace_id: str) -> FileListResponse:
             break
     files.sort(key=lambda f: f.path)
     return FileListResponse(workspace_id=workspace_id, files=files, truncated=truncated)
+
+
+@workspace_router.get("/entries", response_model=EntriesResponse)
+def list_entries(
+    request: Request, workspace_id: str, path: str = ""
+) -> EntriesResponse:
+    """ONE directory level, on demand — the lazy project-explorer contract.
+    The limit is per directory, never "the first N files of the whole repo".
+    Git markers: files carry their own state; a directory carries "M"/"?" when
+    anything beneath it changed (VS Code-style aggregate)."""
+    ws = _workspace_for(request, workspace_id)
+    raw_rel = path.strip().strip("/")
+    base = _resolve(ws, raw_rel) if raw_rel else ws
+    if not base.is_dir():
+        raise HTTPException(status_code=400, detail="Path is not a directory.")
+    # Contained value only from here on (never the raw query string).
+    rel = str(base.relative_to(ws)) if raw_rel else ""
+
+    # git status once for the requested subtree; map to immediate children.
+    porcelain = _git(
+        ws, "status", "--porcelain", "--untracked-files=all", "--", rel or "."
+    )
+    child_status: dict[str, str] = {}
+    if porcelain.returncode == 0:
+        prefix = f"{rel}/" if rel else ""
+        for line in porcelain.stdout.decode("utf-8", errors="replace").splitlines():
+            if len(line) < 4:
+                continue
+            code, p = line[:2], line[3:].strip().strip('"')
+            if prefix and not p.startswith(prefix):
+                continue
+            child = p[len(prefix) :].split("/", 1)[0]
+            mark = "?" if code == "??" else "M"
+            # Any tracked change under a child wins over pure-untracked.
+            if child_status.get(child) != "M":
+                child_status[child] = mark
+
+    entries: list[DirEntry] = []
+    truncated = False
+    dirs: list[DirEntry] = []
+    files_e: list[DirEntry] = []
+    for entry in sorted(base.iterdir(), key=lambda e: e.name.lower()):
+        if entry.name == ".git" or entry.name == _META_FILE:
+            continue
+        if len(dirs) + len(files_e) >= MAX_LIST_ENTRIES:
+            truncated = True
+            break
+        if entry.is_dir():
+            dirs.append(
+                DirEntry(
+                    name=entry.name,
+                    type="directory",
+                    status=child_status.get(entry.name),
+                )
+            )
+        else:
+            files_e.append(
+                DirEntry(
+                    name=entry.name,
+                    type="file",
+                    size=entry.stat().st_size,
+                    status=child_status.get(entry.name),
+                )
+            )
+    entries = dirs + files_e  # directories first, like any real explorer
+    return EntriesResponse(
+        workspace_id=workspace_id, path=rel, entries=entries, truncated=truncated
+    )
 
 
 @workspace_router.get("/files/{path:path}", response_model=FileResponse)
