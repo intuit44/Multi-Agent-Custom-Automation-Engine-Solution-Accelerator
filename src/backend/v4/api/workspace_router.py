@@ -634,6 +634,11 @@ def _link_into(ws: Path, local_path: str) -> Path:
         )
     target = _resolve_link_target(local_path)
     ws.parent.mkdir(parents=True, exist_ok=True)
+    if ws.exists():
+        raise HTTPException(
+            status_code=409,
+            detail="Workspace already exists; choose a different name.",
+        )
     ws.symlink_to(target, target_is_directory=True)
     if not (target / ".git").is_dir():
         for cmd in (
