@@ -391,6 +391,7 @@ async def process_request(
         description=input_task.description,
         session_id=input_task.session_id,
         persist_user_task=True,
+        workspace_id=input_task.workspace_id,
     )
     return {
         "status": "Request started successfully",
@@ -552,6 +553,7 @@ async def _create_plan_and_start(
     history: Optional[list] = None,
     persist_user_task: bool = False,
     composed_agents: Optional[list] = None,
+    workspace_id: Optional[str] = None,
 ) -> str:
     """Create a Plan and kick off the Magentic orchestration as a BackgroundTask.
 
@@ -633,7 +635,11 @@ async def _create_plan_and_start(
         history = await _recover_session_context(
             _ctx_svc, session_id, user_id, description
         )
-    input_task = InputTask(session_id=session_id, description=description)
+    input_task = InputTask(
+        session_id=session_id,
+        description=description,
+        workspace_id=workspace_id,
+    )
 
     try:
         plan_id = str(uuid.uuid4())
@@ -729,7 +735,12 @@ async def _create_plan_and_start(
         async def run_orchestration_task():
             try:
                 await OrchestrationManager().run_orchestration(
-                    user_id, session_id, input_task, plan_id=plan_id, history=history
+                    user_id,
+                    session_id,
+                    input_task,
+                    plan_id=plan_id,
+                    history=history,
+                    workspace_id=workspace_id,
                 )
             finally:
                 orchestration_config.clear_run_active(session_id)
@@ -1199,6 +1210,7 @@ async def chat_message(
         input_task_for_plan = InputTask(
             session_id=chat_request.session_id,
             description=chat_request.message,
+            workspace_id=chat_request.workspace_id,
         )
         try:
             result = await process_request(
@@ -2125,11 +2137,13 @@ class _RouterChatClient:
         agent_name: str,
         user_access_token: Optional[str] = None,
         user_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
     ) -> None:
         from common.config.app_config import config
 
         self.agent_name = agent_name
         self._last_response_id: Optional[str] = None
+        self._workspace_id = workspace_id
         # End-user access token (EasyAuth/Bearer) for on-behalf-of calls. When
         # present, the call is made as the *user*, not the app Managed Identity
         # — required so Foundry propagates a real delegated user context to the
@@ -2594,6 +2608,25 @@ class _RouterChatClient:
             finally:
                 await client.close()
             await GeneratedFileStore.get_instance().save(file_id, name or file_id, data)
+            if self._workspace_id:
+                from v4.common.services.workspace_service import (
+                    _git,
+                    _resolve,
+                    workspace_for,
+                )
+
+                try:
+                    _ws = workspace_for(self._user_id, self._workspace_id)
+                    _dest = _resolve(_ws, name or file_id)
+                    _dest.parent.mkdir(parents=True, exist_ok=True)
+                    _dest.write_bytes(data)
+                    _rel = str(_dest.relative_to(_ws))
+                    _git(_ws, "add", _rel)
+                    _git(_ws, "commit", "-q", "-m", f"agent: add {name or file_id}")
+                except Exception as _ws_err:
+                    logger.warning(
+                        "workspace write failed for file_id=%s: %s", file_id, _ws_err
+                    )
 
         _spawn_bg_persist(_run(), f"codeinterp:{file_id}")
 
@@ -3670,6 +3703,7 @@ async def chat_message_stream(
                 orchestrator_name,
                 user_access_token=user_access_token,
                 user_id=user_id,
+                workspace_id=chat_request.workspace_id,
             )
             _cleanup.push_async_callback(agent.close)
             selected_agent_name = orchestrator_name
@@ -3837,6 +3871,7 @@ async def chat_message_stream(
                                 # run_plan call; None falls back to the
                                 # user's selected team.
                                 composed_agents=getattr(content, "agents", None),
+                                workspace_id=chat_request.workspace_id,
                             )
                             yield _sse_event(
                                 {
@@ -4118,6 +4153,11 @@ async def chat_message_stream(
                             )
                             full_text += _md
                             yield _sse_event({"type": "token", "content": _md})
+                            # Persist to Blob (GeneratedFileStore) and workspace in parallel.
+                            # Fire-and-forget: container file expires minutes after creation.
+                            agent._spawn_container_file_persist(
+                                fid, container_id, fname
+                            )
 
                     elif ct == "oauth_consent_request":
                         # Tool (e.g. GitHub MCP) needs the user to complete OAuth.
