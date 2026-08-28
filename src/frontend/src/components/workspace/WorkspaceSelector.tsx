@@ -52,6 +52,9 @@ export const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({
   // Create dialog state
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
+  const [newRepoUrl, setNewRepoUrl] = useState('');
+  const [newRepoToken, setNewRepoToken] = useState('');
+  const [newLocalPath, setNewLocalPath] = useState('');
   const [creating, setCreating] = useState(false);
 
   // Delete confirm state
@@ -100,7 +103,12 @@ export const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({
     if (!name) return;
     setCreating(true);
     try {
-      const ws = await WorkspaceService.create({ name });
+      const ws = await WorkspaceService.create({
+        name,
+        repo_url: newRepoUrl.trim() || undefined,
+        repo_token: newRepoToken.trim() || undefined,
+        local_path: newLocalPath.trim() || undefined,
+      });
       setWorkspaces((prev) => {
         const exists = prev.find((w) => w.workspace_id === ws.workspace_id);
         if (exists)
@@ -110,6 +118,9 @@ export const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({
       selectWorkspace(ws.workspace_id);
       setCreateOpen(false);
       setNewName('');
+      setNewRepoUrl('');
+      setNewRepoToken('');
+      setNewLocalPath('');
     } catch {
       // TODO: surface error toast
     } finally {
@@ -256,16 +267,41 @@ export const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({
           <DialogBody>
             <DialogTitle>Nuevo workspace</DialogTitle>
             <DialogContent>
-              <Input
-                autoFocus
-                placeholder="Nombre del workspace"
-                value={newName}
-                onChange={(_e, d) => setNewName(d.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleCreate();
-                }}
-                style={{ width: '100%' }}
-              />
+              <div
+                style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
+              >
+                <Input
+                  autoFocus
+                  placeholder="Nombre del workspace"
+                  value={newName}
+                  onChange={(_e, d) => setNewName(d.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleCreate();
+                  }}
+                  style={{ width: '100%' }}
+                />
+                <Input
+                  placeholder="URL del repo https (opcional — clona tu proyecto)"
+                  value={newRepoUrl}
+                  onChange={(_e, d) => setNewRepoUrl(d.value)}
+                  style={{ width: '100%' }}
+                />
+                {newRepoUrl.trim() && (
+                  <Input
+                    type="password"
+                    placeholder="Token del repo (opcional, no se almacena)"
+                    value={newRepoToken}
+                    onChange={(_e, d) => setNewRepoToken(d.value)}
+                    style={{ width: '100%' }}
+                  />
+                )}
+                <Input
+                  placeholder="Ruta local (opcional, solo dev — vincula tu carpeta)"
+                  value={newLocalPath}
+                  onChange={(_e, d) => setNewLocalPath(d.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
             </DialogContent>
             <DialogActions>
               <DialogTrigger disableButtonEnhancement>

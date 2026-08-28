@@ -44,9 +44,11 @@ Security
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 from datetime import datetime, timezone
@@ -56,6 +58,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from auth.auth_utils import get_authenticated_user_details
+from common.config.app_config import config
 
 # Router for per-workspace file operations  (/workspace/{workspace_id}/…)
 workspace_router = APIRouter(prefix="/workspace/{workspace_id}", tags=["workspace"])
@@ -74,6 +77,10 @@ MAX_LIST_ENTRIES = 1000
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$")
 # Git refs for restore: leading alphanumeric forbids "-option" injection.
 _SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./~^-]{0,63}$")
+# Clone sources: https only (no ssh/file/git schemes, no leading dash, no spaces).
+_SAFE_REPO_URL = re.compile(r"^https://[A-Za-z0-9][A-Za-z0-9._~:/?#@!$&'()*+,;=%-]*$")
+# Linked workspaces may only point INSIDE this root (dev: the projects dir).
+LINK_ROOT = Path(os.getenv("MACAE_LINK_ROOT", "/workspaces")).resolve()
 
 _GIT_IDENTITY = ("MACAE Workspace", "workspace@macae.local")
 _init_lock = threading.Lock()
@@ -124,6 +131,10 @@ def _workspace_for(request: Request, workspace_id: str) -> Path:
     if not _SAFE_ID.match(workspace_id):
         raise HTTPException(status_code=400, detail="Invalid workspace id.")
     ws = _contained(WORKSPACE_ROOT, user_id, workspace_id)
+    if ws.is_symlink():
+        # Linked workspace (dev): operate on the real project folder. File
+        # containment in _resolve then guards against escapes from THAT base.
+        return ws.resolve()
     if not (ws / ".git").is_dir():
         with _init_lock:
             if not (ws / ".git").is_dir():  # re-check under the lock
@@ -457,7 +468,104 @@ def _count_files(ws: Path) -> int:
     for _root, dirs, files in os.walk(ws):
         dirs[:] = [d for d in dirs if d != ".git"]
         count += sum(1 for f in files if f != _META_FILE)
+        if count >= MAX_LIST_ENTRIES:  # linked projects can be huge — cap the walk
+            return MAX_LIST_ENTRIES
     return count
+
+
+def _exclude_meta(ws: Path) -> None:
+    """Hide the meta file via .git/info/exclude — local-only ignore that never
+    touches the user's tracked .gitignore (clone/linked workspaces are THEIR
+    repos; we do not edit their files)."""
+    exclude = ws / ".git" / "info" / "exclude"
+    current = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+    if _META_FILE not in current:
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        joiner = "" if (not current or current.endswith("\n")) else "\n"
+        exclude.write_text(current + joiner + _META_FILE + "\n", encoding="utf-8")
+
+
+def _clone_into(ws: Path, url: str, token: str | None) -> None:
+    """Born-from-repo workspace: git clone (https only). The token travels as a
+    transient header for this one command and is never stored on disk."""
+    if not _SAFE_REPO_URL.match(url):
+        raise HTTPException(status_code=400, detail="Repo URL must be https.")
+    ws.parent.mkdir(parents=True, exist_ok=True)
+    args = ["git"]
+    if token:
+        basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+        args += ["-c", f"http.extraHeader=Authorization: Basic {basic}"]
+    args += ["clone", "-q", "--", url, str(ws)]
+    try:
+        result = subprocess.run(args, capture_output=True, timeout=180)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=503, detail="git is not installed in this image."
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="git clone timed out.")
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=400,
+            detail="git clone failed: "
+            + result.stderr.decode("utf-8", errors="replace")[-300:],
+        )
+    _git(ws, "config", "user.name", _GIT_IDENTITY[0])
+    _git(ws, "config", "user.email", _GIT_IDENTITY[1])
+    _exclude_meta(ws)
+
+
+def _resolve_link_target(local_path: str) -> Path:
+    """Contain a user-supplied link target under LINK_ROOT — normpath +
+    startswith (the CodeQL-recognized barrier), then a symlink-collapsing
+    resolve with a re-check."""
+    candidate = os.path.normpath(os.path.join(str(LINK_ROOT), local_path.strip()))
+    # SIMPLE guard form on purpose: a compound condition (`!= root and not
+    # startswith`) breaks CodeQL's barrier recognition — proven empirically.
+    if not candidate.startswith(str(LINK_ROOT) + os.sep):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Local path must live under {LINK_ROOT}.",
+        )
+    resolved = Path(candidate).resolve()
+    if not str(resolved).startswith(str(LINK_ROOT) + os.sep):
+        raise HTTPException(status_code=400, detail="Local path escapes the link root.")
+    if not resolved.is_dir():
+        raise HTTPException(
+            status_code=400, detail=f"Local path not found: {local_path}"
+        )
+    return resolved
+
+
+def _link_into(ws: Path, local_path: str) -> Path:
+    """Linked workspace (dev only): the workspace IS an existing local folder —
+    the Claude-Desktop model. In prod the backend cannot see the user's disk;
+    repo_url (git as transport) is the equivalent there. Returns the target."""
+    if config.APP_ENV != "dev":
+        raise HTTPException(
+            status_code=400,
+            detail="local_path links are dev-only; use repo_url in prod.",
+        )
+    target = _resolve_link_target(local_path)
+    ws.parent.mkdir(parents=True, exist_ok=True)
+    ws.symlink_to(target, target_is_directory=True)
+    if not (target / ".git").is_dir():
+        for cmd in (
+            ("init", "-q"),
+            ("config", "user.name", _GIT_IDENTITY[0]),
+            ("config", "user.email", _GIT_IDENTITY[1]),
+            ("commit", "--allow-empty", "-q", "-m", "init workspace"),
+        ):
+            result = _git(target, *cmd)
+            if result.returncode != 0:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Workspace git init failed: "
+                    + result.stderr.decode("utf-8", errors="replace"),
+                )
+    # Pre-existing repos keep THEIR committer identity — we set nothing.
+    _exclude_meta(target)
+    return target
 
 
 class WorkspaceSummary(BaseModel):
@@ -474,6 +582,10 @@ class WorkspaceListResponse(BaseModel):
 class WorkspaceCreateRequest(BaseModel):
     name: str
     workspace_id: str | None = None  # client-supplied slug; server generates if omitted
+    # Where the workspace is born from (both optional; empty init otherwise):
+    repo_url: str | None = None  # https git clone — works identically in prod
+    repo_token: str | None = None  # transient clone auth; NEVER stored anywhere
+    local_path: str | None = None  # link an existing local folder (dev only)
 
 
 class WorkspaceCreateResponse(BaseModel):
@@ -541,31 +653,44 @@ def create_workspace(
     if not (ws / ".git").is_dir():
         with _init_lock:
             if not (ws / ".git").is_dir():
-                ws.mkdir(parents=True, exist_ok=True)
-                # Exclude meta file from the user's git history
-                gitignore = ws / ".gitignore"
-                existing = (
-                    gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
-                )
-                if _META_FILE not in existing.splitlines():
-                    gitignore.write_text(
-                        existing.rstrip("\n") + "\n" + _META_FILE + "\n",
-                        encoding="utf-8",
+                linked_target: Path | None = None
+                if body.local_path:
+                    linked_target = _link_into(ws, body.local_path)
+                elif body.repo_url:
+                    _clone_into(ws, body.repo_url.strip(), body.repo_token)
+                else:
+                    ws.mkdir(parents=True, exist_ok=True)
+                    # Empty-born workspace: the meta exclusion is OURS to commit
+                    # (idempotent: never clobber a .gitignore that already exists)
+                    gitignore = ws / ".gitignore"
+                    existing = (
+                        gitignore.read_text(encoding="utf-8")
+                        if gitignore.exists()
+                        else ""
                     )
-                for cmd in (
-                    ("init", "-q"),
-                    ("config", "user.name", _GIT_IDENTITY[0]),
-                    ("config", "user.email", _GIT_IDENTITY[1]),
-                    ("commit", "--allow-empty", "-q", "-m", "init workspace"),
-                ):
-                    result = _git(ws, *cmd)
-                    if result.returncode != 0:
-                        raise HTTPException(
-                            status_code=500,
-                            detail="Workspace git init failed: "
-                            + result.stderr.decode("utf-8", errors="replace"),
+                    if _META_FILE not in existing.splitlines():
+                        prefix = existing.rstrip("\n") + "\n" if existing else ""
+                        gitignore.write_text(
+                            prefix + _META_FILE + "\n", encoding="utf-8"
                         )
+                    for cmd in (
+                        ("init", "-q"),
+                        ("config", "user.name", _GIT_IDENTITY[0]),
+                        ("config", "user.email", _GIT_IDENTITY[1]),
+                        ("commit", "--allow-empty", "-q", "-m", "init workspace"),
+                    ):
+                        result = _git(ws, *cmd)
+                        if result.returncode != 0:
+                            raise HTTPException(
+                                status_code=500,
+                                detail="Workspace git init failed: "
+                                + result.stderr.decode("utf-8", errors="replace"),
+                            )
                 meta = {"name": body.name.strip(), "created_at": now_iso}
+                if body.repo_url:
+                    meta["repo_url"] = body.repo_url.strip()
+                if linked_target is not None:
+                    meta["linked_path"] = str(linked_target)
                 _write_meta(ws, meta)
     else:
         # Update name if workspace already exists
@@ -589,15 +714,17 @@ def create_workspace(
     response_class=Response,
 )
 def delete_workspace(request: Request, workspace_id: str) -> None:
-    """Delete a workspace and all its files. Irreversible."""
-    import shutil
-
+    """Delete a workspace. Linked workspaces are only DETACHED — the real
+    project folder is never touched. Everything else is irreversible."""
     user_id = _auth_user(request)
     if not _SAFE_ID.match(user_id):
         raise HTTPException(status_code=400, detail="Invalid user id.")
     if not _SAFE_ID.match(workspace_id):
         raise HTTPException(status_code=400, detail="Invalid workspace id.")
     ws = _contained(WORKSPACE_ROOT, user_id, workspace_id)
+    if ws.is_symlink():
+        ws.unlink()  # detach the link; the target project stays intact
+        return None
     if not ws.exists():
         raise HTTPException(status_code=404, detail="Workspace not found.")
     shutil.rmtree(ws)
