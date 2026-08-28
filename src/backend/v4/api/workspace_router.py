@@ -322,12 +322,17 @@ def list_entries(
     # Contained value only from here on (never the raw query string).
     rel = str(base.relative_to(ws)) if raw_rel else ""
 
-    # git status once for the requested subtree; map to immediate children.
-    porcelain = _git(
-        ws, "status", "--porcelain", "--untracked-files=all", "--", rel or "."
-    )
     child_status: dict[str, str] = {}
-    if porcelain.returncode == 0:
+    try:
+        porcelain = _git(
+            ws, "status", "--porcelain", "--untracked-files=all", "--", rel or "."
+        )
+    except HTTPException as exc:
+        if exc.status_code not in {503, 504}:
+            raise
+        porcelain = None
+
+    if porcelain and porcelain.returncode == 0:
         prefix = f"{rel}/" if rel else ""
         for line in porcelain.stdout.decode("utf-8", errors="replace").splitlines():
             if len(line) < 4:
@@ -340,7 +345,6 @@ def list_entries(
             # Any tracked change under a child wins over pure-untracked.
             if child_status.get(child) != "M":
                 child_status[child] = mark
-
     entries: list[DirEntry] = []
     truncated = False
     dirs: list[DirEntry] = []
