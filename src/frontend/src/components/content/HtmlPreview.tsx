@@ -32,7 +32,6 @@ import {
 } from '@fluentui/react-components';
 import { apiClient } from '../../api/apiClient';
 import {
-  ArrowClockwise20Regular,
   ArrowDownload20Regular,
   ChevronDown20Regular,
   Code20Regular,
@@ -41,6 +40,7 @@ import {
   Eye20Regular,
 } from '@fluentui/react-icons';
 import { WorkspaceEditor } from './WorkspaceEditor';
+import { WorkspaceTree } from '../workspace/WorkspaceTree';
 
 const MIN_HEIGHT = 120;
 const MAX_HEIGHT = 600;
@@ -522,64 +522,12 @@ export const PreviewRightSlot: React.FC<{ fallback?: React.ReactNode }> = ({
 
   if (!ctx || !active) {
     // Resting state: an explicit fallback (e.g. the plan tree) keeps priority;
-    // otherwise the slot shows the workspace files so entering a session never
-    // means hunting for chips in the chat scrollback.
+    // otherwise the slot is the lazy project EXPLORER — one request per level
+    // on expand, never a recursive walk — so entering a session never means
+    // hunting for chips in the chat scrollback.
     if (fallback) return <>{fallback}</>;
-    if (!wsId || wsFiles.length === 0) return null;
-    return (
-      <div
-        style={{
-          width: '280px',
-          height: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          borderLeft: '1px solid var(--colorNeutralStroke1)',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '6px 8px',
-            borderBottom: '1px solid var(--colorNeutralStroke1)',
-          }}
-        >
-          <span style={{ flex: 1, fontSize: '13px', fontWeight: 600 }}>
-            {`Archivos (${wsFiles.length})`}
-          </span>
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<ArrowClockwise20Regular />}
-            aria-label="Refrescar archivos del workspace"
-            onClick={loadWsFiles}
-          />
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '4px' }}>
-          {wsFiles.map((f) => (
-            <Button
-              key={f.path}
-              appearance="subtle"
-              size="small"
-              icon={<DocumentRegular />}
-              style={{ width: '100%', justifyContent: 'flex-start' }}
-              onClick={() => openWsFile(f.path)}
-            >
-              <span
-                style={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {f.path}
-              </span>
-            </Button>
-          ))}
-        </div>
-      </div>
-    );
+    if (!wsId) return null;
+    return <WorkspaceTree workspaceId={wsId} onOpenFile={openWsFile} />;
   }
 
   const isHtml = active.lang === 'html' || /\.html?$/i.test(active.title);
