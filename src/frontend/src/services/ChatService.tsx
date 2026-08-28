@@ -228,7 +228,10 @@ export class ChatService {
           },
           fileIds,
           planId,
-          allowPlan
+          allowPlan,
+          typeof window !== 'undefined'
+            ? window.localStorage.getItem('macae_active_workspace_id')
+            : null
         ).catch(fail);
 
         return {
