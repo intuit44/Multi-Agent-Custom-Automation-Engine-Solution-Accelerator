@@ -17,6 +17,12 @@ export interface WorkspaceSummary {
 export interface WorkspaceCreateRequest {
   name: string;
   workspace_id?: string; // client-supplied slug; server generates if omitted
+  /** Born-from-repo: https git clone (works identically in prod). */
+  repo_url?: string;
+  /** Transient clone auth; never stored server-side. */
+  repo_token?: string;
+  /** Link an existing local folder (dev only — Claude Desktop model). */
+  local_path?: string;
 }
 
 const BASE = '/api/v4/workspaces';
