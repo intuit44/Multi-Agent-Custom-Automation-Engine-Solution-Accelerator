@@ -32,7 +32,7 @@ interface WorkspaceTreeProps {
 }
 
 const statusColor = (s?: string | null): string =>
-  s === 'M'
+  s === 'M' || s === '?'
     ? 'var(--colorStatusWarningForeground1)'
     : 'var(--colorStatusSuccessForeground1)';
 
