@@ -8,13 +8,14 @@
  * files carry their own. Clicking a file hands its full path to the viewer
  * (Monaco); clicking a directory toggles and lazily loads its children.
  */
-import { Button, Spinner, Tooltip } from '@fluentui/react-components';
+import { Button, Input, Spinner, Tooltip } from '@fluentui/react-components';
 import {
   ArrowClockwise20Regular,
   ChevronDown16Regular,
   ChevronRight16Regular,
   Document16Regular,
   Folder16Regular,
+  Search16Regular,
 } from '@fluentui/react-icons';
 import { useCallback, useEffect, useState } from 'react';
 import { apiClient } from '../../api/apiClient';
@@ -84,6 +85,29 @@ export const WorkspaceTree: React.FC<WorkspaceTreeProps> = ({
     setExpanded(new Set());
     load('');
   };
+
+  // ── search: whole-workspace filename filter (git ls-files server-side) ──
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<string[] | null>(null);
+  useEffect(() => {
+    const query = q.trim();
+    if (!query) {
+      setResults(null);
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        const r: { matches?: string[] } = await apiClient.get(
+          `/v4/workspace/${encodeURIComponent(workspaceId)}/search`,
+          { params: { q: query } }
+        );
+        setResults(r.matches ?? []);
+      } catch {
+        setResults([]);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q, workspaceId]);
 
   const renderLevel = (parent: string, depth: number): React.ReactNode => {
     const children = childrenMap[parent];
@@ -181,9 +205,15 @@ export const WorkspaceTree: React.FC<WorkspaceTreeProps> = ({
           borderBottom: '1px solid var(--colorNeutralStroke1)',
         }}
       >
-        <span style={{ flex: 1, fontSize: '13px', fontWeight: 600 }}>
-          Archivos
-        </span>
+        <Input
+          size="small"
+          placeholder="Buscar archivo…"
+          value={q}
+          onChange={(_e, d) => setQ(d.value)}
+          contentBefore={<Search16Regular />}
+          style={{ flex: 1, minWidth: 0 }}
+          aria-label="Buscar archivo en el workspace"
+        />
         <Tooltip content="Refrescar" relationship="label">
           <Button
             appearance="subtle"
@@ -195,7 +225,46 @@ export const WorkspaceTree: React.FC<WorkspaceTreeProps> = ({
         </Tooltip>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px' }}>
-        {renderLevel('', 0)}
+        {results !== null ? (
+          results.length === 0 ? (
+            <div
+              style={{
+                padding: '8px',
+                fontSize: '12px',
+                color: 'var(--colorNeutralForeground3)',
+              }}
+            >
+              Sin coincidencias.
+            </div>
+          ) : (
+            results.map((p) => (
+              <Button
+                key={p}
+                appearance="subtle"
+                size="small"
+                icon={<Document16Regular />}
+                style={{
+                  width: '100%',
+                  justifyContent: 'flex-start',
+                  minHeight: '24px',
+                }}
+                onClick={() => onOpenFile(p)}
+              >
+                <span
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {p}
+                </span>
+              </Button>
+            ))
+          )
+        ) : (
+          renderLevel('', 0)
+        )}
       </div>
     </div>
   );

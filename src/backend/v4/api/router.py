@@ -2950,6 +2950,19 @@ class _RouterChatClient:
                 "analysis, and produce downloadable files when asked. Keep the "
                 "final answer brief."
             )
+        # WORKSPACE AWARENESS: without this the model is blind to the substrate
+        # — persistence is automatic but the agent cannot reason about it
+        # ("I can't save files") nor answer "¿dónde quedó el archivo?".
+        if self._workspace_id:
+            instructions += (
+                f"\n\nWORKSPACE: the user has the persistent project workspace "
+                f"'{self._workspace_id}' active in this conversation. Every file "
+                "you produce with the code interpreter is saved into it "
+                "automatically and committed to its git history; the user sees "
+                "it immediately in their file explorer panel. When asked to "
+                "create or save a file, use the code interpreter and state the "
+                "FILENAME you produced — never claim you cannot save files."
+            )
         call_names: dict = {}  # call_id -> tool name, to label tool results
         # Memory = the conversation itself, rebuilt from Cosmos + AI Search and
         # passed as `input` message items (NOT previous_response_id). store=False:

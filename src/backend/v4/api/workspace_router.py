@@ -269,6 +269,39 @@ def list_entries(
     )
 
 
+class SearchResponse(BaseModel):
+    workspace_id: str
+    query: str
+    matches: list[str]  # workspace-relative paths
+    truncated: bool
+
+
+@workspace_router.get("/search", response_model=SearchResponse)
+def search_files(request: Request, workspace_id: str, q: str = "") -> SearchResponse:
+    """Find files by name across the WHOLE workspace — git as the index
+    (`ls-files` tracked + others), never an os.walk. Case-insensitive
+    substring on the relative path; capped at 200 matches."""
+    ws = _workspace_for(request, workspace_id)
+    query = q.strip().lower()
+    if not query:
+        return SearchResponse(
+            workspace_id=workspace_id, query=q, matches=[], truncated=False
+        )
+    names: set[str] = set()
+    for extra in ((), ("--others", "--exclude-standard")):
+        result = _git(ws, "ls-files", *extra)
+        if result.returncode == 0:
+            names.update(result.stdout.decode("utf-8", errors="replace").splitlines())
+    names.discard(_META_FILE)
+    matches = sorted(p for p in names if query in p.lower())
+    return SearchResponse(
+        workspace_id=workspace_id,
+        query=q,
+        matches=matches[:200],
+        truncated=len(matches) > 200,
+    )
+
+
 @workspace_router.get("/files/{path:path}", response_model=FileResponse)
 def get_file(request: Request, workspace_id: str, path: str) -> FileResponse:
     """Read a workspace file as text."""
