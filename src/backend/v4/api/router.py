@@ -2968,14 +2968,25 @@ class _RouterChatClient:
         # — persistence is automatic but the agent cannot reason about it
         # ("I can't save files") nor answer "¿dónde quedó el archivo?".
         if self._workspace_id:
+            _wid = self._workspace_id
+            _wuid = self._user_id or "sample_user"
             instructions += (
                 f"\n\nWORKSPACE: the user has the persistent project workspace "
-                f"'{self._workspace_id}' active in this conversation. Every file "
-                "you produce with the code interpreter is saved into it "
-                "automatically and committed to its git history; the user sees "
-                "it immediately in their file explorer panel. When asked to "
-                "create or save a file, use the code interpreter and state the "
-                "FILENAME you produced — never claim you cannot save files."
+                f"'{_wid}' active in this conversation. Every file you produce "
+                "with the code interpreter is saved into it automatically and "
+                "committed to its git history; the user sees it immediately in "
+                "their file explorer panel. When asked to create or save a "
+                "file, use the code interpreter and state the FILENAME you "
+                "produced — never claim you cannot save files.\n"
+                "To SEE the workspace (list folders, read a file, find a file) "
+                "use the MacaeMcpServer tools — you do NOT already know its "
+                "contents; never fabricate them: "
+                f"MacaeMcpServer___workspace_list_entries {{user_id='{_wuid}', "
+                f"workspace_id='{_wid}', path=''}} (then descend by directory), "
+                f"MacaeMcpServer___workspace_read_file {{user_id='{_wuid}', "
+                f"workspace_id='{_wid}', path='<relative path>'}}, "
+                f"MacaeMcpServer___workspace_search_files {{user_id='{_wuid}', "
+                f"workspace_id='{_wid}', query='<name fragment>'}}."
             )
         call_names: dict = {}  # call_id -> tool name, to label tool results
         # Memory = the conversation itself, rebuilt from Cosmos + AI Search and

@@ -21,6 +21,7 @@ class Domain(Enum):
     GENERAL = "general"
     DATA = "data"
     INSPECTOR = "inspector"
+    WORKSPACE = "workspace"
 
 
 class MCPToolBase(ABC):
