@@ -78,8 +78,12 @@ def _resolve_in(ws: Path, raw: str) -> Path:
 
 
 def _git(ws: Path, *args: str) -> "subprocess.CompletedProcess[bytes]":
-    return subprocess.run(["git", *args], cwd=ws, capture_output=True, timeout=15)
-
+    try:
+        return subprocess.run(["git", *args], cwd=ws, capture_output=True, timeout=15)
+    except FileNotFoundError as exc:
+        raise WorkspaceAccessError("git is not available in this environment.") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise WorkspaceAccessError("git operation timed out.") from exc
 
 class WorkspaceToolService(MCPToolBase):
     """Read-only workspace access for agents (list / read / search)."""
