@@ -102,8 +102,25 @@ async def _materialize_hosted_file_to_workspace(
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(data)
         rel = str(dest.relative_to(ws))
-        _git(ws, "add", rel)
-        _git(ws, "commit", "-q", "-m", f"agent: add {name or file_id}")
+
+        add_res = _git(ws, "add", rel)
+        if add_res.returncode != 0:
+            _log.warning(
+                "Workspace git add failed for %s: %s",
+                rel,
+                add_res.stderr.decode("utf-8", errors="replace")[-300:],
+            )
+            return
+
+        commit_res = _git(ws, "commit", "-q", "-m", f"agent: add {name or file_id}")
+        if commit_res.returncode != 0:
+            _log.warning(
+                "Workspace git commit failed for %s: %s",
+                rel,
+                commit_res.stderr.decode("utf-8", errors="replace")[-300:],
+            )
+            return
+
         _log.info(
             "Magentic workspace write: user=%s ws=%s file=%s",
             user_id,
