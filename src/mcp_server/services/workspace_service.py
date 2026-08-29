@@ -41,6 +41,16 @@ _META_FILE = ".macae_workspace_meta.json"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$")
 _GIT_IDENTITY = ("MACAE Workspace", "workspace@macae.local")
 
+# ── terminal (workspace_exec) ────────────────────────────────────────────────
+# Kill switch: set MACAE_WORKSPACE_EXEC=0 to disable the shell tool entirely.
+EXEC_ENABLED = os.getenv("MACAE_WORKSPACE_EXEC", "1") != "0"
+EXEC_TIMEOUT_DEFAULT = 120
+EXEC_TIMEOUT_MAX = 600
+EXEC_OUTPUT_LIMIT = 60000  # chars per stream, then truncated with a marker
+# Env vars whose NAME suggests a credential are stripped from the child process:
+# the agent gets a real terminal, not the server's secrets.
+_SECRET_ENV_HINT = re.compile(r"SECRET|PASSWORD|PASSWD|TOKEN|_KEY$|APIKEY|CREDENTIAL", re.I)
+
 
 class WorkspaceAccessError(Exception):
     """Raised for any invalid/denied workspace access; message is user-safe."""
@@ -124,6 +134,19 @@ def _git_commit_all(ws: Path, message: str) -> None:
             "git commit failed: "
             + commit_result.stderr.decode("utf-8", errors="replace").strip()
         )
+
+
+def _child_env() -> dict:
+    """Environment for spawned commands: the server's env minus anything whose
+    name looks like a credential."""
+    return {k: v for k, v in os.environ.items() if not _SECRET_ENV_HINT.search(k)}
+
+
+def _clip(text: str) -> tuple[str, bool]:
+    """Cap one output stream; returns (text, was_truncated)."""
+    if len(text) <= EXEC_OUTPUT_LIMIT:
+        return text, False
+    return text[:EXEC_OUTPUT_LIMIT] + "\n... (output truncated)", True
 
 
 class WorkspaceToolService(MCPToolBase):
@@ -608,6 +631,90 @@ class WorkspaceToolService(MCPToolBase):
                     error_message=str(e), context="workspace_delete_file"
                 )
 
+        # ── TERMINAL ──────────────────────────────────────────────────────
+
+        @mcp.tool(tags={self.domain.value})
+        def workspace_exec(
+            user_id: str,
+            workspace_id: str,
+            command: str,
+            path: str = "",
+            timeout: int = EXEC_TIMEOUT_DEFAULT,
+        ) -> str:
+            """Run a shell command inside the user's workspace — a REAL terminal.
+
+            The command runs through bash with the workspace as the working
+            directory, so pipes, globs, redirections and && all work:
+            `git status`, `git diff HEAD~1`, `git log --oneline -10`,
+            `git commit -am "msg"`, `uv run pytest -q`, `npm ci && npm run build`,
+            `find . -name '*.py'`, `grep -rn TODO src | head -20`,
+            `python script.py`.
+
+            Prefer THIS over asking for a dedicated tool — it is the generic
+            capability. Returns exit_code, stdout and stderr verbatim: a
+            non-zero exit_code is a real command result (e.g. failing tests),
+            not a tool failure, so read it and report it faithfully instead of
+            guessing.
+
+            path (optional) runs the command in a sub-directory of the
+            workspace. timeout is in seconds (default 120, max 600)."""
+            try:
+                if not EXEC_ENABLED:
+                    raise WorkspaceAccessError(
+                        "Shell execution is disabled on this server "
+                        "(MACAE_WORKSPACE_EXEC=0)."
+                    )
+                if not (command or "").strip():
+                    raise WorkspaceAccessError("Empty command.")
+                ws = _workspace_dir(user_id, workspace_id)
+                cwd = _resolve_in(ws, path) if path else ws
+                if not cwd.is_dir():
+                    raise WorkspaceAccessError(f"Not a directory: '{path}'.")
+                secs = max(
+                    1, min(int(timeout or EXEC_TIMEOUT_DEFAULT), EXEC_TIMEOUT_MAX)
+                )
+                try:
+                    proc = subprocess.run(
+                        ["bash", "-c", command],
+                        cwd=str(cwd),
+                        capture_output=True,
+                        timeout=secs,
+                        env=_child_env(),
+                    )
+                except FileNotFoundError as exc:
+                    raise WorkspaceAccessError(
+                        "bash is not available in this environment."
+                    ) from exc
+                except subprocess.TimeoutExpired:
+                    raise WorkspaceAccessError(
+                        f"Command timed out after {secs}s: {command[:120]}"
+                    )
+                out, out_cut = _clip(proc.stdout.decode("utf-8", errors="replace"))
+                err, err_cut = _clip(proc.stderr.decode("utf-8", errors="replace"))
+                rel_cwd = "/" if cwd == ws else str(cwd.relative_to(ws))
+                return format_success_response(
+                    action="workspace_exec",
+                    details={
+                        "command": command,
+                        "cwd": rel_cwd,
+                        "exit_code": proc.returncode,
+                        "stdout": out,
+                        "stderr": err,
+                        "truncated": out_cut or err_cut,
+                    },
+                    summary=(
+                        f"exit={proc.returncode} for `{command[:80]}` in '{rel_cwd}'."
+                    ),
+                )
+            except WorkspaceAccessError as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_exec"
+                )
+            except Exception as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_exec"
+                )
+
     @property
     def tool_count(self) -> int:
-        return 13
+        return 14
