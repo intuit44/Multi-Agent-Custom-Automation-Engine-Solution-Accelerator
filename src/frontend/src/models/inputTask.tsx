@@ -8,6 +8,8 @@ export interface InputTask {
     description: string;
     /** MANDATORY team identifier to use for this plan */
     team_id?: string;
+    /** Active workspace: agent file outputs land here (session fallback server-side). */
+    workspace_id?: string;
 }
 
 /**

@@ -40,7 +40,7 @@ from common.config.app_config import config
 # ── constants ────────────────────────────────────────────────────────────────
 
 WORKSPACE_ROOT = Path(
-    os.getenv("MACAE_WORKSPACE_ROOT", str(Path.home() / ".macae" / "workspaces"))
+    os.getenv("MACAE_WORKSPACE_ROOT") or str(Path.home() / ".macae" / "workspaces")
 ).resolve()
 MAX_FILE_BYTES = 1 * 1024 * 1024  # 1 MB
 MAX_LIST_ENTRIES = 1000

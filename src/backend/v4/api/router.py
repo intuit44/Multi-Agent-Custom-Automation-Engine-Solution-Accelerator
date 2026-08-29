@@ -391,7 +391,7 @@ async def process_request(
         description=input_task.description,
         session_id=input_task.session_id,
         persist_user_task=True,
-        workspace_id=input_task.workspace_id,
+        workspace_id=input_task.workspace_id or input_task.session_id,
     )
     return {
         "status": "Request started successfully",
@@ -1210,7 +1210,9 @@ async def chat_message(
         input_task_for_plan = InputTask(
             session_id=chat_request.session_id,
             description=chat_request.message,
-            workspace_id=chat_request.workspace_id,
+            # Selected workspace wins; the session's own space otherwise —
+            # the agent must see the SAME workspace the panel shows.
+            workspace_id=chat_request.workspace_id or chat_request.session_id,
         )
         try:
             result = await process_request(
@@ -3751,7 +3753,11 @@ async def chat_message_stream(
                 orchestrator_name,
                 user_access_token=user_access_token,
                 user_id=user_id,
-                workspace_id=chat_request.workspace_id,
+                # Selected workspace wins; session fallback otherwise (same
+                # semantics as the explorer panel — agent and user see ONE space).
+                workspace_id=chat_request.workspace_id
+                or chat_request.session_id
+                or None,
             )
             _cleanup.push_async_callback(agent.close)
             selected_agent_name = orchestrator_name
@@ -3919,7 +3925,8 @@ async def chat_message_stream(
                                 # run_plan call; None falls back to the
                                 # user's selected team.
                                 composed_agents=getattr(content, "agents", None),
-                                workspace_id=chat_request.workspace_id,
+                                workspace_id=chat_request.workspace_id
+                                or chat_request.session_id,
                             )
                             yield _sse_event(
                                 {

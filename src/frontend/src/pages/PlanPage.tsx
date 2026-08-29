@@ -996,6 +996,12 @@ const PlanPage: React.FC = () => {
           const resp = await apiService.createPlan({
             session_id: sessionId || '',
             description: chatInput,
+            // Selected workspace wins in the formal lane too; the backend
+            // falls back to the session's own space when omitted.
+            workspace_id:
+              (typeof window !== 'undefined' &&
+                window.localStorage.getItem('macae_active_workspace_id')) ||
+              undefined,
           });
           setPlanLane(false);
           setWaitingForPlan(true);
