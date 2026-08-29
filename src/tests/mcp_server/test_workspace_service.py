@@ -49,8 +49,9 @@ class TestWorkspaceToolService:
     def test_register_tools(self, workspace_tools):
         """Test tool registration."""
         tools, mock_mcp_server = workspace_tools
+        service = workspace_service.WorkspaceToolService()
 
-        assert len(mock_mcp_server.tools) == 13
+        assert len(mock_mcp_server.tools) == service.tool_count
         assert "workspace_git_status" in tools
         assert "workspace_write_file" in tools
         for tool in mock_mcp_server.tools:
