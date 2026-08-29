@@ -2629,6 +2629,16 @@ class _RouterChatClient:
                             + add_res.stderr.decode("utf-8", errors="replace")[-300:]
                         )
 
+                    staged = _git(_ws, "diff", "--cached", "--quiet", "--", _rel)
+                    if staged.returncode == 0:
+                        # No staged changes (e.g. same content as HEAD) → nothing to commit.
+                        return
+                    if staged.returncode != 1:
+                        raise RuntimeError(
+                            "git diff --cached failed: "
+                            + staged.stderr.decode("utf-8", errors="replace")[-300:]
+                        )
+
                     commit_res = _git(
                         _ws, "commit", "-q", "-m", f"agent: add {name or file_id}"
                     )
