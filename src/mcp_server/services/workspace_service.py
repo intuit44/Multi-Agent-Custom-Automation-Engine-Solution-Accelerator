@@ -475,13 +475,18 @@ class WorkspaceToolService(MCPToolBase):
                 ws = _workspace_dir_write(user_id, workspace_id)
                 dest = _resolve_in(ws, path)
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_text(content, encoding="utf-8")
+                data = content.encode("utf-8")
+                if len(data) > MAX_FILE_BYTES:
+                    raise WorkspaceAccessError(
+                        f"File too large ({len(data)} bytes). Max is {MAX_FILE_BYTES} bytes."
+                    )
+                dest.write_bytes(data)
                 msg = commit_message.strip() or f"agent: write {path}"
                 _git_commit_all(ws, msg)
                 return format_success_response(
                     action="workspace_write_file",
-                    details={"path": path, "bytes": len(content.encode("utf-8"))},
-                    summary=f"Wrote {len(content.encode('utf-8'))} bytes to '{path}' and committed.",
+                    details={"path": path, "bytes": len(data)},
+                    summary=f"Wrote {len(data)} bytes to '{path}' and committed.",
                 )
             except WorkspaceAccessError as e:
                 return format_error_response(
