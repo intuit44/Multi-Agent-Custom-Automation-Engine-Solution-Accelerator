@@ -300,7 +300,12 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
               }
             },
           },
-          fileIds
+          fileIds,
+          undefined, // planId — no aplicable desde este carril
+          undefined, // allowPlan — usa default
+          typeof window !== 'undefined'
+            ? window.localStorage.getItem('macae_active_workspace_id')
+            : undefined
         );
 
         if (collectedFiles.length > 0) {

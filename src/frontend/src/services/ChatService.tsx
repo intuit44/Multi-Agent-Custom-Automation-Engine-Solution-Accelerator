@@ -86,11 +86,19 @@ export class ChatService {
    */
   static async sendMessage(
     message: string,
-    sessionId?: string
+    sessionId?: string,
+    workspaceId?: string | null
   ): Promise<ChatMessageResponse> {
+    const activeWorkspaceId =
+      workspaceId ??
+      (typeof window !== 'undefined'
+        ? window.localStorage.getItem('macae_active_workspace_id')
+        : null);
+
     const request: ChatMessageRequest = {
       session_id: sessionId || '',
       message,
+      ...(activeWorkspaceId ? { workspace_id: activeWorkspaceId } : {}),
     };
 
     const response = await apiService.sendChatMessage(request);

@@ -2621,8 +2621,22 @@ class _RouterChatClient:
                     _dest.parent.mkdir(parents=True, exist_ok=True)
                     _dest.write_bytes(data)
                     _rel = str(_dest.relative_to(_ws))
-                    _git(_ws, "add", _rel)
-                    _git(_ws, "commit", "-q", "-m", f"agent: add {name or file_id}")
+
+                    add_res = _git(_ws, "add", _rel)
+                    if add_res.returncode != 0:
+                        raise RuntimeError(
+                            "git add failed: "
+                            + add_res.stderr.decode("utf-8", errors="replace")[-300:]
+                        )
+
+                    commit_res = _git(
+                        _ws, "commit", "-q", "-m", f"agent: add {name or file_id}"
+                    )
+                    if commit_res.returncode != 0:
+                        raise RuntimeError(
+                            "git commit failed: "
+                            + commit_res.stderr.decode("utf-8", errors="replace")[-300:]
+                        )
                 except Exception as _ws_err:
                     logger.warning(
                         "workspace write failed for file_id=%s: %s", file_id, _ws_err
@@ -2949,6 +2963,19 @@ class _RouterChatClient:
                 "Use the code interpreter to run Python, do the computation or "
                 "analysis, and produce downloadable files when asked. Keep the "
                 "final answer brief."
+            )
+        # WORKSPACE AWARENESS: without this the model is blind to the substrate
+        # — persistence is automatic but the agent cannot reason about it
+        # ("I can't save files") nor answer "¿dónde quedó el archivo?".
+        if self._workspace_id:
+            instructions += (
+                f"\n\nWORKSPACE: the user has the persistent project workspace "
+                f"'{self._workspace_id}' active in this conversation. Every file "
+                "you produce with the code interpreter is saved into it "
+                "automatically and committed to its git history; the user sees "
+                "it immediately in their file explorer panel. When asked to "
+                "create or save a file, use the code interpreter and state the "
+                "FILENAME you produced — never claim you cannot save files."
             )
         call_names: dict = {}  # call_id -> tool name, to label tool results
         # Memory = the conversation itself, rebuilt from Cosmos + AI Search and

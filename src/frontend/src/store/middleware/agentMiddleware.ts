@@ -119,7 +119,10 @@ export const agentMiddleware: Middleware =
         };
 
         // 5. Llamar ChatService con streaming
-        const activeWorkspaceId = localStorage.getItem('macae_active_workspace_id');
+        const activeWorkspaceId =
+          typeof window !== 'undefined'
+            ? window.localStorage.getItem('macae_active_workspace_id')
+            : null;
         await ChatService.sendMessageStream(
           message,
           sessionId || state.chat.sessionId,
