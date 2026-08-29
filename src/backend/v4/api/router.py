@@ -2621,8 +2621,22 @@ class _RouterChatClient:
                     _dest.parent.mkdir(parents=True, exist_ok=True)
                     _dest.write_bytes(data)
                     _rel = str(_dest.relative_to(_ws))
-                    _git(_ws, "add", _rel)
-                    _git(_ws, "commit", "-q", "-m", f"agent: add {name or file_id}")
+
+                    add_res = _git(_ws, "add", _rel)
+                    if add_res.returncode != 0:
+                        raise RuntimeError(
+                            "git add failed: "
+                            + add_res.stderr.decode("utf-8", errors="replace")[-300:]
+                        )
+
+                    commit_res = _git(
+                        _ws, "commit", "-q", "-m", f"agent: add {name or file_id}"
+                    )
+                    if commit_res.returncode != 0:
+                        raise RuntimeError(
+                            "git commit failed: "
+                            + commit_res.stderr.decode("utf-8", errors="replace")[-300:]
+                        )
                 except Exception as _ws_err:
                     logger.warning(
                         "workspace write failed for file_id=%s: %s", file_id, _ws_err
