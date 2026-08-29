@@ -18,6 +18,7 @@ from services.product_service_widgets import ProductServiceWithWidgets
 from services.tech_support_service import TechSupportService
 from services.general_service import GeneralService
 from services.data_tool_service import DataToolService
+from services.workspace_service import WorkspaceToolService
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -35,6 +36,7 @@ factory.register_service(ProductService())
 factory.register_service(ProductServiceWithWidgets())
 factory.register_service(GeneralService())
 factory.register_service(DataToolService(config.dataset_path))
+factory.register_service(WorkspaceToolService())
 
 
 def create_fastmcp_server():
