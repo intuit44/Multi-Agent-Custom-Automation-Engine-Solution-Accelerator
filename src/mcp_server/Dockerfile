@@ -35,7 +35,7 @@ WORKDIR /app
 # is no longer valid, which makes ANY `apt-get update` fail (exit 100) — drop
 # that source first. Installed before the COPY so the layer caches.
 RUN rm -f /etc/apt/sources.list.d/yarn.list \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && bash -c "set -o pipefail; curl -fsSL https://deb.nodesource.com/setup_20.x | bash -" \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* \
     && node --version && npm --version
