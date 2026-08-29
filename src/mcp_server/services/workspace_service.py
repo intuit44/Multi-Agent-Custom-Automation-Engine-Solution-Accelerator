@@ -90,6 +90,7 @@ def _git(ws: Path, *args: str) -> "subprocess.CompletedProcess[bytes]":
     except subprocess.TimeoutExpired as exc:
         raise WorkspaceAccessError("git operation timed out.") from exc
 
+
 class WorkspaceToolService(MCPToolBase):
     """Read-only workspace access for agents (list / read / search)."""
 
