@@ -52,8 +52,13 @@ def _workspace_dir(user_id: str, workspace_id: str) -> Path:
         raise WorkspaceAccessError("Workspace path escapes the root.")
     ws = Path(joined)
     if ws.is_symlink():  # linked workspace → operate on the real project
-        ws = ws.resolve()
-    if not (ws / ".git").is_dir():
+        if os.getenv("APP_ENV", "dev") != "dev":
+            raise WorkspaceAccessError("Linked workspaces are dev-only.")
+        link_root = Path(os.getenv("MACAE_LINK_ROOT", "/workspaces")).resolve()
+        target = ws.resolve()
+        if not str(target).startswith(str(link_root) + os.sep):
+            raise WorkspaceAccessError("Linked workspace escapes the link root.")
+        ws = target
         raise WorkspaceAccessError(
             f"Workspace '{workspace_id}' does not exist for this user."
         )
