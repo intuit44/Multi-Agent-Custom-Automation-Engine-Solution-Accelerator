@@ -95,18 +95,25 @@ export const WorkspaceTree: React.FC<WorkspaceTreeProps> = ({
       setResults(null);
       return;
     }
-    const t = setTimeout(async () => {
-      try {
-        const r: { matches?: string[] } = await apiClient.get(
-          `/v4/workspace/${encodeURIComponent(workspaceId)}/search`,
-          { params: { q: query } }
-        );
-        setResults(r.matches ?? []);
-      } catch {
-        setResults([]);
-      }
+
+    let cancelled = false;
+    const t = setTimeout(() => {
+      apiClient
+        .get(`/v4/workspace/${encodeURIComponent(workspaceId)}/search`, {
+          params: { q: query },
+        })
+        .then((r: { matches?: string[] } | null) => {
+          if (!cancelled) setResults(r?.matches ?? []);
+        })
+        .catch(() => {
+          if (!cancelled) setResults([]);
+        });
     }, 250);
-    return () => clearTimeout(t);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [q, workspaceId]);
 
   const renderLevel = (parent: string, depth: number): React.ReactNode => {
