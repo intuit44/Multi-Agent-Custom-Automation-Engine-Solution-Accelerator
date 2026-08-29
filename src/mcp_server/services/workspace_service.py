@@ -302,6 +302,9 @@ class WorkspaceToolService(MCPToolBase):
             try:
                 ws = _workspace_dir(user_id, workspace_id)
                 result = _git(ws, "status", "--short")
+                if result.returncode != 0:
+                    stderr = result.stderr.decode("utf-8", errors="replace").strip()
+                    raise WorkspaceAccessError(f"git status failed: {stderr}")
                 output = result.stdout.decode("utf-8", errors="replace").strip()
                 return format_success_response(
                     action="workspace_git_status",
