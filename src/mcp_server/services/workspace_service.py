@@ -74,7 +74,12 @@ def _workspace_dir(user_id: str, workspace_id: str) -> Path:
 def _workspace_dir_write(user_id: str, workspace_id: str) -> Path:
     """Like _workspace_dir but used by write tools — same resolution, explicit
     name makes call-sites clearer about intent."""
-    return _workspace_dir(user_id, workspace_id)
+    ws = _workspace_dir(user_id, workspace_id)
+    if _git(ws, "rev-parse", "--is-inside-work-tree").returncode != 0:
+        raise WorkspaceAccessError(
+            "Workspace is not a git repository; it must be initialized by the backend first."
+        )
+    return ws
 
 
 def _resolve_in(ws: Path, raw: str) -> Path:
