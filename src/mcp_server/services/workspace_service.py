@@ -59,6 +59,7 @@ def _workspace_dir(user_id: str, workspace_id: str) -> Path:
         if not str(target).startswith(str(link_root) + os.sep):
             raise WorkspaceAccessError("Linked workspace escapes the link root.")
         ws = target
+    elif not ws.is_dir():
         raise WorkspaceAccessError(
             f"Workspace '{workspace_id}' does not exist for this user."
         )
@@ -66,6 +67,7 @@ def _workspace_dir(user_id: str, workspace_id: str) -> Path:
 
 
 def _resolve_in(ws: Path, raw: str) -> Path:
+    ws = ws.resolve()
     rel = Path((raw or "").replace("\\", "/").strip())
     if str(rel) in {"", "."}:
         return ws
