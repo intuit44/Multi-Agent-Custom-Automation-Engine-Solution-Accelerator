@@ -49,7 +49,9 @@ EXEC_TIMEOUT_MAX = 600
 EXEC_OUTPUT_LIMIT = 60000  # chars per stream, then truncated with a marker
 # Env vars whose NAME suggests a credential are stripped from the child process:
 # the agent gets a real terminal, not the server's secrets.
-_SECRET_ENV_HINT = re.compile(r"SECRET|PASSWORD|PASSWD|TOKEN|_KEY$|APIKEY|CREDENTIAL", re.I)
+_SECRET_ENV_HINT = re.compile(
+    r"SECRET|PASSWORD|PASSWD|TOKEN|_KEY$|APIKEY|CREDENTIAL", re.I
+)
 
 
 class WorkspaceAccessError(Exception):
