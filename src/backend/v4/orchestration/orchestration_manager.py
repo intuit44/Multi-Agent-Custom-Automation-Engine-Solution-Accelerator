@@ -112,6 +112,18 @@ async def _materialize_hosted_file_to_workspace(
             )
             return
 
+        staged = _git(ws, "diff", "--cached", "--quiet", "--", rel)
+        if staged.returncode == 0:
+            # No changes staged (e.g. same content as HEAD) → nothing to commit.
+            return
+        if staged.returncode != 1:
+            _log.warning(
+                "Workspace git diff --cached failed for %s: %s",
+                rel,
+                staged.stderr.decode("utf-8", errors="replace")[-300:],
+            )
+            return
+
         commit_res = _git(ws, "commit", "-q", "-m", f"agent: add {name or file_id}")
         if commit_res.returncode != 0:
             _log.warning(
