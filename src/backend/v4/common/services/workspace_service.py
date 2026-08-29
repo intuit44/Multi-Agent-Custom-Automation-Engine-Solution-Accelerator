@@ -311,6 +311,12 @@ def _link_into(ws: Path, local_path: str) -> Path:
 def git_status(ws: Path) -> str:
     """Return `git status --short` output for *ws* (empty string = clean)."""
     result = _git(ws, "status", "--short")
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail="git status failed: "
+            + result.stderr.decode("utf-8", errors="replace").strip(),
+        )
     return result.stdout.decode("utf-8", errors="replace").strip()
 
 
