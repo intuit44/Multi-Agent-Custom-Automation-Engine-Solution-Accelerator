@@ -2,7 +2,7 @@
 Tests for workspace MCP service behaviors.
 """
 
-import json
+from json import JSONDecodeError, loads
 import subprocess
 
 import pytest
@@ -138,7 +138,10 @@ class TestWorkspaceToolService:
             user_id, workspace_id, "notes.txt", "hello", "agent: write notes.txt"
         )
 
-        payload = json.loads(result)
+        try:
+            payload = loads(result)
+        except JSONDecodeError as exc:
+            pytest.fail(f"Expected a JSON success response, got: {result} ({exc})")
         status = subprocess.run(
             ["git", "status", "--short"],
             cwd=workspace,
