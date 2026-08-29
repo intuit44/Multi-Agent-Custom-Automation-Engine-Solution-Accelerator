@@ -29,8 +29,7 @@ from core.factory import Domain, MCPToolBase
 from utils.formatters import format_error_response, format_success_response
 
 WORKSPACE_ROOT = Path(
-    os.getenv("MACAE_WORKSPACE_ROOT")
-    or str(Path.home() / ".macae" / "workspaces")
+    os.getenv("MACAE_WORKSPACE_ROOT") or str(Path.home() / ".macae" / "workspaces")
 ).resolve()
 MAX_FILE_BYTES = 1 * 1024 * 1024  # 1 MB — same read cap as the backend
 MAX_ENTRIES = 200
