@@ -27,11 +27,7 @@ import {
   Checkmark20Regular,
 } from '@fluentui/react-icons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  ensureFreshToken,
-  headerBuilder,
-  resolveApiUrl,
-} from '../../api/config';
+import { apiClient } from '../../api/apiClient';
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -79,24 +75,9 @@ function workspacePath(title: string): string {
   return title.replace(/^\/+/, '');
 }
 
-async function apiFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
-  // Same identity as every other API call (apiClient/WorkspaceService):
-  // explicit principal headers. Without them the backend dev-fallback invents
-  // a SECOND user root and the editor writes where the selector cannot see.
-  await ensureFreshToken();
-  const res = await fetch(resolveApiUrl(url), {
-    ...init,
-    headers: headerBuilder({
-      'Content-Type': 'application/json',
-      ...(init.headers as Record<string, string> | undefined),
-    }),
-    credentials: 'include',
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => res.statusText);
-    throw new Error(`${res.status} ${detail}`);
-  }
-  return res.json() as Promise<T>;
+/** Encode each path segment, preserving the '/' separators the API expects. */
+function encodePath(path: string): string {
+  return path.split('/').map(encodeURIComponent).join('/');
 }
 
 // ── types ──────────────────────────────────────────────────────────────────
@@ -131,8 +112,14 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
 }) => {
   const path = workspacePath(title);
   const language = lang ?? langFromFilename(title);
+  // apiClient prepends the API root, so paths start at /v4 (never '/api/v4').
+  // ONE http client for the whole app: apiClient carries the principal headers
+  // and refreshes the token. A private fetch here used credentials:'include',
+  // which the Container Apps ingress (corsPolicy allowCredentials=false)
+  // rejects at preflight — the request never left the browser ("Failed to
+  // fetch", zero backend logs). Do not reintroduce a second client.
   const base = workspaceId
-    ? `/api/v4/workspace/${encodeURIComponent(workspaceId)}`
+    ? `/v4/workspace/${encodeURIComponent(workspaceId)}`
     : null;
 
   const [tabInternal, setTabInternal] = useState<EditorTab>('code');
@@ -187,10 +174,8 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
     setBusy(true);
     setSaveMsg(null);
     try {
-      await apiFetch(`${base}/files/${path}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: editorValue }),
+      await apiClient.put(`${base}/files/${encodePath(path)}`, {
+        content: editorValue,
       });
       lastSaved.current = editorValue;
       setDirty(false);
@@ -208,13 +193,9 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
     setBusy(true);
     setSaveMsg(null);
     try {
-      const r = await apiFetch<{ committed: boolean; sha: string }>(
+      const r: { committed: boolean; sha: string } = await apiClient.post(
         `${base}/commit`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: `Update ${path}` }),
-        }
+        { message: `Update ${path}` }
       );
       setSaveMsg(
         r.committed ? `Committed ${r.sha.slice(0, 7)} ✓` : 'Nothing to commit'
@@ -247,8 +228,8 @@ export const WorkspaceEditor: React.FC<WorkspaceEditorProps> = ({
     setDiffError(null);
     setDiffData(null);
     try {
-      const data = await apiFetch<{ original: string; modified: string }>(
-        `${base}/diff/${path}`
+      const data: { original: string; modified: string } = await apiClient.get(
+        `${base}/diff/${encodePath(path)}`
       );
       setDiffData(data);
     } catch (e) {
