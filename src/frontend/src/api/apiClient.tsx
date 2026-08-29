@@ -17,41 +17,44 @@ const buildUrl = (url: string, params?: Record<string, any>): string => {
 
 // Fetch with Authentication Headers
 const fetchWithAuth = async (url: string, method: string = "GET", body: BodyInit | null = null) => {
-    await ensureFreshToken(); // Refresh EasyAuth token if near expiry (OBO assertion freshness)
-    const authHeaders = headerBuilder(); // Get authentication headers (Authorization from fresh token)
+    // Serialize the body ONCE so it can be replayed on a 401 retry.
+    const isForm = body instanceof FormData;
+    const serializedBody: BodyInit | null = isForm
+        ? (body as FormData)
+        : (body ? JSON.stringify(body) : null);
 
-    const headers: Record<string, string> = {
-        ...authHeaders, // Include auth headers from headerBuilder
+    // Build request options from the CURRENT auth state. Called before the
+    // first attempt and again after a forced refresh so the retry carries the
+    // freshly-minted token, never the dead one.
+    const buildOptions = (): RequestInit => {
+        const headers: Record<string, string> = { ...headerBuilder() };
+        if (isForm) delete headers['Content-Type'];
+        else headers['Content-Type'] = 'application/json';
+        return { method, headers, body: serializedBody || undefined };
     };
 
-    // If body is FormData, do not set Content-Type header
-    if (body && body instanceof FormData) {
-        delete headers['Content-Type'];
-    } else {
-        headers['Content-Type'] = 'application/json';
-        body = body ? JSON.stringify(body) : null;
-    }
-
-    const options: RequestInit = {
-        method,
-        headers,
-        body: body || undefined,
-    };
+    const apiUrl = getApiUrl();
+    const finalUrl = `${apiUrl}${url}`;
 
     try {
-        const apiUrl = getApiUrl();
-        const finalUrl = `${apiUrl}${url}`;
-        // Log the request details
-        const response = await fetch(finalUrl, options);
+        await ensureFreshToken(); // proactive: refresh only if near expiry
+        let response = await fetch(finalUrl, buildOptions());
 
         if (response.status === 401) {
-            // Real rejection: token is dead and /.auth/refresh could not renew.
-            // This is the ONLY place a re-auth redirect may start — never
-            // preemptively before a request (a reload mid-flight loses the
-            // response and resets SPA state, e.g. the Chat|Plan toggle).
-            const errorText = await response.text().catch(() => '');
-            reauthSilently();
-            throw new Error(errorText || 'Session expired — re-authenticating');
+            // The EasyAuth token expired mid-session (it lives ~1h). Do NOT
+            // redirect yet — that reload loses the in-flight response and
+            // resets SPA state. First FORCE a token refresh and replay the
+            // request ONCE: a live /.auth/refresh renews it silently and the
+            // user never sees the 401. Only if the replay is ALSO 401 is the
+            // session truly dead → then, and only then, re-auth via redirect.
+            await ensureFreshToken(Number.POSITIVE_INFINITY); // force, ignore skew
+            response = await fetch(finalUrl, buildOptions());
+
+            if (response.status === 401) {
+                const errorText = await response.text().catch(() => '');
+                reauthSilently();
+                throw new Error(errorText || 'Session expired — re-authenticating');
+            }
         }
 
         if (!response.ok) {
