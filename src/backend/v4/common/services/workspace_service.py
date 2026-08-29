@@ -301,3 +301,186 @@ def _link_into(ws: Path, local_path: str) -> Path:
     # Pre-existing repos keep THEIR committer identity — we set nothing.
     _exclude_meta(target)
     return target
+
+
+# ── Public git-read helpers ───────────────────────────────────────────────────
+# Used by workspace_router endpoints and by any backend code that needs to
+# inspect the state of a workspace without going through the MCP server.
+
+
+def git_status(ws: Path) -> str:
+    """Return `git status --short` output for *ws* (empty string = clean)."""
+    result = _git(ws, "status", "--short")
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail="git status failed: "
+            + result.stderr.decode("utf-8", errors="replace").strip(),
+        )
+    return result.stdout.decode("utf-8", errors="replace").strip()
+
+
+def git_diff(ws: Path, path: str = "", staged: bool = False) -> str:
+    """Return the diff of uncommitted changes, optionally restricted to *path*.
+    Set *staged=True* for the index diff. Output is capped at 64 KB."""
+    args: list[str] = ["diff"]
+    if staged:
+        args.append("--cached")
+    if path:
+        resolved = _resolve(ws, path)
+        args += ["--", str(resolved)]
+    result = _git(ws, *args)
+    output = result.stdout.decode("utf-8", errors="replace")
+    return output[:65536] + ("\n... (truncated)" if len(output) > 65536 else "")
+
+
+def git_log(ws: Path, max_entries: int = 20) -> list[dict]:
+    """Return the last *max_entries* (capped at 100) commits as dicts with
+    keys: hash, author, date, message."""
+    n = max(1, min(max_entries, 100))
+    result = _git(ws, "log", f"-{n}", "--pretty=format:%H\x1f%an\x1f%ai\x1f%s")
+    entries: list[dict] = []
+    for line in result.stdout.decode("utf-8", errors="replace").splitlines():
+        parts = line.split("\x1f", 3)
+        if len(parts) == 4:
+            entries.append(
+                {
+                    "hash": parts[0][:12],
+                    "author": parts[1],
+                    "date": parts[2],
+                    "message": parts[3],
+                }
+            )
+    return entries
+
+
+def git_current_branch(ws: Path) -> str:
+    """Return the active branch name or '(detached) <sha>' if HEAD is detached."""
+    result = _git(ws, "symbolic-ref", "--short", "HEAD")
+    if result.returncode == 0:
+        return result.stdout.decode("utf-8", errors="replace").strip()
+    rev = _git(ws, "rev-parse", "--short", "HEAD")
+    return "(detached) " + rev.stdout.decode("utf-8", errors="replace").strip()
+
+
+def git_list_branches(ws: Path) -> list[str]:
+    """Return all local branch names; active branch has a leading '*'."""
+    result = _git(ws, "branch", "--list")
+    return [
+        line.strip()
+        for line in result.stdout.decode("utf-8", errors="replace").splitlines()
+        if line.strip()
+    ]
+
+
+def search_content(ws: Path, pattern: str, path: str = "") -> list[str]:
+    """Grep for *pattern* (case-insensitive literal) across tracked and
+    untracked files, optionally restricted to *path*. Returns up to 200
+    matching lines as 'rel/path:lineno:text'."""
+    if not pattern:
+        raise HTTPException(status_code=400, detail="Empty search pattern.")
+    base = str(_resolve(ws, path)) if path else str(ws)
+    result = _git(
+        ws,
+        "grep",
+        "-i",
+        "-n",
+        "--untracked",
+        "--no-index",
+        "-e",
+        pattern,
+        "--",
+        base,
+    )
+    lines = result.stdout.decode("utf-8", errors="replace").splitlines()
+    ws_prefix = str(ws) + os.sep
+    rel_lines = [
+        (line.replace(ws_prefix, "") if line.startswith(ws_prefix) else line)
+        for line in lines[:200]
+    ]
+    return rel_lines
+
+
+# ── Public write helpers ──────────────────────────────────────────────────────
+# Every write helper commits atomically so the workspace history stays clean.
+# They are synchronous (same as workspace_for/_git) — call from a thread pool
+# executor when invoked from async contexts if latency matters.
+
+
+def _git_commit_all(ws: Path, message: str) -> None:
+    """Stage everything and commit.  Skipped gracefully when nothing changed."""
+    _git(ws, "config", "user.name", _GIT_IDENTITY[0])
+    _git(ws, "config", "user.email", _GIT_IDENTITY[1])
+    _git(ws, "add", "-A")
+    # Exit-code 0 from diff --cached --quiet means nothing staged.
+    if _git(ws, "diff", "--cached", "--quiet").returncode == 0:
+        return
+    result = _git(ws, "commit", "-q", "-m", message)
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail="git commit failed: "
+            + result.stderr.decode("utf-8", errors="replace").strip(),
+        )
+
+
+def write_file(ws: Path, rel_path: str, content: bytes | str) -> Path:
+    """Write *content* to *ws/rel_path* (create or overwrite) and commit.
+    *content* may be bytes (binary/text) or str (auto-encoded as UTF-8).
+    Returns the resolved absolute path."""
+    dest = _resolve(ws, rel_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    data = content if isinstance(content, bytes) else content.encode("utf-8")
+    dest.write_bytes(data)
+    _git_commit_all(ws, f"agent: write {rel_path}")
+    return dest
+
+
+def create_file(ws: Path, rel_path: str, content: bytes | str) -> Path:
+    """Like write_file but raises 409 if the file already exists."""
+    dest = _resolve(ws, rel_path)
+    if dest.exists():
+        raise HTTPException(
+            status_code=409,
+            detail=f"File already exists: '{rel_path}'. Use write_file to overwrite.",
+        )
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    data = content if isinstance(content, bytes) else content.encode("utf-8")
+    dest.write_bytes(data)
+    _git_commit_all(ws, f"agent: create {rel_path}")
+    return dest
+
+
+def update_file(ws: Path, rel_path: str, content: bytes | str) -> Path:
+    """Like write_file but raises 404 if the file does not exist."""
+    dest = _resolve(ws, rel_path)
+    if not dest.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"File not found: '{rel_path}'. Use create_file to create it.",
+        )
+    if not dest.is_file():
+        raise HTTPException(
+            status_code=400, detail=f"Path is a directory: '{rel_path}'."
+        )
+    data = content if isinstance(content, bytes) else content.encode("utf-8")
+    dest.write_bytes(data)
+    _git_commit_all(ws, f"agent: update {rel_path}")
+    return dest
+
+
+def delete_file(ws: Path, rel_path: str) -> None:
+    """Delete *ws/rel_path* (file or empty directory) and commit the removal."""
+    target = _resolve(ws, rel_path)
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"Path not found: '{rel_path}'.")
+    if target.is_dir():
+        if any(target.iterdir()):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Directory '{rel_path}' is not empty. Delete its contents first.",
+            )
+        target.rmdir()
+    else:
+        target.unlink()
+    _git_commit_all(ws, f"agent: delete {rel_path}")

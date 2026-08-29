@@ -1,5 +1,5 @@
 """
-Workspace read tools — the agents' EYES on the per-user workspace.
+Workspace tools — the agents' EYES and HANDS on the per-user workspace.
 
 Self-contained twin of the backend resolver (same pattern as
 credential_resolver: ca-mcp is a separate process/container, so it operates
@@ -7,11 +7,15 @@ directly on the SHARED volume instead of importing backend code):
 
     {MACAE_WORKSPACE_ROOT}/{user_id}/{workspace_id}/
 
-READ-ONLY by design: writing already happens through the backend's automatic
-code-interpreter materialisation; these tools never create, never modify.
-Local dev shares the machine with the backend (same default root); in prod
-ca-mcp mounts the same Azure Files share (`macae-workspaces`) at the same
-MACAE_WORKSPACE_ROOT path — operator step, one extra mount.
+Read tools (3): workspace_list_entries, workspace_read_file, workspace_search_files
+Git-read tools (6): workspace_search_content, workspace_git_status,
+    workspace_git_diff, workspace_git_log, workspace_git_current_branch,
+    workspace_git_list_branches
+Write tools (4): workspace_write_file, workspace_create_file,
+    workspace_update_file, workspace_delete_file
+  Write tools commit every change to git automatically (message auto-generated
+  from the operation).  The write helpers require the workspace to already exist
+  (initiated by the backend); they never create the root git repo.
 
 Security: identical containment forms as the backend service — normpath +
 SIMPLE `startswith(base + os.sep)` guards (the only shape CodeQL recognizes
@@ -35,6 +39,7 @@ MAX_FILE_BYTES = 1 * 1024 * 1024  # 1 MB — same read cap as the backend
 MAX_ENTRIES = 200
 _META_FILE = ".macae_workspace_meta.json"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$")
+_GIT_IDENTITY = ("MACAE Workspace", "workspace@macae.local")
 
 
 class WorkspaceAccessError(Exception):
@@ -66,6 +71,17 @@ def _workspace_dir(user_id: str, workspace_id: str) -> Path:
     return ws
 
 
+def _workspace_dir_write(user_id: str, workspace_id: str) -> Path:
+    """Like _workspace_dir but used by write tools — same resolution, explicit
+    name makes call-sites clearer about intent."""
+    ws = _workspace_dir(user_id, workspace_id)
+    if _git(ws, "rev-parse", "--is-inside-work-tree").returncode != 0:
+        raise WorkspaceAccessError(
+            "Workspace is not a git repository; it must be initialized by the backend first."
+        )
+    return ws
+
+
 def _resolve_in(ws: Path, raw: str) -> Path:
     ws = ws.resolve()
     rel = Path((raw or "").replace("\\", "/").strip())
@@ -93,13 +109,32 @@ def _git(ws: Path, *args: str) -> "subprocess.CompletedProcess[bytes]":
         raise WorkspaceAccessError("git operation timed out.") from exc
 
 
+def _git_commit_all(ws: Path, message: str) -> None:
+    """Stage all changes in *ws* and commit with *message*. Idempotent: if
+    nothing changed after staging, the commit is skipped gracefully."""
+    _git(ws, "config", "user.name", _GIT_IDENTITY[0])
+    _git(ws, "config", "user.email", _GIT_IDENTITY[1])
+    _git(ws, "add", "-A")
+    result = _git(ws, "diff", "--cached", "--quiet")
+    if result.returncode == 0:
+        return  # nothing staged — no commit needed
+    commit_result = _git(ws, "commit", "-q", "-m", message)
+    if commit_result.returncode != 0:
+        raise WorkspaceAccessError(
+            "git commit failed: "
+            + commit_result.stderr.decode("utf-8", errors="replace").strip()
+        )
+
+
 class WorkspaceToolService(MCPToolBase):
-    """Read-only workspace access for agents (list / read / search)."""
+    """Workspace tools for agents — list, read, search, git-read, and write."""
 
     def __init__(self):
         super().__init__(Domain.WORKSPACE)
 
     def register_tools(self, mcp) -> None:
+        # ── READ TOOLS ────────────────────────────────────────────────────
+
         @mcp.tool(tags={self.domain.value})
         def workspace_list_entries(
             user_id: str, workspace_id: str, path: str = ""
@@ -212,6 +247,367 @@ class WorkspaceToolService(MCPToolBase):
                     error_message=str(e), context="workspace_search_files"
                 )
 
+        # ── GIT-READ TOOLS ────────────────────────────────────────────────
+
+        @mcp.tool(tags={self.domain.value})
+        def workspace_search_content(
+            user_id: str, workspace_id: str, pattern: str, path: str = ""
+        ) -> str:
+            """Grep for *pattern* (literal string, case-insensitive) inside tracked
+            and untracked files. Optionally restrict to a sub-path (relative to
+            the workspace root). Returns up to 200 matching lines as
+            'rel/path:lineno:text'. Returns an empty list when nothing matches."""
+            try:
+                ws = _workspace_dir(user_id, workspace_id)
+                if not pattern:
+                    raise WorkspaceAccessError("Empty pattern.")
+                # git grep --untracked searches tracked + untracked files.
+                # --no-index is INCOMPATIBLE with --untracked (git fatal error).
+                # Pathspec must be RELATIVE to the repo root, not an absolute path.
+                args = ["grep", "-i", "-n", "--untracked", "-e", pattern]
+                if path:
+                    # Resolve to validate containment, then make relative.
+                    resolved = _resolve_in(ws, path)
+                    rel = str(resolved.relative_to(ws))
+                    args += ["--", rel]
+                result = _git(ws, *args)
+                # rc=0 → matches found; rc=1 → no matches (not an error); rc>1 → error
+                if result.returncode > 1:
+                    stderr = result.stderr.decode("utf-8", errors="replace").strip()
+                    raise WorkspaceAccessError(f"git grep failed: {stderr}")
+                lines = result.stdout.decode("utf-8", errors="replace").splitlines()
+                rel_lines = lines[:MAX_ENTRIES]
+                return format_success_response(
+                    action="workspace_search_content",
+                    details={
+                        "pattern": pattern,
+                        "path": path or "/",
+                        "matches": rel_lines,
+                    },
+                    summary=f"{len(rel_lines)} matching lines for '{pattern}'.",
+                )
+            except WorkspaceAccessError as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_search_content"
+                )
+            except Exception as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_search_content"
+                )
+
+        @mcp.tool(tags={self.domain.value})
+        def workspace_git_status(user_id: str, workspace_id: str) -> str:
+            """Return the short git status of the workspace (staged, unstaged,
+            untracked files). Equivalent to `git status --short`."""
+            try:
+                ws = _workspace_dir(user_id, workspace_id)
+                result = _git(ws, "status", "--short")
+                if result.returncode != 0:
+                    stderr = result.stderr.decode("utf-8", errors="replace").strip()
+                    raise WorkspaceAccessError(f"git status failed: {stderr}")
+                output = result.stdout.decode("utf-8", errors="replace").strip()
+                return format_success_response(
+                    action="workspace_git_status",
+                    details={"status": output or "(clean)"},
+                    summary="Git status retrieved.",
+                )
+            except WorkspaceAccessError as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_git_status"
+                )
+            except Exception as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_git_status"
+                )
+
+        @mcp.tool(tags={self.domain.value})
+        def workspace_git_diff(
+            user_id: str, workspace_id: str, path: str = "", staged: bool = False
+        ) -> str:
+            """Show the diff of uncommitted changes. Set staged=true to see
+            staged (indexed) changes. Optionally restrict to a sub-path.
+            Output is capped at 64 KB."""
+            try:
+                ws = _workspace_dir(user_id, workspace_id)
+                args = ["diff"]
+                if staged:
+                    args.append("--cached")
+                if path:
+                    target = _resolve_in(ws, path)
+                    args += ["--", str(target)]
+                result = _git(ws, *args)
+                output = result.stdout.decode("utf-8", errors="replace")
+                if len(output) > 65536:
+                    output = output[:65536] + "\n... (truncated)"
+                return format_success_response(
+                    action="workspace_git_diff",
+                    details={
+                        "staged": staged,
+                        "path": path or "/",
+                        "diff": output or "(no changes)",
+                    },
+                    summary="Git diff retrieved.",
+                )
+            except WorkspaceAccessError as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_git_diff"
+                )
+            except Exception as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_git_diff"
+                )
+
+        @mcp.tool(tags={self.domain.value})
+        def workspace_git_log(
+            user_id: str, workspace_id: str, max_entries: int = 20
+        ) -> str:
+            """Return the last *max_entries* (capped at 100) git commits in the
+            workspace as a list of {hash, author, date, message}."""
+            try:
+                ws = _workspace_dir(user_id, workspace_id)
+                n = max(1, min(max_entries, 100))
+                result = _git(
+                    ws,
+                    "log",
+                    f"-{n}",
+                    "--pretty=format:%H\x1f%an\x1f%ai\x1f%s",
+                )
+                entries = []
+                for line in result.stdout.decode(
+                    "utf-8", errors="replace"
+                ).splitlines():
+                    parts = line.split("\x1f", 3)
+                    if len(parts) == 4:
+                        entries.append(
+                            {
+                                "hash": parts[0][:12],
+                                "author": parts[1],
+                                "date": parts[2],
+                                "message": parts[3],
+                            }
+                        )
+                return format_success_response(
+                    action="workspace_git_log",
+                    details={"entries": entries},
+                    summary=f"{len(entries)} commit(s) retrieved.",
+                )
+            except WorkspaceAccessError as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_git_log"
+                )
+            except Exception as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_git_log"
+                )
+
+        @mcp.tool(tags={self.domain.value})
+        def workspace_git_current_branch(user_id: str, workspace_id: str) -> str:
+            """Return the name of the currently checked-out branch (or the
+            detached HEAD SHA if not on a branch)."""
+            try:
+                ws = _workspace_dir(user_id, workspace_id)
+                result = _git(ws, "symbolic-ref", "--short", "HEAD")
+                if result.returncode == 0:
+                    branch = result.stdout.decode("utf-8", errors="replace").strip()
+                else:
+                    rev = _git(ws, "rev-parse", "--short", "HEAD")
+                    branch = (
+                        "(detached) "
+                        + rev.stdout.decode("utf-8", errors="replace").strip()
+                    )
+                return format_success_response(
+                    action="workspace_git_current_branch",
+                    details={"branch": branch},
+                    summary=f"Current branch: {branch}",
+                )
+            except WorkspaceAccessError as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_git_current_branch"
+                )
+            except Exception as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_git_current_branch"
+                )
+
+        @mcp.tool(tags={self.domain.value})
+        def workspace_git_list_branches(user_id: str, workspace_id: str) -> str:
+            """List all local branches in the workspace. The active branch is
+            marked with a leading '*'."""
+            try:
+                ws = _workspace_dir(user_id, workspace_id)
+                result = _git(ws, "branch", "--list")
+                branches = [
+                    line.strip()
+                    for line in result.stdout.decode(
+                        "utf-8", errors="replace"
+                    ).splitlines()
+                    if line.strip()
+                ]
+                return format_success_response(
+                    action="workspace_git_list_branches",
+                    details={"branches": branches},
+                    summary=f"{len(branches)} branch(es) found.",
+                )
+            except WorkspaceAccessError as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_git_list_branches"
+                )
+            except Exception as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_git_list_branches"
+                )
+
+        # ── WRITE TOOLS ───────────────────────────────────────────────────
+
+        @mcp.tool(tags={self.domain.value})
+        def workspace_write_file(
+            user_id: str,
+            workspace_id: str,
+            path: str,
+            content: str,
+            commit_message: str = "",
+        ) -> str:
+            """Write (create or overwrite) a text file at *path* inside the
+            workspace and commit the change. Use workspace_create_file when you
+            want an explicit guard against overwriting. commit_message is
+            optional — a default is generated from the path."""
+            try:
+                ws = _workspace_dir_write(user_id, workspace_id)
+                dest = _resolve_in(ws, path)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                data = content.encode("utf-8")
+                if len(data) > MAX_FILE_BYTES:
+                    raise WorkspaceAccessError(
+                        f"File too large ({len(data)} bytes). Max is {MAX_FILE_BYTES} bytes."
+                    )
+                dest.write_bytes(data)
+                msg = commit_message.strip() or f"agent: write {path}"
+                _git_commit_all(ws, msg)
+                return format_success_response(
+                    action="workspace_write_file",
+                    details={"path": path, "bytes": len(data)},
+                    summary=f"Wrote {len(data)} bytes to '{path}' and committed.",
+                )
+            except WorkspaceAccessError as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_write_file"
+                )
+            except Exception as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_write_file"
+                )
+
+        @mcp.tool(tags={self.domain.value})
+        def workspace_create_file(
+            user_id: str,
+            workspace_id: str,
+            path: str,
+            content: str,
+            commit_message: str = "",
+        ) -> str:
+            """Create a NEW text file at *path* inside the workspace and commit.
+            Fails if the file already exists — use workspace_write_file to
+            overwrite."""
+            try:
+                ws = _workspace_dir_write(user_id, workspace_id)
+                dest = _resolve_in(ws, path)
+                if dest.exists():
+                    raise WorkspaceAccessError(
+                        f"File already exists: '{path}'. Use workspace_write_file to overwrite."
+                    )
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text(content, encoding="utf-8")
+                msg = commit_message.strip() or f"agent: create {path}"
+                _git_commit_all(ws, msg)
+                return format_success_response(
+                    action="workspace_create_file",
+                    details={"path": path, "bytes": len(content.encode("utf-8"))},
+                    summary=f"Created '{path}' ({len(content.encode('utf-8'))} bytes) and committed.",
+                )
+            except WorkspaceAccessError as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_create_file"
+                )
+            except Exception as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_create_file"
+                )
+
+        @mcp.tool(tags={self.domain.value})
+        def workspace_update_file(
+            user_id: str,
+            workspace_id: str,
+            path: str,
+            content: str,
+            commit_message: str = "",
+        ) -> str:
+            """Update an EXISTING text file at *path* with new *content* and
+            commit. Fails if the file does not exist — use workspace_create_file
+            to create it first."""
+            try:
+                ws = _workspace_dir_write(user_id, workspace_id)
+                dest = _resolve_in(ws, path)
+                if not dest.exists():
+                    raise WorkspaceAccessError(
+                        f"File not found: '{path}'. Use workspace_create_file to create it."
+                    )
+                if not dest.is_file():
+                    raise WorkspaceAccessError(f"Path is a directory: '{path}'.")
+                dest.write_text(content, encoding="utf-8")
+                msg = commit_message.strip() or f"agent: update {path}"
+                _git_commit_all(ws, msg)
+                return format_success_response(
+                    action="workspace_update_file",
+                    details={"path": path, "bytes": len(content.encode("utf-8"))},
+                    summary=f"Updated '{path}' ({len(content.encode('utf-8'))} bytes) and committed.",
+                )
+            except WorkspaceAccessError as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_update_file"
+                )
+            except Exception as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_update_file"
+                )
+
+        @mcp.tool(tags={self.domain.value})
+        def workspace_delete_file(
+            user_id: str,
+            workspace_id: str,
+            path: str,
+            commit_message: str = "",
+        ) -> str:
+            """Delete a file (or empty directory) at *path* from the workspace
+            and commit the removal. Directories are only deleted when empty."""
+            try:
+                ws = _workspace_dir_write(user_id, workspace_id)
+                target = _resolve_in(ws, path)
+                if not target.exists():
+                    raise WorkspaceAccessError(f"Path not found: '{path}'.")
+                if target.is_dir():
+                    if any(target.iterdir()):
+                        raise WorkspaceAccessError(
+                            f"Directory '{path}' is not empty. Delete its contents first."
+                        )
+                    target.rmdir()
+                else:
+                    target.unlink()
+                msg = commit_message.strip() or f"agent: delete {path}"
+                _git_commit_all(ws, msg)
+                return format_success_response(
+                    action="workspace_delete_file",
+                    details={"path": path},
+                    summary=f"Deleted '{path}' and committed.",
+                )
+            except WorkspaceAccessError as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_delete_file"
+                )
+            except Exception as e:
+                return format_error_response(
+                    error_message=str(e), context="workspace_delete_file"
+                )
+
     @property
     def tool_count(self) -> int:
-        return 3
+        return 13
