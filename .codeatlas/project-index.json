@@ -1,20 +1,20 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-09T01:56:40.171Z",
+  "generatedAt": "2026-08-29T05:20:45.499Z",
   "rootPath": "/workspaces/Multi-Agent-Custom-Automation-Engine-Solution-Accelerator",
   "summary": {
-    "totalFiles": 287,
-    "totalEdges": 179,
-    "totalLines": 74577,
+    "totalFiles": 302,
+    "totalEdges": 190,
+    "totalLines": 80431,
     "languages": [
       "py",
       "js"
     ],
     "flowStages": {
       "start": 32,
-      "main": 113,
-      "core": 51,
-      "helpers": 91
+      "main": 125,
+      "core": 53,
+      "helpers": 92
     }
   },
   "files": [
@@ -469,8 +469,8 @@
       "stage": "start",
       "lang": "py",
       "ext": ".py",
-      "lines": 199,
-      "size": 6402,
+      "lines": 220,
+      "size": 7334,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -704,8 +704,8 @@
       "stage": "start",
       "lang": "py",
       "ext": ".py",
-      "lines": 542,
-      "size": 24126,
+      "lines": 576,
+      "size": 26121,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -851,8 +851,8 @@
       "stage": "helpers",
       "lang": "py",
       "ext": ".py",
-      "lines": 63,
-      "size": 1811,
+      "lines": 68,
+      "size": 2063,
       "collaboration": {
         "status": "connected",
         "impact": "leaf",
@@ -912,8 +912,8 @@
       "stage": "helpers",
       "lang": "py",
       "ext": ".py",
-      "lines": 339,
-      "size": 9618,
+      "lines": 389,
+      "size": 11492,
       "collaboration": {
         "status": "connected",
         "impact": "leaf",
@@ -927,9 +927,10 @@
       "isCircular": false,
       "hotspotScore": 12,
       "hotspotLevel": "medium",
-      "summary": "Support or shared utility code. Classes: DataType, AgentType, StepStatus. Functions: update_step_counts",
+      "summary": "Support or shared utility code. Classes: DataType, AgentType, StepStatus. Functions: update_step_counts, _query_bool_per_contract",
       "functions": [
-        "update_step_counts"
+        "update_step_counts",
+        "_query_bool_per_contract"
       ],
       "classes": [
         "DataType",
@@ -961,8 +962,8 @@
       "stage": "helpers",
       "lang": "py",
       "ext": ".py",
-      "lines": 457,
-      "size": 16097,
+      "lines": 462,
+      "size": 16253,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -1416,8 +1417,8 @@
       "stage": "main",
       "lang": "py",
       "ext": ".py",
-      "lines": 6239,
-      "size": 257540,
+      "lines": 6654,
+      "size": 276429,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -1431,11 +1432,10 @@
       "isCircular": false,
       "hotspotScore": 9,
       "hotspotLevel": "low",
-      "summary": "Main orchestration code. Classes: _HostedTextContent, _HostedPlanSignal, _HostedFunctionCall. Functions: _extract_auth, _extract_auth_with_token, _format_context_block, _spawn_bg_persist",
+      "summary": "Main orchestration code. Classes: HtmlPreviewRequest, _HostedTextContent, _HostedPlanSignal. Functions: _extract_auth, _extract_auth_with_token, _spawn_bg_persist, _done",
       "functions": [
         "_extract_auth",
         "_extract_auth_with_token",
-        "_format_context_block",
         "_spawn_bg_persist",
         "_done",
         "_file_response",
@@ -1457,9 +1457,11 @@
         "_build_plan_chat_prompt",
         "_agent_can_join_direct_orchestration",
         "_merge_teams_for_direct_response",
-        "__init__"
+        "__init__",
+        "_capability"
       ],
       "classes": [
+        "HtmlPreviewRequest",
         "_HostedTextContent",
         "_HostedPlanSignal",
         "_HostedFunctionCall",
@@ -1507,6 +1509,66 @@
       "classes": [
         "RouterDecision",
         "RouterDecisionAccumulator"
+      ],
+      "exports": [],
+      "imports": [],
+      "usedBy": []
+    },
+    {
+      "path": "src/backend/v4/api/workspace_router.py",
+      "fileType": "module",
+      "stage": "main",
+      "lang": "py",
+      "ext": ".py",
+      "lines": 611,
+      "size": 21913,
+      "collaboration": {
+        "status": "isolated",
+        "impact": "solo",
+        "summary": "No local collaboration links yet.",
+        "score": 0
+      },
+      "crossStageLinks": 0,
+      "impactScore": 0,
+      "isDeadCode": true,
+      "isOrphan": true,
+      "isCircular": false,
+      "hotspotScore": 6,
+      "hotspotLevel": "low",
+      "summary": "Main orchestration code. Classes: FileInfo, FileListResponse, DirEntry. Functions: _auth_user, _workspace_for, _user_root, list_files",
+      "functions": [
+        "_auth_user",
+        "_workspace_for",
+        "_user_root",
+        "list_files",
+        "list_entries",
+        "search_files",
+        "get_file",
+        "put_file",
+        "get_diff",
+        "commit",
+        "log",
+        "restore",
+        "list_workspaces",
+        "create_workspace",
+        "delete_workspace"
+      ],
+      "classes": [
+        "FileInfo",
+        "FileListResponse",
+        "DirEntry",
+        "EntriesResponse",
+        "FileResponse",
+        "FilePutRequest",
+        "FilePutResponse",
+        "DiffResponse",
+        "CommitRequest",
+        "CommitResponse",
+        "LogEntry",
+        "LogResponse",
+        "RestoreRequest",
+        "SearchResponse",
+        "WorkspaceSummary"
       ],
       "exports": [],
       "imports": [],
@@ -1635,8 +1697,8 @@
       "stage": "helpers",
       "lang": "py",
       "ext": ".py",
-      "lines": 297,
-      "size": 12110,
+      "lines": 346,
+      "size": 13884,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -1662,7 +1724,10 @@
         "MCPCredentialSource",
         "MCPConnectionStatus",
         "MCPServerEntry",
-        "MCPUserConnection"
+        "MCPUserConnection",
+        "OAuthCallbackQuery",
+        "McpReadResourceRequest",
+        "MCPServerUpdateRequest"
       ],
       "exports": [],
       "imports": [],
@@ -1817,8 +1882,8 @@
       "stage": "helpers",
       "lang": "py",
       "ext": ".py",
-      "lines": 103,
-      "size": 3945,
+      "lines": 158,
+      "size": 6264,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -1929,8 +1994,8 @@
       "stage": "helpers",
       "lang": "py",
       "ext": ".py",
-      "lines": 139,
-      "size": 4580,
+      "lines": 152,
+      "size": 5039,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -1964,8 +2029,8 @@
       "stage": "helpers",
       "lang": "py",
       "ext": ".py",
-      "lines": 430,
-      "size": 14391,
+      "lines": 447,
+      "size": 15136,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -2099,6 +2164,49 @@
       "classes": [
         "TeamService"
       ],
+      "exports": [],
+      "imports": [],
+      "usedBy": []
+    },
+    {
+      "path": "src/backend/v4/common/services/workspace_service.py",
+      "fileType": "module",
+      "stage": "helpers",
+      "lang": "py",
+      "ext": ".py",
+      "lines": 304,
+      "size": 12451,
+      "collaboration": {
+        "status": "isolated",
+        "impact": "solo",
+        "summary": "No local collaboration links yet.",
+        "score": 0
+      },
+      "crossStageLinks": 0,
+      "impactScore": 0,
+      "isDeadCode": true,
+      "isOrphan": true,
+      "isCircular": false,
+      "hotspotScore": 6,
+      "hotspotLevel": "low",
+      "summary": "Support or shared utility code. Functions: _git, _contained, workspace_for, user_root_for",
+      "functions": [
+        "_git",
+        "_contained",
+        "workspace_for",
+        "user_root_for",
+        "_resolve",
+        "_is_binary",
+        "_read_text_guarded",
+        "_read_meta",
+        "_write_meta",
+        "_count_files",
+        "_exclude_meta",
+        "_clone_into",
+        "_resolve_link_target",
+        "_link_into"
+      ],
+      "classes": [],
       "exports": [],
       "imports": [],
       "usedBy": []
@@ -2251,8 +2359,8 @@
       "stage": "helpers",
       "lang": "py",
       "ext": ".py",
-      "lines": 524,
-      "size": 20845,
+      "lines": 527,
+      "size": 20986,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -2308,8 +2416,8 @@
       "stage": "helpers",
       "lang": "py",
       "ext": ".py",
-      "lines": 584,
-      "size": 24349,
+      "lines": 953,
+      "size": 41551,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -2321,10 +2429,14 @@
       "isDeadCode": true,
       "isOrphan": true,
       "isCircular": false,
-      "hotspotScore": 6,
+      "hotspotScore": 7,
       "hotspotLevel": "low",
-      "summary": "Support or shared utility code. Classes: MCPEnabledBase, AzureAgentBase. Functions: __init__, __getattr__, get_chat_client, get_responses_client",
+      "summary": "Support or shared utility code. Classes: MCPEnabledBase, AzureAgentBase. Functions: _definition_fingerprint, _get, _ids, _identity",
       "functions": [
+        "_definition_fingerprint",
+        "_get",
+        "_ids",
+        "_identity",
         "__init__",
         "__getattr__",
         "get_chat_client",
@@ -2375,8 +2487,8 @@
       "stage": "main",
       "lang": "py",
       "ext": ".py",
-      "lines": 565,
-      "size": 23274,
+      "lines": 592,
+      "size": 24741,
       "collaboration": {
         "status": "connected",
         "impact": "leaf",
@@ -2410,8 +2522,8 @@
       "stage": "main",
       "lang": "py",
       "ext": ".py",
-      "lines": 256,
-      "size": 9327,
+      "lines": 269,
+      "size": 10098,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -2516,8 +2628,8 @@
       "stage": "core",
       "lang": "py",
       "ext": ".py",
-      "lines": 219,
-      "size": 5443,
+      "lines": 226,
+      "size": 5634,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -2695,8 +2807,8 @@
       "stage": "start",
       "lang": "py",
       "ext": ".py",
-      "lines": 451,
-      "size": 20145,
+      "lines": 511,
+      "size": 23438,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -2710,9 +2822,11 @@
       "isCircular": false,
       "hotspotScore": 6,
       "hotspotLevel": "low",
-      "summary": "Entry or startup logic. Classes: HumanApprovalMagenticManager. Functions: __init__, _get_uncalled_agents, plan_to_obj",
+      "summary": "Entry or startup logic. Classes: HumanApprovalMagenticManager. Functions: __init__, seed_chat_history, _apply_pending_history, _get_uncalled_agents",
       "functions": [
         "__init__",
+        "seed_chat_history",
+        "_apply_pending_history",
         "_get_uncalled_agents",
         "plan_to_obj"
       ],
@@ -2761,8 +2875,8 @@
       "stage": "core",
       "lang": "py",
       "ext": ".py",
-      "lines": 845,
-      "size": 39510,
+      "lines": 997,
+      "size": 45790,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -2887,20 +3001,20 @@
       "stage": "start",
       "lang": "js",
       "ext": ".tsx",
-      "lines": 126,
-      "size": 4615,
+      "lines": 136,
+      "size": 5167,
       "collaboration": {
         "status": "collaborative",
         "impact": "bridge",
         "summary": "Connects multiple parts of the code flow.",
-        "score": 16
+        "score": 22
       },
-      "crossStageLinks": 5,
-      "impactScore": 16,
+      "crossStageLinks": 7,
+      "impactScore": 22,
       "isDeadCode": false,
       "isOrphan": false,
       "isCircular": false,
-      "hotspotScore": 22,
+      "hotspotScore": 28,
       "hotspotLevel": "medium",
       "summary": "Entry or startup logic. Functions: fetchWithAuth, fetchWithoutAuth",
       "functions": [
@@ -2917,7 +3031,9 @@
       "usedBy": [
         "src/frontend/src/api/apiService.tsx",
         "src/frontend/src/api/index.tsx",
+        "src/frontend/src/components/content/HtmlPreview.tsx",
         "src/frontend/src/components/inspector/InspectorLink.tsx",
+        "src/frontend/src/components/workspace/WorkspaceTree.tsx",
         "src/frontend/src/coral/components/WidgetFrame.tsx",
         "src/frontend/src/services/TeamService.tsx"
       ]
@@ -2978,20 +3094,20 @@
       "stage": "helpers",
       "lang": "js",
       "ext": ".tsx",
-      "lines": 266,
-      "size": 8225,
+      "lines": 261,
+      "size": 8132,
       "collaboration": {
         "status": "collaborative",
         "impact": "bridge",
         "summary": "Connects multiple parts of the code flow.",
-        "score": 9
+        "score": 15
       },
-      "crossStageLinks": 3,
-      "impactScore": 9,
+      "crossStageLinks": 5,
+      "impactScore": 15,
       "isDeadCode": false,
       "isOrphan": false,
       "isCircular": false,
-      "hotspotScore": 15,
+      "hotspotScore": 21,
       "hotspotLevel": "medium",
       "summary": "Support or shared utility code. Functions: setApiUrl, setUserInfoGlobal, setEnvData, getConfigData",
       "functions": [
@@ -3019,6 +3135,7 @@
         "setUserInfoGlobal",
         "setEnvData",
         "getConfigData",
+        "reauthSilently",
         "getApiUrl",
         "resolveApiUrl",
         "getUserInfoGlobal",
@@ -3030,8 +3147,10 @@
       "imports": [],
       "usedBy": [
         "src/frontend/src/api/apiClient.tsx",
+        "src/frontend/src/components/content/WorkspaceEditor.tsx",
         "src/frontend/src/index.tsx",
-        "src/frontend/src/services/WebSocketService.tsx"
+        "src/frontend/src/services/WebSocketService.tsx",
+        "src/frontend/src/services/WorkspaceService.ts"
       ]
     },
     {
@@ -3341,8 +3460,8 @@
       "stage": "main",
       "lang": "js",
       "ext": ".tsx",
-      "lines": 712,
-      "size": 24543,
+      "lines": 717,
+      "size": 24791,
       "collaboration": {
         "status": "collaborative",
         "impact": "bridge",
@@ -3381,13 +3500,64 @@
       "usedBy": []
     },
     {
+      "path": "src/frontend/src/components/content/HtmlPreview.tsx",
+      "fileType": "module",
+      "stage": "main",
+      "lang": "js",
+      "ext": ".tsx",
+      "lines": 804,
+      "size": 26511,
+      "collaboration": {
+        "status": "connected",
+        "impact": "leaf",
+        "summary": "Part of the local code flow with a focused role.",
+        "score": 7
+      },
+      "crossStageLinks": 1,
+      "impactScore": 7,
+      "isDeadCode": false,
+      "isOrphan": false,
+      "isCircular": false,
+      "hotspotScore": 22,
+      "hotspotLevel": "medium",
+      "summary": "Main orchestration code. Functions: MemStorage, wrapWithHeightReporter, report, useHtmlPreview",
+      "functions": [
+        "MemStorage",
+        "wrapWithHeightReporter",
+        "report",
+        "useHtmlPreview",
+        "handleDownload",
+        "length",
+        "forEach",
+        "addEventListener"
+      ],
+      "classes": [],
+      "exports": [
+        "HtmlPreview",
+        "useHtmlPreview",
+        "HtmlPreviewProvider",
+        "PreviewRightSlot",
+        "HtmlCodeToggle"
+      ],
+      "imports": [
+        "src/frontend/src/api/apiClient.tsx",
+        "src/frontend/src/components/content/WorkspaceEditor.tsx",
+        "src/frontend/src/components/workspace/WorkspaceTree.tsx"
+      ],
+      "usedBy": [
+        "src/frontend/src/components/content/PlanChatBody.tsx",
+        "src/frontend/src/components/content/streaming/StreamingAgentMessage.tsx",
+        "src/frontend/src/pages/PlanPage.tsx"
+      ]
+    },
+    {
       "path": "src/frontend/src/components/content/PlanChat.tsx",
       "fileType": "module",
       "stage": "main",
       "lang": "js",
       "ext": ".tsx",
-      "lines": 250,
-      "size": 8658,
+      "lines": 275,
+      "size": 9369,
       "collaboration": {
         "status": "active",
         "impact": "orchestrator",
@@ -3429,21 +3599,21 @@
       "stage": "main",
       "lang": "js",
       "ext": ".tsx",
-      "lines": 414,
-      "size": 13242,
+      "lines": 400,
+      "size": 12177,
       "collaboration": {
         "status": "connected",
         "impact": "leaf",
         "summary": "Part of the local code flow with a focused role.",
-        "score": 1
+        "score": 2
       },
       "crossStageLinks": 0,
-      "impactScore": 1,
+      "impactScore": 2,
       "isDeadCode": false,
       "isOrphan": false,
       "isCircular": false,
-      "hotspotScore": 9,
-      "hotspotLevel": "low",
+      "hotspotScore": 11,
+      "hotspotLevel": "medium",
       "summary": "Main orchestration code. Functions: handleFileChange, handleImageChange, getFileIcon",
       "functions": [
         "handleFileChange",
@@ -3452,7 +3622,9 @@
       ],
       "classes": [],
       "exports": [],
-      "imports": [],
+      "imports": [
+        "src/frontend/src/components/content/HtmlPreview.tsx"
+      ],
       "usedBy": [
         "src/frontend/src/components/content/PlanChat.tsx"
       ]
@@ -3463,20 +3635,20 @@
       "stage": "main",
       "lang": "js",
       "ext": ".tsx",
-      "lines": 375,
-      "size": 11415,
+      "lines": 380,
+      "size": 11626,
       "collaboration": {
         "status": "collaborative",
         "impact": "bridge",
         "summary": "Connects multiple parts of the code flow.",
-        "score": 18
+        "score": 19
       },
       "crossStageLinks": 5,
-      "impactScore": 18,
+      "impactScore": 19,
       "isDeadCode": false,
       "isOrphan": false,
       "isCircular": false,
-      "hotspotScore": 23,
+      "hotspotScore": 25,
       "hotspotLevel": "medium",
       "summary": "Main orchestration code. Functions: handler, performNavigation",
       "functions": [
@@ -3492,7 +3664,8 @@
         "src/frontend/src/models/Team.tsx",
         "src/frontend/src/components/common/TeamSelected.tsx",
         "src/frontend/src/lib/types.ts",
-        "src/frontend/src/components/settings/SettingsModal.tsx"
+        "src/frontend/src/components/settings/SettingsModal.tsx",
+        "src/frontend/src/components/workspace/WorkspaceSelector.tsx"
       ],
       "usedBy": [
         "src/frontend/src/pages/PlanPage.tsx"
@@ -3568,6 +3741,44 @@
       "usedBy": []
     },
     {
+      "path": "src/frontend/src/components/content/WorkspaceEditor.tsx",
+      "fileType": "module",
+      "stage": "main",
+      "lang": "js",
+      "ext": ".tsx",
+      "lines": 466,
+      "size": 13782,
+      "collaboration": {
+        "status": "connected",
+        "impact": "leaf",
+        "summary": "Part of the local code flow with a focused role.",
+        "score": 3
+      },
+      "crossStageLinks": 1,
+      "impactScore": 3,
+      "isDeadCode": false,
+      "isOrphan": false,
+      "isCircular": false,
+      "hotspotScore": 11,
+      "hotspotLevel": "medium",
+      "summary": "Main orchestration code. Functions: langFromFilename, workspacePath, tabBtn",
+      "functions": [
+        "langFromFilename",
+        "workspacePath",
+        "tabBtn"
+      ],
+      "classes": [],
+      "exports": [
+        "WorkspaceEditor"
+      ],
+      "imports": [
+        "src/frontend/src/api/config.tsx"
+      ],
+      "usedBy": [
+        "src/frontend/src/components/content/HtmlPreview.tsx"
+      ]
+    },
+    {
       "path": "src/frontend/src/components/content/contoso.tsx",
       "fileType": "module",
       "stage": "main",
@@ -3601,23 +3812,24 @@
       "stage": "main",
       "lang": "js",
       "ext": ".tsx",
-      "lines": 448,
-      "size": 13360,
+      "lines": 535,
+      "size": 16615,
       "collaboration": {
         "status": "connected",
         "impact": "leaf",
         "summary": "Part of the local code flow with a focused role.",
-        "score": 2
+        "score": 3
       },
       "crossStageLinks": 0,
-      "impactScore": 2,
+      "impactScore": 3,
       "isDeadCode": false,
       "isOrphan": false,
       "isCircular": false,
-      "hotspotScore": 12,
+      "hotspotScore": 14,
       "hotspotLevel": "medium",
-      "summary": "Main orchestration code. Functions: GeneratedImage, download, copy, share",
+      "summary": "Main orchestration code. Functions: extractFenceNames, GeneratedImage, download, copy",
       "functions": [
+        "extractFenceNames",
         "GeneratedImage",
         "download",
         "copy",
@@ -3628,7 +3840,9 @@
         "markdownComponents",
         "AgentMessageItem"
       ],
-      "imports": [],
+      "imports": [
+        "src/frontend/src/components/content/HtmlPreview.tsx"
+      ],
       "usedBy": [
         "src/frontend/src/components/content/PlanChat.tsx",
         "src/frontend/src/components/content/streaming/StreamingBufferMessage.tsx"
@@ -4050,6 +4264,81 @@
         "src/frontend/src/components/content/PlanChat.tsx",
         "src/frontend/src/pages/HomePage.tsx",
         "src/frontend/src/pages/PlanPage.tsx"
+      ]
+    },
+    {
+      "path": "src/frontend/src/components/workspace/WorkspaceSelector.tsx",
+      "fileType": "module",
+      "stage": "main",
+      "lang": "js",
+      "ext": ".tsx",
+      "lines": 362,
+      "size": 11232,
+      "collaboration": {
+        "status": "connected",
+        "impact": "leaf",
+        "summary": "Part of the local code flow with a focused role.",
+        "score": 3
+      },
+      "crossStageLinks": 1,
+      "impactScore": 3,
+      "isDeadCode": false,
+      "isOrphan": false,
+      "isCircular": false,
+      "hotspotScore": 11,
+      "hotspotLevel": "medium",
+      "summary": "Main orchestration code. Functions: selectWorkspace, handleCreate, handleDelete",
+      "functions": [
+        "selectWorkspace",
+        "handleCreate",
+        "handleDelete"
+      ],
+      "classes": [],
+      "exports": [
+        "WorkspaceSelector"
+      ],
+      "imports": [
+        "src/frontend/src/services/WorkspaceService.ts"
+      ],
+      "usedBy": [
+        "src/frontend/src/components/content/PlanPanelLeft.tsx"
+      ]
+    },
+    {
+      "path": "src/frontend/src/components/workspace/WorkspaceTree.tsx",
+      "fileType": "module",
+      "stage": "main",
+      "lang": "js",
+      "ext": ".tsx",
+      "lines": 281,
+      "size": 8024,
+      "collaboration": {
+        "status": "connected",
+        "impact": "leaf",
+        "summary": "Part of the local code flow with a focused role.",
+        "score": 3
+      },
+      "crossStageLinks": 1,
+      "impactScore": 3,
+      "isDeadCode": false,
+      "isOrphan": false,
+      "isCircular": false,
+      "hotspotScore": 11,
+      "hotspotLevel": "medium",
+      "summary": "Main orchestration code. Functions: toggleDir, refresh",
+      "functions": [
+        "toggleDir",
+        "refresh"
+      ],
+      "classes": [],
+      "exports": [
+        "WorkspaceTree"
+      ],
+      "imports": [
+        "src/frontend/src/api/apiClient.tsx"
+      ],
+      "usedBy": [
+        "src/frontend/src/components/content/HtmlPreview.tsx"
       ]
     },
     {
@@ -5333,8 +5622,8 @@
       "stage": "core",
       "lang": "js",
       "ext": ".tsx",
-      "lines": 45,
-      "size": 1236,
+      "lines": 47,
+      "size": 1307,
       "collaboration": {
         "status": "connected",
         "impact": "leaf",
@@ -5488,8 +5777,8 @@
       "stage": "core",
       "lang": "js",
       "ext": ".tsx",
-      "lines": 26,
-      "size": 649,
+      "lines": 28,
+      "size": 766,
       "collaboration": {
         "status": "connected",
         "impact": "leaf",
@@ -5622,8 +5911,8 @@
       "stage": "core",
       "lang": "js",
       "ext": ".tsx",
-      "lines": 14,
-      "size": 431,
+      "lines": 16,
+      "size": 550,
       "collaboration": {
         "status": "connected",
         "impact": "leaf",
@@ -5787,20 +6076,20 @@
       "stage": "main",
       "lang": "js",
       "ext": ".tsx",
-      "lines": 1314,
-      "size": 47186,
+      "lines": 1353,
+      "size": 48968,
       "collaboration": {
         "status": "collaborative",
         "impact": "bridge",
         "summary": "Connects multiple parts of the code flow.",
-        "score": 39
+        "score": 40
       },
       "crossStageLinks": 10,
-      "impactScore": 39,
+      "impactScore": 40,
       "isDeadCode": false,
       "isOrphan": false,
       "isCircular": false,
-      "hotspotScore": 46,
+      "hotspotScore": 48,
       "hotspotLevel": "high",
       "summary": "Main orchestration code. Functions: connectWebSocket, handleConnectionChange, handlePlanApprovalResponse, initializePlanLoading",
       "functions": [
@@ -5827,6 +6116,7 @@
         "src/frontend/src/services/ChatService.tsx",
         "src/frontend/src/hooks/usePlanCancellationAlert.tsx",
         "src/frontend/src/components/common/PlanCancellationDialog.tsx",
+        "src/frontend/src/components/content/HtmlPreview.tsx",
         "src/frontend/src/store/hooks.ts",
         "src/frontend/src/store/slices/planSlice.ts",
         "src/frontend/src/components/content/PlanPanelRight.tsx"
@@ -5964,8 +6254,8 @@
       "stage": "core",
       "lang": "js",
       "ext": ".tsx",
-      "lines": 302,
-      "size": 12205,
+      "lines": 395,
+      "size": 12031,
       "collaboration": {
         "status": "collaborative",
         "impact": "bridge",
@@ -6198,6 +6488,40 @@
       ]
     },
     {
+      "path": "src/frontend/src/services/WorkspaceService.ts",
+      "fileType": "module",
+      "stage": "core",
+      "lang": "js",
+      "ext": ".ts",
+      "lines": 71,
+      "size": 2380,
+      "collaboration": {
+        "status": "connected",
+        "impact": "leaf",
+        "summary": "Part of the local code flow with a focused role.",
+        "score": 4
+      },
+      "crossStageLinks": 2,
+      "impactScore": 4,
+      "isDeadCode": false,
+      "isOrphan": false,
+      "isCircular": false,
+      "hotspotScore": 9,
+      "hotspotLevel": "low",
+      "summary": "Core business logic. Type: module",
+      "functions": [],
+      "classes": [],
+      "exports": [
+        "WorkspaceService"
+      ],
+      "imports": [
+        "src/frontend/src/api/config.tsx"
+      ],
+      "usedBy": [
+        "src/frontend/src/components/workspace/WorkspaceSelector.tsx"
+      ]
+    },
+    {
       "path": "src/frontend/src/services/index.tsx",
       "fileType": "entry",
       "stage": "start",
@@ -6339,8 +6663,8 @@
       "stage": "core",
       "lang": "js",
       "ext": ".ts",
-      "lines": 144,
-      "size": 4054,
+      "lines": 151,
+      "size": 4365,
       "collaboration": {
         "status": "connected",
         "impact": "leaf",
@@ -6861,8 +7185,8 @@
       "stage": "helpers",
       "lang": "js",
       "ext": ".ts",
-      "lines": 82,
-      "size": 1952,
+      "lines": 99,
+      "size": 2514,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -6874,10 +7198,12 @@
       "isDeadCode": true,
       "isOrphan": true,
       "isCircular": false,
-      "hotspotScore": 4,
+      "hotspotScore": 5,
       "hotspotLevel": "low",
-      "summary": "Support or shared utility code. Type: config",
-      "functions": [],
+      "summary": "Support or shared utility code. Functions: manualChunks",
+      "functions": [
+        "manualChunks"
+      ],
       "classes": [],
       "exports": [],
       "imports": [],
@@ -7034,8 +7360,8 @@
       "stage": "core",
       "lang": "py",
       "ext": ".py",
-      "lines": 91,
-      "size": 2600,
+      "lines": 92,
+      "size": 2628,
       "collaboration": {
         "status": "connected",
         "impact": "leaf",
@@ -7179,8 +7505,8 @@
       "stage": "start",
       "lang": "py",
       "ext": ".py",
-      "lines": 179,
-      "size": 5674,
+      "lines": 181,
+      "size": 5783,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -7318,8 +7644,8 @@
       "stage": "core",
       "lang": "py",
       "ext": ".py",
-      "lines": 2267,
-      "size": 93325,
+      "lines": 2343,
+      "size": 97161,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -7536,6 +7862,47 @@
       "usedBy": []
     },
     {
+      "path": "src/mcp_server/services/workspace_service.py",
+      "fileType": "module",
+      "stage": "core",
+      "lang": "py",
+      "ext": ".py",
+      "lines": 218,
+      "size": 9948,
+      "collaboration": {
+        "status": "isolated",
+        "impact": "solo",
+        "summary": "No local collaboration links yet.",
+        "score": 0
+      },
+      "crossStageLinks": 0,
+      "impactScore": 0,
+      "isDeadCode": true,
+      "isOrphan": true,
+      "isCircular": false,
+      "hotspotScore": 5,
+      "hotspotLevel": "low",
+      "summary": "Core business logic. Classes: WorkspaceAccessError, WorkspaceToolService. Functions: _workspace_dir, _resolve_in, _git, __init__",
+      "functions": [
+        "_workspace_dir",
+        "_resolve_in",
+        "_git",
+        "__init__",
+        "register_tools",
+        "workspace_list_entries",
+        "workspace_read_file",
+        "workspace_search_files",
+        "tool_count"
+      ],
+      "classes": [
+        "WorkspaceAccessError",
+        "WorkspaceToolService"
+      ],
+      "exports": [],
+      "imports": [],
+      "usedBy": []
+    },
+    {
       "path": "src/mcp_server/utils/__init__.py",
       "fileType": "module",
       "stage": "helpers",
@@ -7637,8 +8004,8 @@
       "stage": "main",
       "lang": "py",
       "ext": ".py",
-      "lines": 83,
-      "size": 3542,
+      "lines": 86,
+      "size": 3545,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -8171,8 +8538,8 @@
       "stage": "helpers",
       "lang": "py",
       "ext": ".py",
-      "lines": 611,
-      "size": 25663,
+      "lines": 622,
+      "size": 26499,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -8215,8 +8582,8 @@
       "stage": "helpers",
       "lang": "py",
       "ext": ".py",
-      "lines": 451,
-      "size": 20040,
+      "lines": 457,
+      "size": 19662,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -8634,8 +9001,8 @@
       "stage": "main",
       "lang": "py",
       "ext": ".py",
-      "lines": 295,
-      "size": 10503,
+      "lines": 302,
+      "size": 10787,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -8713,6 +9080,37 @@
         "test_missing_index_defaults_to_zero",
         "test_has_function_guards_content_streaming",
         "test_delta_without_function_attr_is_ignored"
+      ],
+      "classes": [],
+      "exports": [],
+      "imports": [],
+      "usedBy": []
+    },
+    {
+      "path": "src/tests/backend/v4/api/test_router_toolboxes.py",
+      "fileType": "test",
+      "stage": "main",
+      "lang": "py",
+      "ext": ".py",
+      "lines": 90,
+      "size": 3071,
+      "collaboration": {
+        "status": "isolated",
+        "impact": "solo",
+        "summary": "No local collaboration links yet.",
+        "score": 0
+      },
+      "crossStageLinks": 0,
+      "impactScore": 0,
+      "isDeadCode": true,
+      "isOrphan": true,
+      "isCircular": false,
+      "hotspotScore": 5,
+      "hotspotLevel": "low",
+      "summary": "Main orchestration code. Functions: _load_router_chat_client, test_toolbox_parsing_and_headers_for_each_toolbox",
+      "functions": [
+        "_load_router_chat_client",
+        "test_toolbox_parsing_and_headers_for_each_toolbox"
       ],
       "classes": [],
       "exports": [],
@@ -8956,8 +9354,8 @@
       "stage": "helpers",
       "lang": "py",
       "ext": ".py",
-      "lines": 493,
-      "size": 21214,
+      "lines": 501,
+      "size": 20768,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -9271,8 +9669,8 @@
       "stage": "helpers",
       "lang": "py",
       "ext": ".py",
-      "lines": 695,
-      "size": 25791,
+      "lines": 795,
+      "size": 29471,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -9286,7 +9684,7 @@
       "isCircular": false,
       "hotspotScore": 7,
       "hotspotLevel": "low",
-      "summary": "Support or shared utility code. Classes: TestMCPEnabledBase, TestAzureAgentBase. Functions: setup_method, test_init_with_minimal_params, test_init_with_full_params, test_init_with_none_values",
+      "summary": "Support or shared utility code. Classes: TestMCPEnabledBase, TestAzureAgentBase, TestDefinitionFingerprint. Functions: setup_method, test_init_with_minimal_params, test_init_with_full_params, test_init_with_none_values",
       "functions": [
         "setup_method",
         "test_init_with_minimal_params",
@@ -9302,11 +9700,14 @@
         "test_get_agent_id_generate_new",
         "test_inheritance_from_mcp_enabled_base",
         "test_azure_specific_attributes",
-        "test_getattr_delegation_inheritance"
+        "test_getattr_delegation_inheritance",
+        "test_mcp_tool_fingerprint_matches_for_object_and_dict_shapes",
+        "test_bing_grounding_fingerprint_matches_for_object_and_dict_shapes"
       ],
       "classes": [
         "TestMCPEnabledBase",
-        "TestAzureAgentBase"
+        "TestAzureAgentBase",
+        "TestDefinitionFingerprint"
       ],
       "exports": [],
       "imports": [],
@@ -9701,8 +10102,8 @@
       "stage": "core",
       "lang": "py",
       "ext": ".py",
-      "lines": 1546,
-      "size": 58482,
+      "lines": 1550,
+      "size": 58695,
       "collaboration": {
         "status": "isolated",
         "impact": "solo",
@@ -9760,6 +10161,150 @@
         "MockGroupChatRequestSentEvent",
         "MockGroupChatResponseReceivedEvent",
         "MockExecutorCompletedEvent"
+      ],
+      "exports": [],
+      "imports": [],
+      "usedBy": []
+    },
+    {
+      "path": "src/tests/contract/conftest.py",
+      "fileType": "test",
+      "stage": "main",
+      "lang": "py",
+      "ext": ".py",
+      "lines": 410,
+      "size": 15867,
+      "collaboration": {
+        "status": "isolated",
+        "impact": "solo",
+        "summary": "No local collaboration links yet.",
+        "score": 0
+      },
+      "crossStageLinks": 0,
+      "impactScore": 0,
+      "isDeadCode": true,
+      "isOrphan": true,
+      "isCircular": false,
+      "hotspotScore": 6,
+      "hotspotLevel": "low",
+      "summary": "Main orchestration code. Functions: pytest_addoption, pytest_configure, app, _patch_testclient_stream_leak",
+      "functions": [
+        "pytest_addoption",
+        "pytest_configure",
+        "app",
+        "_patch_testclient_stream_leak",
+        "_exit",
+        "_drop_telemetry",
+        "_host_class",
+        "_normalize_path",
+        "_azure_host_matcher",
+        "_azure_path_matcher",
+        "pytest_recording_configure",
+        "_scrub_response",
+        "_walk",
+        "vcr_config",
+        "vcr_cassette_dir",
+        "force_stable_session_id"
+      ],
+      "classes": [],
+      "exports": [],
+      "imports": [],
+      "usedBy": []
+    },
+    {
+      "path": "src/tests/contract/lint_cassette.py",
+      "fileType": "module",
+      "stage": "main",
+      "lang": "py",
+      "ext": ".py",
+      "lines": 112,
+      "size": 3800,
+      "collaboration": {
+        "status": "isolated",
+        "impact": "solo",
+        "summary": "No local collaboration links yet.",
+        "score": 0
+      },
+      "crossStageLinks": 0,
+      "impactScore": 0,
+      "isDeadCode": true,
+      "isOrphan": true,
+      "isCircular": false,
+      "hotspotScore": 5,
+      "hotspotLevel": "low",
+      "summary": "Main orchestration code. Functions: main",
+      "functions": [
+        "main"
+      ],
+      "classes": [],
+      "exports": [],
+      "imports": [],
+      "usedBy": []
+    },
+    {
+      "path": "src/tests/contract/test_chat_flow_contract.py",
+      "fileType": "test",
+      "stage": "main",
+      "lang": "py",
+      "ext": ".py",
+      "lines": 56,
+      "size": 1888,
+      "collaboration": {
+        "status": "isolated",
+        "impact": "solo",
+        "summary": "No local collaboration links yet.",
+        "score": 0
+      },
+      "crossStageLinks": 0,
+      "impactScore": 0,
+      "isDeadCode": true,
+      "isOrphan": true,
+      "isCircular": false,
+      "hotspotScore": 4,
+      "hotspotLevel": "low",
+      "summary": "Main orchestration code. Functions: test_chat_flow",
+      "functions": [
+        "test_chat_flow"
+      ],
+      "classes": [],
+      "exports": [],
+      "imports": [],
+      "usedBy": []
+    },
+    {
+      "path": "src/tests/contract/test_plan_boundary_contract.py",
+      "fileType": "test",
+      "stage": "main",
+      "lang": "py",
+      "ext": ".py",
+      "lines": 148,
+      "size": 4895,
+      "collaboration": {
+        "status": "isolated",
+        "impact": "solo",
+        "summary": "No local collaboration links yet.",
+        "score": 0
+      },
+      "crossStageLinks": 0,
+      "impactScore": 0,
+      "isDeadCode": true,
+      "isOrphan": true,
+      "isCircular": false,
+      "hotspotScore": 5,
+      "hotspotLevel": "low",
+      "summary": "Main orchestration code. Classes: _InertAgent, _Cut. Functions: create_session, _manager, _context, _role",
+      "functions": [
+        "create_session",
+        "_manager",
+        "_context",
+        "_role",
+        "test_task_stays_bare_and_history_becomes_messages",
+        "test_seed_is_consumed_once",
+        "test_empty_seed_clears_stale_context"
+      ],
+      "classes": [
+        "_InertAgent",
+        "_Cut"
       ],
       "exports": [],
       "imports": [],
@@ -10330,6 +10875,73 @@
         "test_chat_input_validation",
         "test_duplicate_team_entries",
         "test_cross_team_agent_validation"
+      ],
+      "classes": [],
+      "exports": [],
+      "imports": [],
+      "usedBy": []
+    },
+    {
+      "path": "tests/e2e-test/tests/test_chat_flow_generated.py",
+      "fileType": "test",
+      "stage": "main",
+      "lang": "py",
+      "ext": ".py",
+      "lines": 7,
+      "size": 135,
+      "collaboration": {
+        "status": "isolated",
+        "impact": "solo",
+        "summary": "No local collaboration links yet.",
+        "score": 0
+      },
+      "crossStageLinks": 0,
+      "impactScore": 0,
+      "isDeadCode": true,
+      "isOrphan": true,
+      "isCircular": false,
+      "hotspotScore": 2,
+      "hotspotLevel": "low",
+      "summary": "Main orchestration code. Functions: test_example",
+      "functions": [
+        "test_example"
+      ],
+      "classes": [],
+      "exports": [],
+      "imports": [],
+      "usedBy": []
+    },
+    {
+      "path": "tests/e2e-test/tests/test_chat_flow_sse.py",
+      "fileType": "test",
+      "stage": "main",
+      "lang": "py",
+      "ext": ".py",
+      "lines": 126,
+      "size": 4392,
+      "collaboration": {
+        "status": "isolated",
+        "impact": "solo",
+        "summary": "No local collaboration links yet.",
+        "score": 0
+      },
+      "crossStageLinks": 0,
+      "impactScore": 0,
+      "isDeadCode": true,
+      "isOrphan": true,
+      "isCircular": false,
+      "hotspotScore": 5,
+      "hotspotLevel": "low",
+      "summary": "Main orchestration code. Functions: _send_and_capture, _of, chart_turn, test_el_turno_produjo_eventos",
+      "functions": [
+        "_send_and_capture",
+        "_of",
+        "chart_turn",
+        "test_el_turno_produjo_eventos",
+        "test_un_solo_artefacto_por_grafico",
+        "test_ningun_link_sandbox_en_el_turno_vivo",
+        "test_sin_errores_de_herramienta",
+        "test_metadata_de_herramientas"
       ],
       "classes": [],
       "exports": [],
