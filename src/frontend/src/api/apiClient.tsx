@@ -18,11 +18,11 @@ const buildUrl = (url: string, params?: Record<string, any>): string => {
 // Fetch with Authentication Headers
 const fetchWithAuth = async (url: string, method: string = "GET", body: BodyInit | null = null) => {
     // Serialize the body ONCE so it can be replayed on a 401 retry.
-    const isForm = body instanceof FormData;
-    const serializedBody: BodyInit | null = isForm
-        ? (body as FormData)
-        : (body ? JSON.stringify(body) : null);
-
+const isForm = body instanceof FormData;
+const hasBody = body !== null && body !== undefined;
+const serializedBody: BodyInit | null = isForm
+    ? (body as FormData)
+    : (hasBody ? JSON.stringify(body) : null);
     // Build request options from the CURRENT auth state. Called before the
     // first attempt and again after a forced refresh so the retry carries the
     // freshly-minted token, never the dead one.
@@ -117,18 +117,36 @@ export const apiClient = {
      * Does NOT parse JSON; caller reads response.body as a ReadableStream.
      */
     stream: async (url: string, body?: any): Promise<Response> => {
-        await ensureFreshToken(); // Refresh EasyAuth token if near expiry (OBO assertion freshness)
         const apiUrl = getApiUrl();
-        const authHeaders = headerBuilder();
-        const headers: Record<string, string> = {
-            ...authHeaders,
-            'Content-Type': 'application/json',
-        };
-        const response = await fetch(`${apiUrl}${url}`, {
+        const finalUrl = `${apiUrl}${url}`;
+        const serializedBody = body ? JSON.stringify(body) : undefined;
+
+        // Rebuild options from the CURRENT auth state so a replay after a forced
+        // refresh carries the fresh token, never the dead one.
+        const buildOptions = (): RequestInit => ({
             method: 'POST',
-            headers,
-            body: body ? JSON.stringify(body) : undefined,
+            headers: { ...headerBuilder(), 'Content-Type': 'application/json' },
+            body: serializedBody,
         });
+
+        await ensureFreshToken(); // proactive: refresh only if near expiry
+        let response = await fetch(finalUrl, buildOptions());
+
+        // The EasyAuth token expires mid-session (~1h). SSE has NO retry layer
+        // above this call (fetchWithAuth is bypassed), so recover HERE exactly as
+        // fetchWithAuth does: force a refresh and replay ONCE. Without this, an
+        // expired token forced a full page reload to resume streaming
+        // (chat/message/stream) — the observed failure.
+        if (response.status === 401) {
+            await ensureFreshToken(Number.POSITIVE_INFINITY); // force, ignore skew
+            response = await fetch(finalUrl, buildOptions());
+            if (response.status === 401) {
+                const errorText = await response.text().catch(() => '');
+                reauthSilently();
+                throw new Error(errorText || 'Session expired — re-authenticating');
+            }
+        }
+
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(errorText || 'Stream request failed');
