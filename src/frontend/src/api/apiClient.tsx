@@ -18,11 +18,11 @@ const buildUrl = (url: string, params?: Record<string, any>): string => {
 // Fetch with Authentication Headers
 const fetchWithAuth = async (url: string, method: string = "GET", body: BodyInit | null = null) => {
     // Serialize the body ONCE so it can be replayed on a 401 retry.
-    const isForm = body instanceof FormData;
-    const serializedBody: BodyInit | null = isForm
-        ? (body as FormData)
-        : (body ? JSON.stringify(body) : null);
-
+const isForm = body instanceof FormData;
+const hasBody = body !== null && body !== undefined;
+const serializedBody: BodyInit | null = isForm
+    ? (body as FormData)
+    : (hasBody ? JSON.stringify(body) : null);
     // Build request options from the CURRENT auth state. Called before the
     // first attempt and again after a forced refresh so the retry carries the
     // freshly-minted token, never the dead one.
