@@ -65,7 +65,7 @@
       "editor.defaultFormatter": "redhat.vscode-yaml",
     },
     "chat.tools.terminal.autoApprove": {
-      "az": true,
+      "az": false,
     },
   },
 }
