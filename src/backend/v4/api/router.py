@@ -3541,7 +3541,7 @@ async def chat_message_stream(
         # SSE client (apiClient.stream) only refresh-retries on 401; a 500 skips
         # the retry, kills the chat, and forces a full page reload. Same pattern
         # workspace_router already uses for its endpoints.
-        raise HTTPException(status_code=401, detail=str(exc))
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
     user_id = authenticated_user["user_principal_id"]
     tenant_id = authenticated_user.get("tenant_id", "")
     # End-user token for on-behalf-of invocation of the hosted agent, so its
