@@ -3533,7 +3533,9 @@ async def chat_message_stream(
     from v4.orchestration.intent_router import Intent
 
     try:
-        authenticated_user = get_authenticated_user_details(request_headers=request.headers)
+        authenticated_user = get_authenticated_user_details(
+            request_headers=request.headers
+        )
     except PermissionError as exc:
         # Auth failure must surface as 401 — never an unhandled 500. The frontend
         # SSE client (apiClient.stream) only refresh-retries on 401; a 500 skips
