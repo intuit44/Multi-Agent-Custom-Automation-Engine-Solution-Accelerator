@@ -261,6 +261,7 @@ async def audio_stream(
             )
             for t in pending:
                 t.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
 
     except WebSocketDisconnect:
         logging.debug("[audio/stream] client disconnected; closing stream handler")
