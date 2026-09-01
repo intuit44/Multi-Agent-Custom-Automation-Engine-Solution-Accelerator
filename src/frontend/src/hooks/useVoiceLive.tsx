@@ -14,8 +14,8 @@
  *   { type:"barge_in_ack" }               — servidor confirmó barge-in
  *   ArrayBuffer                           — TTS PCM16 binario alternativo
  *
- * Barge-in: si el usuario habla mientras el modelo reproduce TTS el hook
- * envía { type:"barge_in" } y detiene la reproducción local.
+ * Barge-in: el server detecta speech-start (ServerVad) y cancela la respuesta; el hook
+ * corta la reproducción local al recibir { type:"barge_in_ack" }.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
