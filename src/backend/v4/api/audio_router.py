@@ -257,7 +257,7 @@ async def audio_stream(
                 t.cancel()
 
     except WebSocketDisconnect:
-        pass
+        logging.debug("[audio/stream] client disconnected; closing stream handler")
     except Exception as exc:
         logging.error("[audio/stream] session error: %s", exc)
         try:
