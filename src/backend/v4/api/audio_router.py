@@ -189,7 +189,15 @@ async def audio_stream(
                                 delta = getattr(event, "delta", None)
                                 if delta:
                                     audio_frames += 1
-                                    await websocket.send_bytes(base64.b64decode(delta))
+                                    if isinstance(delta, bytes):
+                                        await websocket.send_bytes(delta)
+                                    else:
+                                        padded = (
+                                            delta + "=="[: (4 - len(delta) % 4) % 4]
+                                        )
+                                        await websocket.send_bytes(
+                                            base64.b64decode(padded)
+                                        )
 
                             elif (
                                 etype == ServerEventType.RESPONSE_AUDIO_TRANSCRIPT_DELTA
