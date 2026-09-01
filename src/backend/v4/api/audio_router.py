@@ -262,5 +262,10 @@ async def audio_stream(
         logging.error("[audio/stream] session error: %s", exc)
         try:
             await websocket.close(1011)
-        except Exception:
-            pass
+        except Exception as close_exc:
+            # Best-effort close during error handling; do not mask the original failure.
+            logging.debug(
+                "[audio/stream] websocket close failed during error cleanup: %s",
+                close_exc,
+                exc_info=True,
+            )
