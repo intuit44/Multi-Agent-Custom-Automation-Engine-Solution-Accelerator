@@ -70,8 +70,8 @@ function buildAudioSocketUrl(): string {
   }
   const hasApi = /\/api(\/|$)/i.test(base);
   const path = hasApi ? '/v4/audio/stream' : '/api/v4/audio/stream';
-  return `${base}${path}?user_id=${getUserId() || ''}`;
-}
+  const userId = encodeURIComponent(getUserId() || '');
+  return `${base}${path}?user_id=${userId}`;
 
 // ---------------------------------------------------------------------------
 // Hook
