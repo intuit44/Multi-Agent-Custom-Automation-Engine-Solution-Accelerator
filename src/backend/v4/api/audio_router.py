@@ -154,7 +154,9 @@ async def audio_stream(
                                 delta = getattr(event, "delta", None)
                                 if delta:
                                     await websocket.send_text(
-                                        json.dumps({"type": "transcript", "text": delta})
+                                        json.dumps(
+                                            {"type": "transcript", "text": delta}
+                                        )
                                     )
 
                             elif (
@@ -189,12 +191,16 @@ async def audio_stream(
                                     audio_frames += 1
                                     await websocket.send_bytes(delta)
 
-                            elif etype == ServerEventType.RESPONSE_AUDIO_TRANSCRIPT_DELTA:
+                            elif (
+                                etype == ServerEventType.RESPONSE_AUDIO_TRANSCRIPT_DELTA
+                            ):
                                 delta = getattr(event, "delta", None)
                                 if delta:
                                     resp_text.append(delta)
                                     await websocket.send_text(
-                                        json.dumps({"type": "transcript", "text": delta})
+                                        json.dumps(
+                                            {"type": "transcript", "text": delta}
+                                        )
                                     )
 
                             elif etype == ServerEventType.RESPONSE_CREATED:
