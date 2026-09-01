@@ -125,8 +125,11 @@ async def audio_stream(
                             if msg.get("type") == "barge_in":
                                 try:
                                     await vl.response.cancel()
-                                except Exception:
-                                    pass
+                                except Exception as exc:
+                                    logging.debug(
+                                        "[audio/stream] barge_in cancel failed (ignored): %s",
+                                        exc,
+                                    )
                                 await websocket.send_text(
                                     json.dumps({"type": "barge_in_ack"})
                                 )
