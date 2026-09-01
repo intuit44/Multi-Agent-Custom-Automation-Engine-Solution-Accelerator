@@ -368,7 +368,11 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
         )}
 
         {/* Mic Button */}
-        <MicButton mode="voicelive" disabled={isDisabled} />
+        <MicButton
+          mode="voicelive"
+          disabled={isDisabled}
+          onUserTranscript={(t) => OnChatSubmit(t)}
+        />
         <MicButton
           mode="dictation"
           disabled={isDisabled}

@@ -28,6 +28,7 @@ import InlineToaster, { useInlineToaster } from '../toast/InlineToaster';
 import PromptCard from '@/coral/components/PromptCard';
 import { Send } from '@/coral/imports/bundleicons';
 import MicButton from './MicButton';
+import { isVoiceLiveActive, voiceLiveSpeak } from '../../hooks/useVoiceLive';
 import {
   Attach20Regular,
   Clipboard20Regular,
@@ -318,6 +319,11 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
             metadata: { intent, generatedFiles: collectedFiles, fullResponse },
           })
         );
+        // Voice gateway: si hay sesión de voz activa, verbalizar la respuesta
+        // final del router (TTS con parafraseo natural — no lee Markdown/URLs).
+        if (isVoiceLiveActive() && fullResponse) {
+          voiceLiveSpeak(fullResponse);
+        }
         dismissToast(id);
 
         if (redirectPlan) {
@@ -569,7 +575,11 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
               </MenuPopover>
             </Menu>
 
-            <MicButton mode="voicelive" disabled={submitting} />
+            <MicButton
+              mode="voicelive"
+              disabled={submitting}
+              onUserTranscript={(t) => handleSubmit(t)}
+            />
             <MicButton
               mode="dictation"
               disabled={submitting}
