@@ -27,6 +27,7 @@ import ChatInput from '@/coral/modules/ChatInput';
 import InlineToaster, { useInlineToaster } from '../toast/InlineToaster';
 import PromptCard from '@/coral/components/PromptCard';
 import { Send } from '@/coral/imports/bundleicons';
+import MicButton from './MicButton';
 import {
   Attach20Regular,
   Clipboard20Regular,
@@ -567,6 +568,13 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
                 </MenuList>
               </MenuPopover>
             </Menu>
+
+            <MicButton mode="voicelive" disabled={submitting} />
+            <MicButton
+              mode="dictation"
+              disabled={submitting}
+              onTranscript={(t) => setInput((v) => v + t)}
+            />
 
             <Button
               appearance="subtle"

@@ -112,10 +112,12 @@ app_v4 = APIRouter(
 # Workspace endpoints: Monaco (browser) and MCP filesystem agents share one physical
 # path — {MACAE_WORKSPACE_ROOT}/{user_id}/{workspace_id}/ — so there is a single
 # source of truth per workspace regardless of which writer touches it.
+from v4.api.audio_router import audio_router  # noqa: E402
 from v4.api.workspace_router import workspace_router, workspaces_router  # noqa: E402
 
 app_v4.include_router(workspaces_router)
 app_v4.include_router(workspace_router)
+app_v4.include_router(audio_router)
 
 
 @app_v4.websocket("/socket/{process_id}")
@@ -391,7 +393,7 @@ async def process_request(
         description=input_task.description,
         session_id=input_task.session_id,
         persist_user_task=True,
-        workspace_id=input_task.workspace_id or input_task.session_id,
+        workspace_id=input_task.workspace_id,
     )
     return {
         "status": "Request started successfully",
@@ -1210,9 +1212,7 @@ async def chat_message(
         input_task_for_plan = InputTask(
             session_id=chat_request.session_id,
             description=chat_request.message,
-            # Selected workspace wins; the session's own space otherwise —
-            # the agent must see the SAME workspace the panel shows.
-            workspace_id=chat_request.workspace_id or chat_request.session_id,
+            workspace_id=chat_request.workspace_id,
         )
         try:
             result = await process_request(
@@ -2631,24 +2631,17 @@ class _RouterChatClient:
                             + add_res.stderr.decode("utf-8", errors="replace")[-300:]
                         )
 
-                    staged = _git(_ws, "diff", "--cached", "--quiet", "--", _rel)
-                    if staged.returncode == 0:
-                        # No staged changes (e.g. same content as HEAD) → nothing to commit.
-                        return
-                    if staged.returncode != 1:
-                        raise RuntimeError(
-                            "git diff --cached failed: "
-                            + staged.stderr.decode("utf-8", errors="replace")[-300:]
+                    if _git(_ws, "diff", "--cached", "--quiet").returncode != 0:
+                        commit_res = _git(
+                            _ws, "commit", "-q", "-m", f"agent: add {name or file_id}"
                         )
-
-                    commit_res = _git(
-                        _ws, "commit", "-q", "-m", f"agent: add {name or file_id}"
-                    )
-                    if commit_res.returncode != 0:
-                        raise RuntimeError(
-                            "git commit failed: "
-                            + commit_res.stderr.decode("utf-8", errors="replace")[-300:]
-                        )
+                        if commit_res.returncode != 0:
+                            raise RuntimeError(
+                                "git commit failed: "
+                                + commit_res.stderr.decode("utf-8", errors="replace")[
+                                    -300:
+                                ]
+                            )
                 except Exception as _ws_err:
                     logger.warning(
                         "workspace write failed for file_id=%s: %s", file_id, _ws_err
@@ -3762,11 +3755,7 @@ async def chat_message_stream(
                 orchestrator_name,
                 user_access_token=user_access_token,
                 user_id=user_id,
-                # Selected workspace wins; session fallback otherwise (same
-                # semantics as the explorer panel — agent and user see ONE space).
-                workspace_id=chat_request.workspace_id
-                or chat_request.session_id
-                or None,
+                workspace_id=chat_request.workspace_id,
             )
             _cleanup.push_async_callback(agent.close)
             selected_agent_name = orchestrator_name
@@ -3934,8 +3923,7 @@ async def chat_message_stream(
                                 # run_plan call; None falls back to the
                                 # user's selected team.
                                 composed_agents=getattr(content, "agents", None),
-                                workspace_id=chat_request.workspace_id
-                                or chat_request.session_id,
+                                workspace_id=chat_request.workspace_id,
                             )
                             yield _sse_event(
                                 {

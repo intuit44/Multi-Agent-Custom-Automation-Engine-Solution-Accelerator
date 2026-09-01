@@ -284,6 +284,20 @@ wheels = [
 ]
 
 [[package]]
+name = "azure-ai-voicelive"
+version = "1.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "azure-core" },
+    { name = "isodate" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4c/41/f5ba6c453c4602afb4ed4d6d835fac13e2c5029b72f546e8ccaa899ed540/azure_ai_voicelive-1.3.0.tar.gz", hash = "sha256:93183a534763c35eed50b23b5c5caf170e3fac88a7132698371245b775adcc72", size = 265319, upload-time = "2026-08-03T21:00:58.814Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2a/e2/bf2c30ebeb09a44613d28d76d12056df9a62e92d72ed08a0653976e7f5a2/azure_ai_voicelive-1.3.0-py3-none-any.whl", hash = "sha256:afc1ae488dd06b04cb000410129769d89c1f028c412c06536ff6a3f472e2258c", size = 160363, upload-time = "2026-08-03T21:01:00.292Z" },
+]
+
+[[package]]
 name = "azure-common"
 version = "1.1.28"
 source = { registry = "https://pypi.org/simple" }
@@ -457,6 +471,7 @@ dependencies = [
     { name = "azure-ai-evaluation" },
     { name = "azure-ai-inference" },
     { name = "azure-ai-projects" },
+    { name = "azure-ai-voicelive" },
     { name = "azure-core" },
     { name = "azure-cosmos" },
     { name = "azure-identity" },
@@ -514,6 +529,7 @@ requires-dist = [
     { name = "azure-ai-evaluation", specifier = "==1.11.0" },
     { name = "azure-ai-inference", specifier = "==1.0.0b9" },
     { name = "azure-ai-projects", specifier = "==2.0.0" },
+    { name = "azure-ai-voicelive", specifier = "==1.3.0" },
     { name = "azure-core", specifier = "==1.38.0" },
     { name = "azure-cosmos", specifier = "==4.9.0" },
     { name = "azure-identity", specifier = "==1.24.0" },
