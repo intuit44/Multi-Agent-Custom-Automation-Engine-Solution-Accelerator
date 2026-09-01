@@ -28,7 +28,7 @@ import { useHtmlPreview } from './HtmlPreview';
 interface SimplifiedPlanChatProps extends PlanChatProps {
   planData: any;
   input: string;
-  setInput: (input: string) => void;
+  setInput: React.Dispatch<React.SetStateAction<string>>;
   submittingChatDisableInput: boolean;
   OnChatSubmit: (input: string) => void;
   waitingForPlan: boolean;
@@ -372,7 +372,7 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
         <MicButton
           mode="dictation"
           disabled={isDisabled}
-          onTranscript={(t) => setInput(input + t)}
+          onTranscript={(t) => setInput((value) => value + t)}
         />
 
         {/* Send Button */}
