@@ -233,6 +233,21 @@ class AppConfig:
         self.FOUNDRY_MCP_ENDPOINT = self._get_optional(
             "FOUNDRY_MCP_ENDPOINT", "https://mcp.ai.azure.com"
         )
+        # Azure Voice Live — mismo recurso AI Services que AZURE_AI_AGENT_ENDPOINT.
+        # VOICE_LIVE_ENDPOINT se puede sobreescribir; por defecto reutiliza el endpoint
+        # del agente Foundry. Modelo GA: "gpt-realtime". Voz: Azure Neural o OpenAI.
+        # Voice Live quiere el recurso PELADO (https://<res>.services.ai.azure.com);
+        # AZURE_AI_AGENT_ENDPOINT trae /api/projects/... → hay que recortarlo o no conecta.
+        self.VOICE_LIVE_ENDPOINT = self._get_optional(
+            "VOICE_LIVE_ENDPOINT",
+            (self.AZURE_AI_AGENT_ENDPOINT or "").split("/api/")[0] or "",
+        )
+        self.VOICE_LIVE_MODEL = self._get_optional(
+            "VOICE_LIVE_MODEL", "gpt-realtime-2.1"
+        )
+        self.VOICE_LIVE_VOICE = self._get_optional(
+            "VOICE_LIVE_VOICE", "en-US-Ava:DragonHDLatestNeural"
+        )
         self.FOUNDRY_MCP_SCOPE = self._get_optional(
             "FOUNDRY_MCP_SCOPE", "https://mcp.ai.azure.com/.default"
         )

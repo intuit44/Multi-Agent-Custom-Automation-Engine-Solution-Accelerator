@@ -13,6 +13,7 @@ import {
   Tooltip,
 } from '@fluentui/react-components';
 import { Send } from '@/coral/imports/bundleicons';
+import MicButton from './MicButton';
 import {
   Attach20Regular,
   Dismiss20Regular,
@@ -365,6 +366,14 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
             />
           </Tooltip>
         )}
+
+        {/* Mic Button */}
+        <MicButton mode="voicelive" disabled={isDisabled} />
+        <MicButton
+          mode="dictation"
+          disabled={isDisabled}
+          onTranscript={(t) => setInput((input || '') + t)}
+        />
 
         {/* Send Button */}
         <Button

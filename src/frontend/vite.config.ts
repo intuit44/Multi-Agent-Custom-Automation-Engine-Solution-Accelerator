@@ -29,6 +29,10 @@ export default defineConfig({
         port: 3001,
         open: true,
         host: true,
+        // WSL2: el watcher nativo de chokidar no detecta cambios en /workspaces,
+        // por eso HMR no tomaba los edits. Polling lo arregla (cuesta algo de CPU
+        // en idle, pero elimina el ritual de reiniciar vite tras cada cambio).
+        watch: { usePolling: true, interval: 700 },
         proxy: {
             '/api': {
                 target: 'http://localhost:8000',
