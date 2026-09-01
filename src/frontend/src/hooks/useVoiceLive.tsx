@@ -72,6 +72,7 @@ function buildAudioSocketUrl(): string {
   const path = hasApi ? '/v4/audio/stream' : '/api/v4/audio/stream';
   const userId = encodeURIComponent(getUserId() || '');
   return `${base}${path}?user_id=${userId}`;
+}
 
 // ---------------------------------------------------------------------------
 // Hook
