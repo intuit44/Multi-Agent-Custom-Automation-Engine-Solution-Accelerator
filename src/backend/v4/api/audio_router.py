@@ -88,7 +88,10 @@ async def audio_stream(
                     )
                 )
             else:
-                # VoiceLive: full duplex conversation.
+                # VoiceLive GATEWAY: el modelo NO responde solo (create_response=False).
+                # Flujo: STT del usuario → user_transcript → frontend lo manda al
+                # MODEL ROUTER (misma lógica que texto escrito) → la respuesta final
+                # vuelve por {type:"speak"} y Voice Live SOLO la verbaliza (TTS).
                 voice_name = config.VOICE_LIVE_VOICE
                 voice_cfg: AzureStandardVoice | str = (
                     AzureStandardVoice(name=voice_name)
@@ -101,10 +104,14 @@ async def audio_stream(
                         voice=voice_cfg,
                         input_audio_format=InputAudioFormat.PCM16,
                         output_audio_format=OutputAudioFormat.PCM16,
+                        input_audio_transcription=AudioInputTranscriptionOptions(
+                            model="azure-speech"
+                        ),
                         turn_detection=ServerVad(
                             threshold=0.5,
                             prefix_padding_ms=300,
                             silence_duration_ms=500,
+                            create_response=False,
                         ),
                         input_audio_echo_cancellation=AudioEchoCancellation(),
                         input_audio_noise_reduction=AudioNoiseReduction(
@@ -132,6 +139,24 @@ async def audio_stream(
                                     )
                                 await websocket.send_text(
                                     json.dumps({"type": "barge_in_ack"})
+                                )
+                            elif msg.get("type") == "speak" and msg.get("text"):
+                                # TTS on-demand: verbalizar la respuesta final del
+                                # MODEL ROUTER. instructions (no verbatim) → parafraseo
+                                # natural: no lee Markdown/código/URLs letra a letra.
+                                await vl.response.create(
+                                    response={
+                                        "modalities": ["audio"],
+                                        "instructions": (
+                                            "Transmite el siguiente contenido en voz alta, "
+                                            "de forma natural y conversacional, en el mismo "
+                                            "idioma del contenido. No leas símbolos de "
+                                            "Markdown, código ni URLs literalmente: "
+                                            "descríbelos brevemente si aportan. No inventes "
+                                            "información que no esté en el contenido.\n\n"
+                                            f"CONTENIDO:\n{msg['text']}"
+                                        ),
+                                    }
                                 )
                 except WebSocketDisconnect:
                     pass
@@ -184,8 +209,25 @@ async def audio_stream(
                                 )
 
                         else:
-                            # voicelive: full duplex events
-                            if etype == ServerEventType.RESPONSE_AUDIO_DELTA:
+                            # voicelive gateway events
+                            if (
+                                etype
+                                == ServerEventType.CONVERSATION_ITEM_INPUT_AUDIO_TRANSCRIPTION_COMPLETED
+                            ):
+                                # Lo que DIJO el usuario → el frontend lo envía al
+                                # MODEL ROUTER como un mensaje normal de chat.
+                                transcript = getattr(event, "transcript", None)
+                                if transcript:
+                                    await websocket.send_text(
+                                        json.dumps(
+                                            {
+                                                "type": "user_transcript",
+                                                "text": transcript,
+                                            }
+                                        )
+                                    )
+
+                            elif etype == ServerEventType.RESPONSE_AUDIO_DELTA:
                                 delta = getattr(event, "delta", None)
                                 if delta:
                                     audio_frames += 1

@@ -1,31 +1,20 @@
 /**
- * useVoiceLive — Azure Voice Live / Realtime relay (voz↔voz dúplex)
+ * useVoiceLive — Voice Gateway alrededor del MODEL ROUTER (no paralelo a él)
  *
- * Captura PCM16 mono 24 kHz via AudioWorklet y lo envía por WS al backend
- * relay (/api/v4/audio/stream). El backend hace proxy hacia Azure Voice Live
- * (audience ai.azure.com) reutilizando el agente Foundry existente.
+ * Usuario ──voz──▶ STT (Voice Live, sin auto-respuesta) ──▶ user_transcript
+ *   ──▶ onUserTranscript(texto) → el composer lo envía al MODEL ROUTER (mismo
+ *   flujo que texto escrito: SSE → mensaje en el DOM). Al terminar el stream,
+ *   el composer llama voiceLiveSpeak(respuestaFinal) → TTS → playback.
  *
- * browser → backend (binario):  PCM16 LE mono 24 kHz, ~20 ms chunks
- * backend → browser (JSON o binario):
- *   { type:"transcript_start" }           — nuevo turno asistente
- *   { type:"transcript", text:"..." }     — transcripción parcial/final
- *   { type:"transcript_end" }             — turno completado
- *   { type:"audio_chunk", data:"<b64>" }  — TTS PCM16 del servidor
- *   { type:"barge_in_ack" }               — servidor confirmó barge-in
- *   ArrayBuffer                           — TTS PCM16 binario alternativo
- *
- * Barge-in: el server detecta speech-start (ServerVad) y cancela la respuesta; el hook
- * corta la reproducción local al recibir { type:"barge_in_ack" }.
+ * browser → backend (binario): PCM16 LE mono 24 kHz, ~20 ms chunks
+ * browser → backend (JSON):   { type:"speak", text } · { type:"barge_in" }
+ * backend → browser:
+ *   { type:"user_transcript", text } — lo que dijo el usuario (STT)
+ *   { type:"barge_in_ack" }          — servidor confirmó barge-in
+ *   ArrayBuffer                      — TTS PCM16 binario
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useAppDispatch } from '../store/hooks';
-import {
-  addStreamToken,
-  finishStreaming,
-  initAssistantMessage,
-  startStreaming,
-} from '../store/slices/chatSlice';
 import { getApiUrl, getUserId } from '../api/config';
 
 // ---------------------------------------------------------------------------
@@ -75,11 +64,29 @@ function buildAudioSocketUrl(): string {
 }
 
 // ---------------------------------------------------------------------------
+// Singleton: permite a los composers verbalizar la respuesta final del router
+// sin tener el hook en scope (voiceLiveSpeak) y saber si hay sesión de voz.
+// ---------------------------------------------------------------------------
+let activeVoiceWs: WebSocket | null = null;
+
+export function isVoiceLiveActive(): boolean {
+  return activeVoiceWs?.readyState === WebSocket.OPEN;
+}
+
+/** Envía la respuesta final del MODEL ROUTER al gateway para TTS (parafraseo natural). */
+export function voiceLiveSpeak(text: string): void {
+  if (text && activeVoiceWs?.readyState === WebSocket.OPEN) {
+    activeVoiceWs.send(JSON.stringify({ type: 'speak', text }));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
-export function useVoiceLive() {
-  const dispatch = useAppDispatch();
+export function useVoiceLive(onUserTranscript?: (text: string) => void) {
   const [recording, setRecording] = useState(false);
+  const onUserTranscriptRef = useRef(onUserTranscript);
+  onUserTranscriptRef.current = onUserTranscript;
 
   const wsRef = useRef<WebSocket | null>(null);
   const actxRef = useRef<AudioContext | null>(null);
@@ -158,6 +165,7 @@ export function useVoiceLive() {
       workletUrlRef.current = null;
     }
     if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.close(1000);
+    if (activeVoiceWs === wsRef.current) activeVoiceWs = null;
     wsRef.current = null;
     stopPlayback();
     setRecording(false);
@@ -179,6 +187,7 @@ export function useVoiceLive() {
       const ws = new WebSocket(buildAudioSocketUrl());
       ws.binaryType = 'arraybuffer'; // el TTS binario llega como ArrayBuffer, no Blob
       wsRef.current = ws;
+      activeVoiceWs = ws;
 
       ws.onmessage = (e) => {
         // TTS binario directo: encolar el ArrayBuffer tal cual (sin round-trip
@@ -194,15 +203,9 @@ export function useVoiceLive() {
           statsRef.current.recvT++;
           const msg = JSON.parse(e.data as string);
           switch (msg.type) {
-            case 'transcript_start':
-              dispatch(initAssistantMessage());
-              dispatch(startStreaming());
-              break;
-            case 'transcript':
-              if (msg.text) dispatch(addStreamToken(msg.text));
-              break;
-            case 'transcript_end':
-              dispatch(finishStreaming({}));
+            case 'user_transcript':
+              // STT del usuario → va al MODEL ROUTER vía el composer (flujo normal).
+              if (msg.text) onUserTranscriptRef.current?.(msg.text);
               break;
             case 'audio_chunk':
               if (msg.data) enqueueAudio(msg.data);
@@ -260,7 +263,7 @@ export function useVoiceLive() {
       console.error('[useVoiceLive] start error', err);
       stop();
     }
-  }, [recording, drainQueue, dispatch, enqueueAudio, stopPlayback, stop]);
+  }, [recording, drainQueue, enqueueAudio, stopPlayback, stop]);
 
   const toggle = useCallback(() => {
     recording ? stop() : start();

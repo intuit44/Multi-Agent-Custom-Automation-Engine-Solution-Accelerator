@@ -8,6 +8,7 @@ import React, {
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Spinner, Text } from '@fluentui/react-components';
 import { PlanDataService } from '../services/PlanDataService';
+import { isVoiceLiveActive, voiceLiveSpeak } from '@/hooks/useVoiceLive';
 import {
   ProcessedPlanData,
   WebsocketMessageType,
@@ -1120,6 +1121,9 @@ const PlanPage: React.FC = () => {
           }
           scrollToBottom();
         }
+        // Voice gateway: si hay sesión de voz activa, verbalizar la respuesta
+        // final del router (TTS con parafraseo natural).
+        if (accumulated && isVoiceLiveActive()) voiceLiveSpeak(accumulated);
       } catch (e: any) {
         showToast(e?.message || 'Failed to send message', 'error');
         // Solo eliminar el último mensaje si se agregó el placeholder
