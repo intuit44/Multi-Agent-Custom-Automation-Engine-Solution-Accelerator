@@ -223,8 +223,11 @@ async def audio_stream(
                             ):
                                 try:
                                     await vl.response.cancel()
-                                except Exception:
-                                    pass
+                                except Exception as exc:
+                                    logging.debug(
+                                        "[audio/stream] Voice Live cancel failed during barge-in: %s",
+                                        exc,
+                                    )
                                 await websocket.send_text(
                                     json.dumps({"type": "barge_in_ack"})
                                 )
