@@ -372,7 +372,7 @@ const PlanChatBody: React.FC<SimplifiedPlanChatProps> = ({
         <MicButton
           mode="dictation"
           disabled={isDisabled}
-          onTranscript={(t) => setInput((input || '') + t)}
+          onTranscript={(t) => setInput((v) => (v || '') + t)}
         />
 
         {/* Send Button */}
