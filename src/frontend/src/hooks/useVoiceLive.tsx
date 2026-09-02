@@ -68,16 +68,24 @@ function buildAudioSocketUrl(): string {
 // sin tener el hook en scope (voiceLiveSpeak) y saber si hay sesión de voz.
 // ---------------------------------------------------------------------------
 let activeVoiceWs: WebSocket | null = null;
+// Identidad del TURNO de voz (única sesión activa = activeVoiceWs). Abre cuando el
+// STT entrega la voz del usuario (user_transcript) y se consume al vocear la
+// respuesta: UN turno = UN speak. Es el límite real del turno, no una heurística
+// de contenido/tiempo. Dos composers (HomeInput/PlanPage) que vocean la misma
+// respuesta caen en el mismo turno → el 2º no dispara. Dos preguntas legítimas
+// seguidas abren dos turnos → las dos se vocean (sin falsos positivos).
+let voiceTurnOpen = false;
 
 export function isVoiceLiveActive(): boolean {
   return activeVoiceWs?.readyState === WebSocket.OPEN;
 }
 
-/** Envía la respuesta final del MODEL ROUTER al gateway para TTS (parafraseo natural). */
+/** Vocea la respuesta final del MODEL ROUTER (grounded). Un solo speak por turno. */
 export function voiceLiveSpeak(text: string): void {
-  if (text && activeVoiceWs?.readyState === WebSocket.OPEN) {
-    activeVoiceWs.send(JSON.stringify({ type: 'speak', text }));
-  }
+  if (!text || activeVoiceWs?.readyState !== WebSocket.OPEN) return;
+  if (!voiceTurnOpen) return; // sin turno abierto (2º caller, o tecleado) → no vocea
+  voiceTurnOpen = false; // consumir el turno
+  activeVoiceWs.send(JSON.stringify({ type: 'speak', text }));
 }
 
 // ---------------------------------------------------------------------------
@@ -204,8 +212,12 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
           const msg = JSON.parse(e.data as string);
           switch (msg.type) {
             case 'user_transcript':
-              // STT del usuario → va al MODEL ROUTER vía el composer (flujo normal).
-              if (msg.text) onUserTranscriptRef.current?.(msg.text);
+              // STT del usuario → abre el turno (una utterance = un speak) y va al
+              // MODEL ROUTER vía el composer (flujo normal).
+              if (msg.text) {
+                voiceTurnOpen = true;
+                onUserTranscriptRef.current?.(msg.text);
+              }
               break;
             case 'audio_chunk':
               if (msg.data) enqueueAudio(msg.data);
