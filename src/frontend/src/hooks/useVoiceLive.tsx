@@ -172,7 +172,15 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
       URL.revokeObjectURL(workletUrlRef.current);
       workletUrlRef.current = null;
     }
-    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.close(1000);
+    voiceTurnOpen = false;
+
+    if (
+      wsRef.current &&
+      wsRef.current.readyState !== WebSocket.CLOSING &&
+      wsRef.current.readyState !== WebSocket.CLOSED
+    ) {
+      wsRef.current.close(1000);
+    }
     if (activeVoiceWs === wsRef.current) activeVoiceWs = null;
     wsRef.current = null;
     stopPlayback();
