@@ -700,12 +700,16 @@ class TestDatabaseBaseContextManager:
 
         database = MockDatabase()
 
-        with pytest.raises(ValueError):
+        exception_raised = False
+        try:
             async with database:
                 assert database.initialized is True
                 # Raise an exception to test cleanup
                 raise ValueError("Test exception")
+        except ValueError:
+            exception_raised = True
 
+        assert exception_raised is True
         # Even with exception, close should have been called
         assert database.closed is True
 
