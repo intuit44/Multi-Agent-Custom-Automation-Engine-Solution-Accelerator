@@ -22,6 +22,9 @@ class _WebSocket:
             return next(self.messages)
         except StopIteration:
             await asyncio.Future()
+            raise RuntimeError(
+                "Unreachable: receive() resumed after waiting forever"
+            )
 
     async def send_text(self, message):
         self.sent_text.append(message)
