@@ -204,7 +204,9 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
       ws.binaryType = 'arraybuffer'; // el TTS binario llega como ArrayBuffer, no Blob
       wsRef.current = ws;
       activeVoiceWs = ws;
-      ws.addEventListener('close', () => stop());
+      ws.addEventListener('close', () => {
+        if (wsRef.current === ws) stop();
+      });
 
       ws.onmessage = (e) => {
         // TTS binario directo: encolar el ArrayBuffer tal cual (sin round-trip
@@ -242,11 +244,11 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
 
       ws.onerror = (ev) => {
         console.log('[VL] ws error', ev);
-        stop();
+        if (wsRef.current === ws) stop();
       };
       ws.onclose = (e) => {
         console.log('[VL] ws closed code=', e.code, 'reason=', e.reason);
-        setRecording(false);
+        if (wsRef.current === ws) setRecording(false);
       };
 
       await new Promise<void>((res, rej) => {
