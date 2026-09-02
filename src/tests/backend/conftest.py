@@ -201,6 +201,13 @@ try:
 except Exception:
     # Never fail collection over an optional warm-up import.
     pass
+try:
+    import azure.ai.voicelive  # noqa: F401
+    import azure.ai.voicelive.aio  # noqa: F401
+    import azure.ai.voicelive.models  # noqa: F401
+    import v4.api.audio_router  # noqa: F401
+except Exception:
+    pass
 _patch_azure_ai_projects_models()
 
 
