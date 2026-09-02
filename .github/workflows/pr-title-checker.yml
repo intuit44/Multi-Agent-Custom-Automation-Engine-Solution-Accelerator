@@ -9,7 +9,7 @@ on:
   merge_group:
 
 permissions:
-  pull-requests: read
+  pull-requests: write
 
 jobs:
   main:
@@ -23,6 +23,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          wip: true
           types: |
             feat
             fix
