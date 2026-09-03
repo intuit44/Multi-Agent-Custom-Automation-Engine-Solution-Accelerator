@@ -67,7 +67,8 @@ export class ChatService {
     fileIds?: string[],
     planId?: string,
     allowPlan?: boolean,
-    workspaceId?: string | null
+    workspaceId?: string | null,
+    signal?: AbortSignal
   ): Promise<void> {
     const request: ChatMessageRequest = {
       session_id: sessionId || '',
@@ -77,7 +78,7 @@ export class ChatService {
       ...(allowPlan === false ? { allow_plan: false } : {}),
       ...(workspaceId ? { workspace_id: workspaceId } : {}),
     };
-    await apiService.sendChatMessageStream(request, callbacks);
+    await apiService.sendChatMessageStream(request, callbacks, signal);
   }
 
   /**
@@ -167,6 +168,10 @@ export class ChatService {
       onOAuthConsentRequest?: (consentLink: string) => void;
       /** false = the backend withholds run_plan: this message can never create a plan. */
       allowPlan?: boolean;
+      /** Cancelación explícita del turno (barge-in de voz, nuevo envío, unmount). */
+      signal?: AbortSignal;
+      /** Actividad de tools en tiempo real (carril 2 de voz, spinner, etc.). */
+      onToolActivity?: StreamCallbacks['onToolActivity'];
     } = {}
   ): AsyncIterable<string> {
     const {
@@ -178,6 +183,8 @@ export class ChatService {
       planId,
       onOAuthConsentRequest,
       allowPlan,
+      signal,
+      onToolActivity,
     } = options;
     return {
       [Symbol.asyncIterator](): AsyncIterator<string> {
@@ -211,6 +218,7 @@ export class ChatService {
               if (data.session_id) onSessionId?.(data.session_id);
             },
             onToolActivity: (data) => {
+              onToolActivity?.(data);
               // Surface tool-call activity as a minimal UI hint.
               if (data.activity === 'calling')
                 push(
@@ -239,8 +247,11 @@ export class ChatService {
           allowPlan,
           typeof window !== 'undefined'
             ? window.localStorage.getItem('macae_active_workspace_id')
-            : null
-        ).catch(fail);
+            : null,
+          signal
+          // Si el stream termina sin `done` (abort por barge-in), cerrar igual:
+          // el `for await` del consumidor no puede quedar colgado.
+        ).then(finish, fail);
 
         return {
           next(): Promise<IteratorResult<string>> {

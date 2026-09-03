@@ -28,7 +28,13 @@ import InlineToaster, { useInlineToaster } from '../toast/InlineToaster';
 import PromptCard from '@/coral/components/PromptCard';
 import { Send } from '@/coral/imports/bundleicons';
 import MicButton from './MicButton';
-import { isVoiceLiveActive, voiceLiveSpeak } from '../../hooks/useVoiceLive';
+import {
+  isVoiceLiveActive,
+  onVoiceBargeIn,
+  voiceLiveAck,
+  voiceLiveNarrate,
+  voiceLiveSpeak,
+} from '../../hooks/useVoiceLive';
 import {
   Attach20Regular,
   Clipboard20Regular,
@@ -211,6 +217,24 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
     return cleanup;
   }, []);
 
+  // Un solo stream en vuelo por composer. Un nuevo envío (tecleado o por voz) o
+  // un barge-in abortan el anterior ANTES de abrir otra burbuja: así los tokens
+  // del turno viejo nunca caen en el mensaje assistant del turno nuevo.
+  const streamAbortRef = useRef<AbortController | null>(null);
+  const abortInFlightStream = () => {
+    if (streamAbortRef.current) {
+      streamAbortRef.current.abort();
+      streamAbortRef.current = null;
+    }
+  };
+  useEffect(() => {
+    const unsubscribe = onVoiceBargeIn(() => abortInFlightStream());
+    return () => {
+      unsubscribe();
+      abortInFlightStream();
+    };
+  }, []);
+
   const handleSubmit = async (overrideMessage?: string) => {
     const messageToSend = overrideMessage || input.trim();
     if (messageToSend) {
@@ -228,12 +252,23 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
         const userMessage = messageToSend;
         const fileIds = attachedFiles.map((f) => f.file_id);
 
+        // Transición explícita de turno: cerrar el stream anterior (si sigue vivo)
+        // antes de crear la burbuja nueva.
+        abortInFlightStream();
+        const abort = new AbortController();
+        streamAbortRef.current = abort;
+        const voiceTurn = isVoiceLiveActive();
+
         dispatch(setSessionId(sessionId));
         // Dispatch user message to Redux
         dispatch(addUserMessage(userMessage));
         // Initialize assistant message placeholder
         dispatch(initAssistantMessage());
         dispatch(startStreaming());
+
+        // Carril 1 — acuse hablado inmediato (plantilla, TTS literal). Mata el
+        // silencio mientras el router clasifica / llama tools.
+        if (voiceTurn) voiceLiveAck();
 
         if (!overrideMessage) {
           setInput('');
@@ -282,6 +317,11 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
             onGeneratedFile: (f) => {
               collectedFiles.push(f);
             },
+            // Carril 2 — narración de la tool en el momento ("Consultando X…").
+            onToolActivity: (data) => {
+              if (voiceTurn && data.activity === 'calling')
+                voiceLiveNarrate(data.tool, data.server);
+            },
             onOAuthConsentRequest: (consentLink) => {
               // NOTE: do NOT pass 'noopener' — with it window.open() returns null
               // (per spec), so popup.closed polling never runs and the auto-retry
@@ -307,8 +347,12 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
           undefined, // allowPlan — usa default
           typeof window !== 'undefined'
             ? window.localStorage.getItem('macae_active_workspace_id')
-            : undefined
+            : undefined,
+          abort.signal
         );
+
+        const aborted = abort.signal.aborted;
+        if (streamAbortRef.current === abort) streamAbortRef.current = null;
 
         if (collectedFiles.length > 0) {
           setGeneratedFiles(collectedFiles);
@@ -319,12 +363,18 @@ const HomeInput: React.FC<HomeInputProps> = ({ selectedTeam }) => {
             metadata: { intent, generatedFiles: collectedFiles, fullResponse },
           })
         );
-        // Voice gateway: si hay sesión de voz activa, verbalizar la respuesta
-        // final del router (TTS con parafraseo natural — no lee Markdown/URLs).
-        if (isVoiceLiveActive() && fullResponse) {
+        // Carril 3 — contenido final del router (parafraseo). Sólo si el turno
+        // sigue vivo: un barge-in ya lo canceló y esta respuesta no debe hablar.
+        if (!aborted && isVoiceLiveActive() && fullResponse) {
           voiceLiveSpeak(fullResponse);
         }
         dismissToast(id);
+
+        if (aborted) {
+          // Turno interrumpido por el usuario: burbuja cerrada con lo recibido,
+          // sin navegación ni toasts.
+          return;
+        }
 
         if (redirectPlan) {
           showToast('Plan created!', 'success');
