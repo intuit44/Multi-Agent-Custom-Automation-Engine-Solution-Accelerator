@@ -64,28 +64,108 @@ function buildAudioSocketUrl(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Singleton: permite a los composers verbalizar la respuesta final del router
-// sin tener el hook en scope (voiceLiveSpeak) y saber si hay sesión de voz.
+// Singleton: permite a los composers verbalizar sin tener el hook en scope y
+// saber si hay sesión de voz. ÚNICO dueño del ciclo de turno de voz.
+//
+// Contrato de turno (determinista por construcción):
+//   user_transcript ──▶ turno ABIERTO (id++)
+//     carril 1  voiceLiveAck()      acuse corto, TTS literal, 1 por turno
+//     carril 2  voiceLiveNarrate()  "Consultando X…" por tool, TTS literal
+//     carril 3  voiceLiveSpeak()    contenido final del router, parafraseo, 1 por turno
+//   barge_in_ack ──▶ turno CANCELADO: se corta playback, se invalida el turno
+//     (un speak tardío del turno viejo NO habla) y se avisa al composer para
+//     que aborte el SSE y cierre la burbuja. El siguiente user_transcript abre
+//     un turno NUEVO → burbuja nueva, nunca se anexa a la anterior.
 // ---------------------------------------------------------------------------
 let activeVoiceWs: WebSocket | null = null;
-// Identidad del TURNO de voz (única sesión activa = activeVoiceWs). Abre cuando el
-// STT entrega la voz del usuario (user_transcript) y se consume al vocear la
-// respuesta: UN turno = UN speak. Es el límite real del turno, no una heurística
-// de contenido/tiempo. Dos composers (HomeInput/PlanPage) que vocean la misma
-// respuesta caen en el mismo turno → el 2º no dispara. Dos preguntas legítimas
-// seguidas abren dos turnos → las dos se vocean (sin falsos positivos).
-let voiceTurnOpen = false;
+
+type VoiceTurn = {
+  id: number;
+  open: boolean; // true entre user_transcript y speak (o barge-in)
+  acked: boolean; // carril 1 ya emitido
+  narrated: Set<string>; // carril 2: tools ya narradas en este turno
+};
+let voiceTurn: VoiceTurn = {
+  id: 0,
+  open: false,
+  acked: false,
+  narrated: new Set(),
+};
+
+/** Composers registran acá qué hacer cuando el usuario interrumpe (barge-in). */
+const bargeInListeners = new Set<(turnId: number) => void>();
+
+const ACK_PHRASES = [
+  'Dame un segundo, lo reviso.',
+  'Un momento, déjame revisar.',
+  'Ok, lo estoy mirando.',
+];
+
+/** Nombre humano y corto para narrar una tool (sin párrafos, sin parafraseo). */
+function humanizeTool(tool: string, server?: string): string {
+  const t = (tool || '').replace(/[_-]+/g, ' ').trim();
+  if (!t) return server ? `Consultando ${server}` : 'Consultando';
+  return server ? `Consultando ${t} en ${server}` : `Consultando ${t}`;
+}
+
+function sendJson(payload: Record<string, unknown>): boolean {
+  if (activeVoiceWs?.readyState !== WebSocket.OPEN) return false;
+  activeVoiceWs.send(JSON.stringify(payload));
+  return true;
+}
+
+function openVoiceTurn(): number {
+  voiceTurn = {
+    id: voiceTurn.id + 1,
+    open: true,
+    acked: false,
+    narrated: new Set(),
+  };
+  return voiceTurn.id;
+}
+
+function cancelVoiceTurn(): void {
+  voiceTurn = { ...voiceTurn, open: false };
+}
 
 export function isVoiceLiveActive(): boolean {
   return activeVoiceWs?.readyState === WebSocket.OPEN;
 }
 
-/** Vocea la respuesta final del MODEL ROUTER (grounded). Un solo speak por turno. */
+/** Id del turno de voz en curso (0 = ninguno). Útil para descartar resultados tardíos. */
+export function currentVoiceTurnId(): number {
+  return voiceTurn.open ? voiceTurn.id : 0;
+}
+
+/** Suscribirse al barge-in del usuario. Devuelve el unsubscribe. */
+export function onVoiceBargeIn(cb: (turnId: number) => void): () => void {
+  bargeInListeners.add(cb);
+  return () => bargeInListeners.delete(cb);
+}
+
+/** Carril 1 — acuse inmediato. Una vez por turno. Plantilla, TTS literal. */
+export function voiceLiveAck(): void {
+  if (!voiceTurn.open || voiceTurn.acked) return;
+  voiceTurn.acked = true;
+  const phrase = ACK_PHRASES[voiceTurn.id % ACK_PHRASES.length];
+  sendJson({ type: 'say', text: phrase });
+}
+
+/** Carril 2 — narración de tool en el momento. Dedupe por tool en el turno. */
+export function voiceLiveNarrate(tool: string, server?: string): void {
+  if (!voiceTurn.open) return;
+  const key = `${server ?? ''}/${tool}`;
+  if (voiceTurn.narrated.has(key)) return;
+  voiceTurn.narrated.add(key);
+  sendJson({ type: 'say', text: humanizeTool(tool, server) });
+}
+
+/** Carril 3 — contenido final del MODEL ROUTER (parafraseo). Un solo speak por turno. */
 export function voiceLiveSpeak(text: string): void {
-  if (!text || activeVoiceWs?.readyState !== WebSocket.OPEN) return;
-  if (!voiceTurnOpen) return; // sin turno abierto (2º caller, o tecleado) → no vocea
-  voiceTurnOpen = false; // consumir el turno
-  activeVoiceWs.send(JSON.stringify({ type: 'speak', text }));
+  if (!text) return;
+  if (!voiceTurn.open) return; // sin turno abierto (2º caller, tecleado, o cancelado) → no vocea
+  voiceTurn = { ...voiceTurn, open: false }; // consumir el turno
+  sendJson({ type: 'speak', text });
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +252,7 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
       URL.revokeObjectURL(workletUrlRef.current);
       workletUrlRef.current = null;
     }
-    voiceTurnOpen = false;
+    cancelVoiceTurn();
 
     if (
       wsRef.current &&
@@ -223,19 +303,33 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
           const msg = JSON.parse(e.data as string);
           switch (msg.type) {
             case 'user_transcript':
-              // STT del usuario → abre el turno (una utterance = un speak) y va al
-              // MODEL ROUTER vía el composer (flujo normal).
+              // STT del usuario → abre un turno NUEVO (una utterance = un turno) y
+              // va al MODEL ROUTER vía el composer (flujo normal).
               if (msg.text) {
-                voiceTurnOpen = true;
+                openVoiceTurn();
                 onUserTranscriptRef.current?.(msg.text);
               }
               break;
             case 'audio_chunk':
               if (msg.data) enqueueAudio(msg.data);
               break;
-            case 'barge_in_ack':
+            case 'barge_in_ack': {
+              // El usuario habló encima: transición EXPLÍCITA de turno. Cortar
+              // audio, invalidar el turno (un speak tardío ya no habla) y avisar
+              // al composer para que aborte el SSE y cierre su burbuja. El
+              // próximo user_transcript abre otro turno → burbuja nueva.
+              const cancelled = voiceTurn.id;
               stopPlayback();
+              cancelVoiceTurn();
+              bargeInListeners.forEach((cb) => {
+                try {
+                  cb(cancelled);
+                } catch (e) {
+                  console.warn('[VL] bargeIn listener error', e);
+                }
+              });
               break;
+            }
           }
         } catch {
           /* no-JSON ignorado */

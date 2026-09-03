@@ -8,7 +8,13 @@ import React, {
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Spinner, Text } from '@fluentui/react-components';
 import { PlanDataService } from '../services/PlanDataService';
-import { isVoiceLiveActive, voiceLiveSpeak } from '@/hooks/useVoiceLive';
+import {
+  isVoiceLiveActive,
+  onVoiceBargeIn,
+  voiceLiveAck,
+  voiceLiveNarrate,
+  voiceLiveSpeak,
+} from '@/hooks/useVoiceLive';
 import {
   ProcessedPlanData,
   WebsocketMessageType,
@@ -333,6 +339,24 @@ const PlanPage: React.FC = () => {
       });
     });
   }, []);
+
+  // Un solo stream de chat en vuelo. Barge-in de voz o un nuevo envío abortan
+  // el anterior antes de abrir otra burbuja (los tokens viejos no caen en la
+  // burbuja nueva).
+  const chatAbortRef = useRef<AbortController | null>(null);
+  const abortInFlightChat = useCallback(() => {
+    if (chatAbortRef.current) {
+      chatAbortRef.current.abort();
+      chatAbortRef.current = null;
+    }
+  }, []);
+  useEffect(() => {
+    const unsubscribe = onVoiceBargeIn(() => abortInFlightChat());
+    return () => {
+      unsubscribe();
+      abortInFlightChat();
+    };
+  }, [abortInFlightChat]);
 
   // Initial scroll on load/refresh.
   // loadPlanData / loadSessionHistory populate agentMessages while loading=true,
@@ -1022,6 +1046,12 @@ const PlanPage: React.FC = () => {
       let accumulated = '';
       let placeholderAdded = false;
       let respondingAgent = AgentType.GROUP_CHAT_MANAGER;
+      // Transición explícita de turno + carril 1 (acuse hablado inmediato).
+      abortInFlightChat();
+      const abort = new AbortController();
+      chatAbortRef.current = abort;
+      const voiceTurn = isVoiceLiveActive();
+      if (voiceTurn) voiceLiveAck();
       // Once the plan is closed in place, follow-ups are plain chat: no
       // in-plan flag, or the backend would treat them as plan follow-ups.
       const activePlanId = planClosed
@@ -1064,6 +1094,12 @@ const PlanPage: React.FC = () => {
               }
             },
             planId: activePlanId,
+            signal: abort.signal,
+            // Carril 2 — narración de la tool en el momento.
+            onToolActivity: (data) => {
+              if (voiceTurn && data.activity === 'calling')
+                voiceLiveNarrate(data.tool, data.server);
+            },
             onGeneratedFile: (f) => {
               collectedFiles.push(f);
             },
@@ -1121,16 +1157,23 @@ const PlanPage: React.FC = () => {
           }
           scrollToBottom();
         }
-        // Voice gateway: si hay sesión de voz activa, verbalizar la respuesta
-        // final del router (TTS con parafraseo natural).
-        if (accumulated && isVoiceLiveActive()) voiceLiveSpeak(accumulated);
+        if (chatAbortRef.current === abort) chatAbortRef.current = null;
+        // Carril 3 — contenido final del router (parafraseo). Un barge-in ya
+        // canceló el turno: esa respuesta no debe hablar.
+        if (!abort.signal.aborted && accumulated && isVoiceLiveActive())
+          voiceLiveSpeak(accumulated);
       } catch (e: any) {
-        showToast(e?.message || 'Failed to send message', 'error');
-        // Solo eliminar el último mensaje si se agregó el placeholder
-        if (placeholderAdded) {
-          setAgentMessages((prev) =>
-            prev.filter((_, i) => i !== prev.length - 1)
-          );
+        if (abort.signal.aborted) {
+          // Interrumpido por el usuario: dejar la burbuja con lo recibido.
+          if (chatAbortRef.current === abort) chatAbortRef.current = null;
+        } else {
+          showToast(e?.message || 'Failed to send message', 'error');
+          // Solo eliminar el último mensaje si se agregó el placeholder
+          if (placeholderAdded) {
+            setAgentMessages((prev) =>
+              prev.filter((_, i) => i !== prev.length - 1)
+            );
+          }
         }
       } finally {
         setAttachedFiles([]);
@@ -1148,6 +1191,7 @@ const PlanPage: React.FC = () => {
       planId,
       planLane,
       planClosed,
+      abortInFlightChat,
       closedSessionId,
       planApprovalRequest,
       showToast,

@@ -14,6 +14,13 @@ JSON events sent to browser (dictation):
   { "type": "transcript",     "text": "..." }
   { "type": "transcript_end", "text": "..." }
 
+JSON commands from browser (voicelive) — tres carriles, orden determinista:
+  { "type": "say",   "text" }  carril 1/2: acuse + narración de tools. Plantilla
+                                corta, TTS literal, sin parafraseo.
+  { "type": "speak", "text" }  carril 3: contenido final del router, parafraseado.
+  { "type": "barge_in" }        cancela la respuesta activa.
+Cada say/speak cancela la respuesta activa anterior (Voice Live admite una).
+
 The backend never touches local audio (no PyAudio). The browser is mic + speaker.
 Azure Voice Live SDK handles VAD, barge-in, TTS, and STT server-side.
 Credential: shared Managed Identity (audience ai.azure.com).
@@ -45,6 +52,19 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from common.config.app_config import config
 
 audio_router = APIRouter()
+
+
+async def _cancel_active_response(vl) -> None:
+    """Best-effort cancel of the in-flight Voice Live response.
+
+    Voice Live admite UNA respuesta activa por sesión. Antes de `response.create`
+    (say/speak) cancelamos la anterior: si no hay ninguna el server responde con
+    un error inocuo que se ignora.
+    """
+    try:
+        await vl.response.cancel()
+    except Exception as exc:
+        logging.debug("[audio/stream] response.cancel (ignored): %s", exc)
 
 
 @audio_router.websocket("/audio/stream")
@@ -140,10 +160,29 @@ async def audio_stream(
                                 await websocket.send_text(
                                     json.dumps({"type": "barge_in_ack"})
                                 )
+                            elif msg.get("type") == "say" and msg.get("text"):
+                                # Carril 1/2 (acuse + narración de tools): frase corta
+                                # de plantilla, TTS LITERAL, sin parafraseo. Mata el
+                                # silencio mientras el router/tools trabajan. Cancela
+                                # cualquier respuesta activa: Voice Live sólo admite
+                                # una a la vez (si no, "already has active response").
+                                await _cancel_active_response(vl)
+                                await vl.response.create(
+                                    response={
+                                        "modalities": ["audio"],
+                                        "instructions": (
+                                            "Di exactamente la siguiente frase, sin "
+                                            "añadir, quitar ni comentar nada:\n"
+                                            f"{str(msg['text'])[:200]}"
+                                        ),
+                                    }
+                                )
                             elif msg.get("type") == "speak" and msg.get("text"):
-                                # TTS on-demand: verbalizar la respuesta final del
-                                # MODEL ROUTER. instructions (no verbatim) → parafraseo
-                                # natural: no lee Markdown/código/URLs letra a letra.
+                                # Carril 3 (contenido final): verbalizar la respuesta
+                                # del MODEL ROUTER. instructions (no verbatim) →
+                                # parafraseo natural: no lee Markdown/código/URLs
+                                # letra a letra. Único carril con parafraseo.
+                                await _cancel_active_response(vl)
                                 await vl.response.create(
                                     response={
                                         "modalities": ["audio"],
