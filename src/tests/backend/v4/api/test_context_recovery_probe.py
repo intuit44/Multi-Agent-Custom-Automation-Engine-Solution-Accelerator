@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from v4.api.router import _recover_session_context
 
-# Formato REAL con que _turn_ledger persiste una ejecución (router.py:4319-4323):
+# Formato REAL con que _turn_ledger persiste una ejecución (ver router.py: event_stream/_turn_ledger):
 # full_text + "\n\n[turn-log]\n" + "\n".join(ledger). Validamos el contrato real,
 # NO una aproximación de cómo desearíamos que se viera.
 TOOL_RESULT = (
