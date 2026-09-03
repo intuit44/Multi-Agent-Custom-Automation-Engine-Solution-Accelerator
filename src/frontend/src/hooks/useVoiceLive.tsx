@@ -17,25 +17,76 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getApiUrl, getUserId } from '../api/config';
 
+/** Tasa que espera el backend (PCM16 mono). El AudioContext NO se fuerza a esta
+ *  tasa: en iOS el hardware corre a 48000/44100 y forzar 24000 hace que WebKit
+ *  reconfigure la sesión de audio al empezar el playback y mate la captura. El
+ *  worklet remuestrea a TARGET_RATE; en desktop (ratio 1 o no) el contrato con
+ *  el server es idéntico. */
+const TARGET_RATE = 24000;
+
 // ---------------------------------------------------------------------------
-// AudioWorklet processor inlined como blob — Float32 → PCM16 LE
+// AudioWorklet processor inlined como blob — Float32 → PCM16 LE @ 24 kHz
+// (`sampleRate` es global en el scope del worklet = tasa real del contexto)
 // ---------------------------------------------------------------------------
 const WORKLET_SRC = `
 class PcmCaptureProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.ratio = sampleRate / ${TARGET_RATE};
+    this.pos = 0;   // posición fraccional dentro del bloque actual
+    this.last = 0;  // última muestra del bloque anterior (interpolación lineal)
+  }
   process(inputs) {
     const ch = inputs[0]?.[0];
     if (!ch) return true;
-    const pcm = new Int16Array(ch.length);
-    for (let i = 0; i < ch.length; i++)
-      pcm[i] = Math.max(-32768, Math.min(32767, ch[i] * 32767));
-    this.port.postMessage(pcm.buffer, [pcm.buffer]);
+    if (this.ratio === 1) {
+      const pcm = new Int16Array(ch.length);
+      for (let i = 0; i < ch.length; i++)
+        pcm[i] = Math.max(-32768, Math.min(32767, ch[i] * 32767));
+      this.port.postMessage(pcm.buffer, [pcm.buffer]);
+      return true;
+    }
+    const out = [];
+    let pos = this.pos;
+    while (pos < ch.length) {
+      const i = Math.floor(pos);
+      const frac = pos - i;
+      const a = i === 0 ? this.last : ch[i - 1];
+      const s = a + (ch[i] - a) * frac;
+      out.push(Math.max(-32768, Math.min(32767, s * 32767)));
+      pos += this.ratio;
+    }
+    this.pos = pos - ch.length;
+    this.last = ch[ch.length - 1];
+    if (out.length) {
+      const pcm = Int16Array.from(out);
+      this.port.postMessage(pcm.buffer, [pcm.buffer]);
+    }
     return true;
   }
 }
 registerProcessor('pcm-capture', PcmCaptureProcessor);
 `;
 
-function createWorkletUrl() {
+// ---------------------------------------------------------------------------
+// iOS / WebKit ≥ 16.4: declarar a la sesión de audio del SO que la página
+// captura Y reproduce a la vez (AVAudioSession playAndRecord). Sin esto iOS
+// asume 'playback' y, al empezar a sonar el TTS, conmuta la sesión, corta el
+// micrófono e interrumpe el AudioContext. No-op en desktop (API inexistente).
+// ---------------------------------------------------------------------------
+export function configureAudioSession(): void {
+  const nav = navigator as Navigator & { audioSession?: { type: string } };
+  try {
+    if (nav.audioSession) {
+      nav.audioSession.type = 'play-and-record';
+      console.log('[VL] audioSession.type = play-and-record');
+    }
+  } catch (e) {
+    console.warn('[VL] audioSession no configurable', e);
+  }
+}
+
+export function createWorkletUrl() {
   return URL.createObjectURL(
     new Blob([WORKLET_SRC], { type: 'application/javascript' })
   );
@@ -209,7 +260,8 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
     const pcm = new Int16Array(chunk);
     const float = new Float32Array(pcm.length);
     for (let i = 0; i < pcm.length; i++) float[i] = pcm[i] / 32768;
-    const buf = ctx.createBuffer(1, float.length, 24000);
+    // Buffer declarado a 24 kHz; WebAudio lo remuestrea a la tasa nativa del ctx.
+    const buf = ctx.createBuffer(1, float.length, TARGET_RATE);
     buf.copyToChannel(float, 0);
     const src = ctx.createBufferSource();
     src.buffer = buf;
@@ -276,10 +328,27 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
       // Crear + reanudar el AudioContext DENTRO del gesto del clic (antes de todo
       // await). Si se crea después de getUserMedia queda SUSPENDIDO por autoplay y
       // el playback no suena aunque src.start() se llame (played++ pero silencio).
-      const actx = new AudioContext({ sampleRate: 24000 });
+      // iOS: declarar la sesión ANTES de crear el contexto y pedir el micrófono.
+      configureAudioSession();
+      // Sin sampleRate forzado: tasa nativa del hardware (el worklet remuestrea).
+      const actx = new AudioContext();
       actxRef.current = actx;
+      console.log('[VL] ctx sampleRate=', actx.sampleRate);
+      // iOS pasa el ctx a 'interrupted' (llamada, cambio de ruta, conmutación
+      // capture↔playback) y NO lo reanuda solo: hay que llamar resume().
+      actx.onstatechange = () => {
+        const st = actx.state as string;
+        console.log('[VL] ctx state=', st);
+        if (!activeRef.current || actxRef.current !== actx) return;
+        if (st !== 'running' && st !== 'closed') {
+          actx.resume().catch((e) => console.warn('[VL] resume failed', e));
+        }
+      };
       if (actx.state === 'suspended') await actx.resume();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getAudioTracks().forEach((t) => {
+        t.onended = () => console.warn('[VL] mic track terminado por el SO');
+      });
       const ws = new WebSocket(buildAudioSocketUrl());
       ws.binaryType = 'arraybuffer'; // el TTS binario llega como ArrayBuffer, no Blob
       wsRef.current = ws;
