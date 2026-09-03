@@ -78,12 +78,21 @@ jobs:
           uv run python -m pytest ../../src/tests/backend/test_app.py \
             --cov=. --cov-config=../../.coveragerc -q
 
+          # test_context_recovery_probe.py imports the real v4.api.router
+          # module chain. Several other backend tests replace sys.modules
+          # entries for v4.*/auth.* with unittest.mock objects at import time
+          # and never restore them, which corrupts that import if it runs
+          # after them — so it needs the same isolation as test_app.py.
+          uv run python -m pytest ../../src/tests/backend/v4/api/test_context_recovery_probe.py \
+            --cov=. --cov-append --cov-config=../../.coveragerc -q
+
           # Remaining backend tests — append to the same coverage data
           uv run python -m pytest ../../src/tests/backend \
             --cov=. --cov-append \
             --cov-report=term --cov-report=xml \
             --cov-config=../../.coveragerc \
-            --ignore=../../src/tests/backend/test_app.py
+            --ignore=../../src/tests/backend/test_app.py \
+            --ignore=../../src/tests/backend/v4/api/test_context_recovery_probe.py
 
       - name: Check coverage threshold
         if: steps.check_tests.outputs.run == 'true'
