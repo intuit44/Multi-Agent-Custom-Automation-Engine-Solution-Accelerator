@@ -4034,7 +4034,7 @@ async def chat_message_stream(
                         if len(_turn_ledger) < 8:
                             _turn_ledger.append(
                                 f"{server_name}.{tool_name}({_ledger_pending_args})"
-                                f" -> {str(content_preview)[:180]}"
+                                f" -> {str(content_preview)[:1000]}"
                             )
                         _ledger_pending_args = ""
                         _mcp_result_key = ("result", tool_name, server_name)
