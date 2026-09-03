@@ -12,6 +12,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getApiUrl, getUserId } from '../api/config';
+// Primitivos de captura compartidos (worklet con remuestreo a 24 kHz + sesión iOS)
+import { configureAudioSession, createWorkletUrl } from './useVoiceLive';
 
 // ---------------------------------------------------------------------------
 // Primitivo compartido: URL del WS (idéntico a useVoiceLive)
@@ -33,28 +35,6 @@ function buildAudioSocketUrl(): string {
   const path = hasApi ? '/v4/audio/stream' : '/api/v4/audio/stream';
   const userId = encodeURIComponent(getUserId() || '');
   return `${base}${path}?user_id=${userId}&mode=dictation`;
-}
-
-// Worklet PCM16 — idéntico al de useVoiceLive (inline blob)
-const WORKLET_SRC = `
-class PcmCaptureProcessor extends AudioWorkletProcessor {
-  process(inputs) {
-    const ch = inputs[0]?.[0];
-    if (!ch) return true;
-    const pcm = new Int16Array(ch.length);
-    for (let i = 0; i < ch.length; i++)
-      pcm[i] = Math.max(-32768, Math.min(32767, ch[i] * 32767));
-    this.port.postMessage(pcm.buffer, [pcm.buffer]);
-    return true;
-  }
-}
-registerProcessor('pcm-capture', PcmCaptureProcessor);
-`;
-
-function createWorkletUrl() {
-  return URL.createObjectURL(
-    new Blob([WORKLET_SRC], { type: 'application/javascript' })
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +63,7 @@ export function useDictation(onTranscript: (text: string) => void) {
   const start = useCallback(async () => {
     if (recording) return;
     try {
+      configureAudioSession();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const ws = new WebSocket(buildAudioSocketUrl());
       ws.binaryType = 'arraybuffer';
@@ -99,7 +80,11 @@ export function useDictation(onTranscript: (text: string) => void) {
             // deltas pueden no llegar (Voice Live solo emite el 'completed'),
             // así que usar el buffer y, si está vacío, el texto del evento.
             const finalText = bufferRef.current || msg.text || '';
-            console.log('[DICT] transcript_end → onTranscript(', finalText.slice(0, 50), ')');
+            console.log(
+              '[DICT] transcript_end → onTranscript(',
+              finalText.slice(0, 50),
+              ')'
+            );
             if (finalText) onTranscript(finalText);
             bufferRef.current = '';
           }
@@ -116,8 +101,9 @@ export function useDictation(onTranscript: (text: string) => void) {
         setTimeout(() => rej(new Error('ws timeout')), 8000);
       });
 
-      const actx = new AudioContext({ sampleRate: 24000 });
+      const actx = new AudioContext(); // tasa nativa; el worklet remuestrea a 24 kHz
       actxRef.current = actx;
+      if (actx.state === 'suspended') await actx.resume();
       const workletUrl = createWorkletUrl();
       workletUrlRef.current = workletUrl;
       await actx.audioWorklet.addModule(workletUrl);
