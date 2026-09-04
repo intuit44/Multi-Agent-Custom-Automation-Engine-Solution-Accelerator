@@ -47,7 +47,10 @@ export function useDictation(onTranscript: (text: string) => void) {
   const workletUrlRef = useRef<string | null>(null);
   const bufferRef = useRef('');
 
+  const activeRef = useRef(false);
+
   const stop = useCallback(() => {
+    activeRef.current = false;
     actxRef.current?.close().catch(() => {});
     actxRef.current = null;
     if (workletUrlRef.current) {
@@ -61,10 +64,29 @@ export function useDictation(onTranscript: (text: string) => void) {
   }, []);
 
   const start = useCallback(async () => {
-    if (recording) return;
+    if (recording || activeRef.current) return;
+    activeRef.current = true;
     try {
+      // iOS: declarar sesión ANTES de crear contexto y pedir micrófono
       configureAudioSession();
+      // AudioContext DENTRO del gesto (antes de awaits) para que no quede suspendido
+      const actx = new AudioContext();
+      actxRef.current = actx;
+      // iOS pasa el ctx a 'interrupted' y no lo reanuda solo
+      actx.onstatechange = () => {
+        const st = actx.state as string;
+        if (!activeRef.current || actxRef.current !== actx) return;
+        if (st !== 'running' && st !== 'closed') {
+          actx.resume().catch(() => {});
+        }
+      };
+      if (actx.state === 'suspended') await actx.resume();
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getAudioTracks().forEach((t) => {
+        t.onended = () => console.warn('[DICT] mic track terminado por el SO');
+      });
+
       const ws = new WebSocket(buildAudioSocketUrl());
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;
@@ -76,15 +98,8 @@ export function useDictation(onTranscript: (text: string) => void) {
           if (msg.type === 'transcript' && msg.text) {
             bufferRef.current += msg.text;
           } else if (msg.type === 'transcript_end') {
-            // El backend manda el texto completo en transcript_end.text; los
-            // deltas pueden no llegar (Voice Live solo emite el 'completed'),
-            // así que usar el buffer y, si está vacío, el texto del evento.
             const finalText = bufferRef.current || msg.text || '';
-            console.log(
-              '[DICT] transcript_end → onTranscript(',
-              finalText.slice(0, 50),
-              ')'
-            );
+            console.log('[DICT] transcript_end →', finalText.slice(0, 50));
             if (finalText) onTranscript(finalText);
             bufferRef.current = '';
           }
@@ -101,9 +116,6 @@ export function useDictation(onTranscript: (text: string) => void) {
         setTimeout(() => rej(new Error('ws timeout')), 8000);
       });
 
-      const actx = new AudioContext(); // tasa nativa; el worklet remuestrea a 24 kHz
-      actxRef.current = actx;
-      if (actx.state === 'suspended') await actx.resume();
       const workletUrl = createWorkletUrl();
       workletUrlRef.current = workletUrl;
       await actx.audioWorklet.addModule(workletUrl);
