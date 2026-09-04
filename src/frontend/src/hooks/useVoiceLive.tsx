@@ -113,7 +113,10 @@ function buildAudioSocketUrl(): string {
   const hasApi = /\/api(\/|$)/i.test(base);
   const path = hasApi ? '/v4/audio/stream' : '/api/v4/audio/stream';
   const userId = encodeURIComponent(getUserId() || '');
-  return `${base}${path}?user_id=${userId}`;
+  // audio=b64: TTS como audio_chunk JSON (texto) — los frames BINARIOS mueren
+  // con 1006 en el camino del dispositivo iOS (probado: server y WebKit ok).
+  // enqueueAudio ya reproduce este formato; el binario queda como fallback.
+  return `${base}${path}?user_id=${userId}&audio=b64`;
 }
 
 // ---------------------------------------------------------------------------
@@ -391,27 +394,39 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
       };
       if (actx.state === 'suspended') await actx.resume();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      micTrackRef.current = stream.getAudioTracks()[0] ?? null;
-      stream.getAudioTracks().forEach((t) => {
-        t.onended = () => {
-          console.warn('[VL] mic track terminado por el SO');
-          diag({ event: 'mic_track_ended' });
-        };
-        // iOS mutea el track en la interrupción de sesión — el instante exacto
-        t.onmute = () => diag({ event: 'mic_muted' });
-        t.onunmute = () => diag({ event: 'mic_unmuted' });
-      });
+      const micTrack = stream.getAudioTracks()[0] ?? null;
+      micTrackRef.current = micTrack;
       const ws = new WebSocket(buildAudioSocketUrl());
       ws.binaryType = 'arraybuffer'; // el TTS binario llega como ArrayBuffer, no Blob
       wsRef.current = ws;
       activeVoiceWs = ws;
+      // Snapshot por CLOSURE, no por refs: un 1006 dispara error→stop() (refs
+      // anulados) y RECIÉN después el evento close — leer refs ahí devuelve
+      // undefined. Las locales de start() sobreviven a stop() y reportan el
+      // estado REAL (p.ej. ctx 'closed', ws 3) en todos los eventos.
+      const snap = () => ({
+        audioContextState: actx.state,
+        sampleRate: actx.sampleRate,
+        micReadyState: micTrack?.readyState,
+        micMuted: micTrack?.muted,
+        wsReadyState: ws.readyState,
+      });
+      stream.getAudioTracks().forEach((t) => {
+        t.onended = () => {
+          console.warn('[VL] mic track terminado por el SO');
+          diag({ event: 'mic_track_ended', ...snap() });
+        };
+        // iOS mutea el track en la interrupción de sesión — el instante exacto
+        t.onmute = () => diag({ event: 'mic_muted', ...snap() });
+        t.onunmute = () => diag({ event: 'mic_unmuted', ...snap() });
+      });
       // pagehide = la página está navegando/descargándose (p.ej. el redirect de
       // reauthSilently). sendBeacon sobrevive a la navegación → queda registrado
       // en el log del backend, discriminando "navegó la página" de "murió el WS".
-      const onPageHide = () => diag({ event: 'pagehide' });
+      const onPageHide = () => diag({ event: 'pagehide', ...snap() });
       // En iOS visibilitychange llega ANTES que pagehide en varias
       // transiciones — capturar ambos da la secuencia temporal completa.
-      const onVisibility = () => diag({ event: 'visibilitychange' });
+      const onVisibility = () => diag({ event: 'visibilitychange', ...snap() });
       window.addEventListener('pagehide', onPageHide);
       document.addEventListener('visibilitychange', onVisibility);
       pagehideCleanupRef.current = () => {
@@ -429,6 +444,7 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
           code: e.code,
           reason: e.reason,
           wasClean: e.wasClean,
+          ...snap(),
         });
         if (wsRef.current === ws) stop(); // stop() ya deja recording=false
       });
@@ -483,6 +499,7 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
 
       ws.onerror = (ev) => {
         console.log('[VL] ws error', ev);
+        diag({ event: 'ws_error', ...snap() });
         if (wsRef.current === ws) stop();
       };
       await new Promise<void>((res, rej) => {
