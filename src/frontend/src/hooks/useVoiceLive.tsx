@@ -241,6 +241,45 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
   // el setup async (~3s de getUserMedia+WS+AudioContext), así que un 2º clic se
   // colaría y abriría una 2ª sesión huérfana. Un ref se ve al instante.
   const activeRef = useRef(false);
+  // Beacon de diagnóstico → POST /api/v4/audio/diag → log del Container App.
+  // sendBeacon sobrevive a la navegación (captura el redirect de reauth).
+  // CADA evento lleva el snapshot completo (ctx, mic, ws, visibilidad, sesión
+  // de audio) + ts: la correlación temporal en el log discrimina navegación/
+  // reload/reauth (visibility→pagehide→close) de transporte (close 1006 con
+  // todo vivo y visible) sin Web Inspector.
+  const pagehideCleanupRef = useRef<(() => void) | null>(null);
+  const micTrackRef = useRef<MediaStreamTrack | null>(null);
+  const diag = useCallback((extra: Record<string, unknown>) => {
+    try {
+      const nav = navigator as Navigator & {
+        audioSession?: { type?: string; state?: string };
+      };
+      const base = (getApiUrl() || '').trim().replace(/\/+$/, '');
+      const path = /\/api(\/|$)/i.test(base)
+        ? '/v4/audio/diag'
+        : '/api/v4/audio/diag';
+      navigator.sendBeacon(
+        `${base}${path}`,
+        JSON.stringify({
+          bundle: 'ios-audio-fix', // marcador: este beacon = bundle nuevo
+          ts: Date.now(),
+          user_id: getUserId() || '',
+          audioContextState: actxRef.current?.state,
+          sampleRate: actxRef.current?.sampleRate,
+          hasAudioSession: 'audioSession' in navigator,
+          audioSessionType: nav.audioSession?.type,
+          audioSessionState: nav.audioSession?.state,
+          micReadyState: micTrackRef.current?.readyState,
+          micMuted: micTrackRef.current?.muted,
+          wsReadyState: wsRef.current?.readyState,
+          visibilityState: document.visibilityState,
+          ...extra,
+        })
+      );
+    } catch {
+      /* el beacon jamás rompe el flujo de audio */
+    }
+  }, []);
 
   // ---- playback -----------------------------------------------------------
   const drainQueueRef = useRef<() => void>(() => {});
@@ -296,6 +335,9 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
   // ---- stop capture -------------------------------------------------------
   const stop = useCallback(() => {
     activeRef.current = false;
+    pagehideCleanupRef.current?.();
+    pagehideCleanupRef.current = null;
+    micTrackRef.current = null;
     if (statsIvRef.current) {
       clearInterval(statsIvRef.current);
       statsIvRef.current = null;
@@ -341,6 +383,7 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
       actx.onstatechange = () => {
         const st = actx.state as string;
         console.log('[VL] ctx state=', st);
+        diag({ event: 'audio_context_state' });
         if (!activeRef.current || actxRef.current !== actx) return;
         if (st !== 'running' && st !== 'closed') {
           actx.resume().catch((e) => console.warn('[VL] resume failed', e));
@@ -348,15 +391,46 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
       };
       if (actx.state === 'suspended') await actx.resume();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micTrackRef.current = stream.getAudioTracks()[0] ?? null;
       stream.getAudioTracks().forEach((t) => {
-        t.onended = () => console.warn('[VL] mic track terminado por el SO');
+        t.onended = () => {
+          console.warn('[VL] mic track terminado por el SO');
+          diag({ event: 'mic_track_ended' });
+        };
+        // iOS mutea el track en la interrupción de sesión — el instante exacto
+        t.onmute = () => diag({ event: 'mic_muted' });
+        t.onunmute = () => diag({ event: 'mic_unmuted' });
       });
       const ws = new WebSocket(buildAudioSocketUrl());
       ws.binaryType = 'arraybuffer'; // el TTS binario llega como ArrayBuffer, no Blob
       wsRef.current = ws;
       activeVoiceWs = ws;
-      ws.addEventListener('close', () => {
-        if (wsRef.current === ws) stop();
+      // pagehide = la página está navegando/descargándose (p.ej. el redirect de
+      // reauthSilently). sendBeacon sobrevive a la navegación → queda registrado
+      // en el log del backend, discriminando "navegó la página" de "murió el WS".
+      const onPageHide = () => diag({ event: 'pagehide' });
+      // En iOS visibilitychange llega ANTES que pagehide en varias
+      // transiciones — capturar ambos da la secuencia temporal completa.
+      const onVisibility = () => diag({ event: 'visibilitychange' });
+      window.addEventListener('pagehide', onPageHide);
+      document.addEventListener('visibilitychange', onVisibility);
+      pagehideCleanupRef.current = () => {
+        window.removeEventListener('pagehide', onPageHide);
+        document.removeEventListener('visibilitychange', onVisibility);
+      };
+      // ÚNICO handler de close, orden explícito: PRIMERO diag (el snapshot
+      // necesita actxRef/micTrackRef/wsRef aún vivos), DESPUÉS stop() que los
+      // anula. Dos listeners separados corren en orden de registro y el diag
+      // quedaría con el snapshot vaciado.
+      ws.addEventListener('close', (e) => {
+        console.log('[VL] ws closed code=', e.code, 'reason=', e.reason);
+        diag({
+          event: 'ws_close',
+          code: e.code,
+          reason: e.reason,
+          wasClean: e.wasClean,
+        });
+        if (wsRef.current === ws) stop(); // stop() ya deja recording=false
       });
 
       ws.onmessage = (e) => {
@@ -411,11 +485,6 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
         console.log('[VL] ws error', ev);
         if (wsRef.current === ws) stop();
       };
-      ws.onclose = (e) => {
-        console.log('[VL] ws closed code=', e.code, 'reason=', e.reason);
-        if (wsRef.current === ws) setRecording(false);
-      };
-
       await new Promise<void>((res, rej) => {
         ws.onopen = () => res();
         setTimeout(() => rej(new Error('ws timeout')), 8000);
@@ -451,7 +520,7 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
       console.error('[useVoiceLive] start error', err);
       stop();
     }
-  }, [recording, drainQueue, enqueueAudio, stopPlayback, stop]);
+  }, [recording, drainQueue, enqueueAudio, stopPlayback, stop, diag]);
 
   const toggle = useCallback(() => {
     recording ? stop() : start();
