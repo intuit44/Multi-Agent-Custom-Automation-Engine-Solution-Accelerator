@@ -46,21 +46,23 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
       this.port.postMessage(pcm.buffer, [pcm.buffer]);
       return true;
     }
-    const out = [];
     let pos = this.pos;
+    const max = Math.ceil((ch.length + 1) / this.ratio) + 1;
+    const pcm = new Int16Array(max);
+    let n = 0;
     while (pos < ch.length) {
       const i = Math.floor(pos);
       const frac = pos - i;
       const a = i === 0 ? this.last : ch[i - 1];
       const s = a + (ch[i] - a) * frac;
-      out.push(Math.max(-32768, Math.min(32767, s * 32767)));
+      pcm[n++] = Math.max(-32768, Math.min(32767, s * 32767));
       pos += this.ratio;
     }
     this.pos = pos - ch.length;
     this.last = ch[ch.length - 1];
-    if (out.length) {
-      const pcm = Int16Array.from(out);
-      this.port.postMessage(pcm.buffer, [pcm.buffer]);
+    if (n) {
+      const outBuf = pcm.buffer.slice(0, n * 2);
+      this.port.postMessage(outBuf, [outBuf]);
     }
     return true;
   }
