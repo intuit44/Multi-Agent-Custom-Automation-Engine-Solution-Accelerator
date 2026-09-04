@@ -93,15 +93,22 @@ async def audio_stream(
     websocket: WebSocket,
     user_id: str = Query(None),  # noqa: ARG001
     mode: str = Query("voicelive"),
+    audio: str = Query("binary"),
 ) -> None:
     """Voice Live relay.
 
     mode=voicelive: full duplex conversation, PCM16 audio in/out.
     mode=dictation: STT only via azure-speech, no model response, no TTS.
+    audio=b64: TTS como {"type":"audio_chunk","data":<base64>} en frames de
+    TEXTO en vez de binarios. En el camino del dispositivo iOS los frames
+    binarios matan el WS (1006 al primer frame; el mismo stream por WebKit/
+    Node llega entero) — un middlebox local (VPN/bloqueador) o el stack del
+    device tolera texto y corta binario. El frontend ya reproduce ambos.
     """
     await websocket.accept()
     credential = config.get_shared_async_credential()
     is_dictation = mode == "dictation"
+    audio_b64 = audio == "b64"
 
     try:
         async with vl_connect(
@@ -298,7 +305,22 @@ async def audio_stream(
                                 delta = getattr(event, "delta", None)
                                 if delta:
                                     audio_frames += 1
-                                    if isinstance(delta, bytes):
+                                    if audio_b64:
+                                        b64 = (
+                                            base64.b64encode(delta).decode()
+                                            if isinstance(delta, bytes)
+                                            else delta
+                                            + "=" * ((4 - len(delta) % 4) % 4)
+                                        )
+                                        await websocket.send_text(
+                                            json.dumps(
+                                                {
+                                                    "type": "audio_chunk",
+                                                    "data": b64,
+                                                }
+                                            )
+                                        )
+                                    elif isinstance(delta, bytes):
                                         await websocket.send_bytes(delta)
                                     else:
                                         padded = (
