@@ -47,11 +47,32 @@ from azure.ai.voicelive.models import (
     ServerEventType,
     ServerVad,
 )
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, Request, WebSocket, WebSocketDisconnect
 
 from common.config.app_config import config
 
 audio_router = APIRouter()
+
+
+@audio_router.post("/audio/diag")
+async def audio_diag(request: Request) -> dict:
+    """Beacon de diagnóstico del cliente de voz (navigator.sendBeacon).
+
+    El frontend lo dispara en ws.onclose / pagehide / mic_track_ended con
+    {ev, code, reason, ctx, sampleRate, audioSessionApi, bundle}. Se loguea en
+    WARNING para que aparezca destacado en el log del Container App: una sola
+    prueba desde el dispositivo deja registrado QUIÉN cerró el WS y con qué
+    código, sin Web Inspector. sendBeacon manda text/plain (simple request,
+    sin preflight CORS) y sobrevive a la navegación de la página — captura
+    incluso el caso reauthSilently() → redirect.
+    """
+    body = await request.body()
+    try:
+        payload: object = json.loads(body or b"{}")
+    except Exception:
+        payload = {"raw": body[:300].decode(errors="replace")}
+    logging.warning("[audio/diag] %s", payload)
+    return {"ok": True}
 
 
 async def _cancel_active_response(vl) -> None:
@@ -144,6 +165,13 @@ async def audio_stream(
                 try:
                     while True:
                         data = await websocket.receive()
+                        # receive() crudo NO lanza WebSocketDisconnect: DEVUELVE
+                        # {"type": "websocket.disconnect"}. Sin este break, la
+                        # próxima iteración vuelve a llamar receive() →
+                        # RuntimeError 'Cannot call "receive" once a disconnect
+                        # message has been received' (el ERROR visto en prod).
+                        if data.get("type") == "websocket.disconnect":
+                            break
                         if data.get("bytes"):
                             b64 = base64.b64encode(data["bytes"]).decode()
                             await vl.input_audio_buffer.append(audio=b64)
