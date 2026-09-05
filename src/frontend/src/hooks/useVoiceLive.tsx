@@ -115,7 +115,7 @@ function buildAudioSocketUrl(): string {
   const userId = encodeURIComponent(getUserId() || '');
   // audio=b64: TTS como audio_chunk JSON (texto) — los frames BINARIOS mueren
   // con 1006 en el camino del dispositivo iOS (probado: server y WebKit ok).
-  // enqueueAudio ya reproduce este formato; el binario queda como fallback.
+  // Usamos b64 por defecto; para binario, omitir `audio=b64` en la URL.
   return `${base}${path}?user_id=${userId}&audio=b64`;
 }
 
