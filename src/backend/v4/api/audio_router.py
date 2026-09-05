@@ -15,10 +15,13 @@ JSON events sent to browser (dictation):
   { "type": "transcript_end", "text": "..." }
 
 JSON commands from browser (voicelive) — tres carriles, orden determinista:
-  { "type": "say",   "text" }  carril 1/2: acuse + narración de tools. Plantilla
-                                corta, TTS literal, sin parafraseo.
-  { "type": "speak", "text" }  carril 3: contenido final del router, parafraseado.
-  { "type": "barge_in" }        cancela la respuesta activa.
+  { "type": "ack",   "user_text" }  carril 1: acuse generado por el modelo a
+                                     partir del enunciado del usuario (no plantilla).
+  { "type": "say",   "text" }       carril 2: narración de tools. TTS literal.
+  { "type": "speak", "text", "acked", "narrated" }
+                                     carril 3: contenido final del router,
+                                     parafraseado, excluyendo lo ya dicho en 1 y 2.
+  { "type": "barge_in" }             cancela la respuesta activa.
 Cada say/speak cancela la respuesta activa anterior (Voice Live admite una).
 
 The backend never touches local audio (no PyAudio). The browser is mic + speaker.
@@ -195,12 +198,36 @@ async def audio_stream(
                                 await websocket.send_text(
                                     json.dumps({"type": "barge_in_ack"})
                                 )
+                            elif msg.get("type") == "ack":
+                                # Carril 1 (acuse): lo GENERA el modelo a partir del
+                                # enunciado real del usuario — no es plantilla. Un
+                                # "hola" recibe un saludo; "¿en qué quedamos?" recibe
+                                # un acuse coherente con eso. Brevísimo y sin responder
+                                # de fondo: el contenido llega por 'speak'.
+                                user_text = str(msg.get("user_text") or "")[:400]
+                                await _cancel_active_response(vl)
+                                await vl.response.create(
+                                    response={
+                                        "modalities": ["audio"],
+                                        "instructions": (
+                                            "El usuario acaba de decir lo siguiente y "
+                                            "su petición se está procesando en segundo "
+                                            "plano. Responde con UNA frase muy breve "
+                                            "(máximo 10 palabras) que acuse recibo de "
+                                            "forma natural y específica a lo que dijo, "
+                                            "en su mismo idioma. Si es un saludo, "
+                                            "saluda; si es una pregunta, indica que lo "
+                                            "revisas. NO respondas la pregunta de fondo "
+                                            "ni inventes datos.\n\n"
+                                            f"USUARIO: {user_text}"
+                                        ),
+                                    }
+                                )
                             elif msg.get("type") == "say" and msg.get("text"):
-                                # Carril 1/2 (acuse + narración de tools): frase corta
-                                # de plantilla, TTS LITERAL, sin parafraseo. Mata el
-                                # silencio mientras el router/tools trabajan. Cancela
-                                # cualquier respuesta activa: Voice Live sólo admite
-                                # una a la vez (si no, "already has active response").
+                                # Carril 2 (narración de tools): frase corta derivada
+                                # del nombre real de la tool, TTS LITERAL, sin
+                                # parafraseo. Cancela cualquier respuesta activa:
+                                # Voice Live sólo admite una a la vez.
                                 await _cancel_active_response(vl)
                                 await vl.response.create(
                                     response={
@@ -215,8 +242,36 @@ async def audio_stream(
                             elif msg.get("type") == "speak" and msg.get("text"):
                                 # Carril 3 (contenido final): verbalizar la respuesta
                                 # del MODEL ROUTER. instructions (no verbatim) →
-                                # parafraseo natural: no lee Markdown/código/URLs
-                                # letra a letra. Único carril con parafraseo.
+                                # parafraseo natural. Único carril con parafraseo.
+                                # Lo ya dicho en carriles 1 y 2 (acuse, "Consultando
+                                # X") se pasa como exclusión: esos puestos ya se
+                                # ocuparon en tiempo real, no se vuelven a narrar.
+                                narrated = [
+                                    str(n) for n in (msg.get("narrated") or []) if n
+                                ]
+                                acked = bool(msg.get("acked"))
+                                exclusions: list[str] = []
+                                if acked:
+                                    exclusions.append(
+                                        "Ya se dio un acuse de recibo al usuario: no "
+                                        "saludes ni vuelvas a acusar; entra directo al "
+                                        "contenido."
+                                    )
+                                if narrated:
+                                    exclusions.append(
+                                        "Ya se anunció en voz alta que se consultaron: "
+                                        + "; ".join(narrated)
+                                        + ". No repitas qué herramientas o fuentes se "
+                                        "consultaron ni el proceso: ve a los resultados."
+                                    )
+                                exclusion_block = (
+                                    (
+                                        "\n\nYA DICHO (no repetir):\n- "
+                                        + "\n- ".join(exclusions)
+                                    )
+                                    if exclusions
+                                    else ""
+                                )
                                 await _cancel_active_response(vl)
                                 await vl.response.create(
                                     response={
@@ -227,7 +282,8 @@ async def audio_stream(
                                             "idioma del contenido. No leas símbolos de "
                                             "Markdown, código ni URLs literalmente: "
                                             "descríbelos brevemente si aportan. No inventes "
-                                            "información que no esté en el contenido.\n\n"
+                                            "información que no esté en el contenido."
+                                            f"{exclusion_block}\n\n"
                                             f"CONTENIDO:\n{msg['text']}"
                                         ),
                                     }

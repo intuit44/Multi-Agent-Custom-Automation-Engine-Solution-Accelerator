@@ -115,7 +115,7 @@ function buildAudioSocketUrl(): string {
   const userId = encodeURIComponent(getUserId() || '');
   // audio=b64: TTS como audio_chunk JSON (texto) — los frames BINARIOS mueren
   // con 1006 en el camino del dispositivo iOS (probado: server y WebKit ok).
-  // enqueueAudio ya reproduce este formato; el binario queda como fallback.
+  // Usamos b64 por defecto; para binario, omitir `audio=b64` en la URL.
   return `${base}${path}?user_id=${userId}&audio=b64`;
 }
 
@@ -125,9 +125,11 @@ function buildAudioSocketUrl(): string {
 //
 // Contrato de turno (determinista por construcción):
 //   user_transcript ──▶ turno ABIERTO (id++)
-//     carril 1  voiceLiveAck()      acuse corto, TTS literal, 1 por turno
+//     carril 1  voiceLiveAck()      acuse generado por el modelo a partir del
+//                                  enunciado del usuario (no plantilla), 1 por turno
 //     carril 2  voiceLiveNarrate()  "Consultando X…" por tool, TTS literal
-//     carril 3  voiceLiveSpeak()    contenido final del router, parafraseo, 1 por turno
+//     carril 3  voiceLiveSpeak()    contenido final del router, parafraseo, 1 por turno.
+//                                  Recibe lo ya dicho en 1 y 2 para NO repetirlo.
 //   barge_in_ack ──▶ turno CANCELADO: se corta playback, se invalida el turno
 //     (un speak tardío del turno viejo NO habla) y se avisa al composer para
 //     que aborte el SSE y cierre la burbuja. El siguiente user_transcript abre
@@ -138,24 +140,20 @@ let activeVoiceWs: WebSocket | null = null;
 type VoiceTurn = {
   id: number;
   open: boolean; // true entre user_transcript y speak (o barge-in)
+  userText: string; // enunciado STT que abrió el turno (contexto del ack)
   acked: boolean; // carril 1 ya emitido
-  narrated: Set<string>; // carril 2: tools ya narradas en este turno
+  narrated: Map<string, string>; // carril 2: key tool → frase dicha
 };
 let voiceTurn: VoiceTurn = {
   id: 0,
   open: false,
+  userText: '',
   acked: false,
-  narrated: new Set(),
+  narrated: new Map(),
 };
 
 /** Composers registran acá qué hacer cuando el usuario interrumpe (barge-in). */
 const bargeInListeners = new Set<(turnId: number) => void>();
-
-const ACK_PHRASES = [
-  'Dame un segundo, lo reviso.',
-  'Un momento, déjame revisar.',
-  'Ok, lo estoy mirando.',
-];
 
 /** Nombre humano y corto para narrar una tool (sin párrafos, sin parafraseo). */
 function humanizeTool(tool: string, server?: string): string {
@@ -170,12 +168,13 @@ function sendJson(payload: Record<string, unknown>): boolean {
   return true;
 }
 
-function openVoiceTurn(): number {
+function openVoiceTurn(userText: string): number {
   voiceTurn = {
     id: voiceTurn.id + 1,
     open: true,
+    userText,
     acked: false,
-    narrated: new Set(),
+    narrated: new Map(),
   };
   return voiceTurn.id;
 }
@@ -199,12 +198,13 @@ export function onVoiceBargeIn(cb: (turnId: number) => void): () => void {
   return () => bargeInListeners.delete(cb);
 }
 
-/** Carril 1 — acuse inmediato. Una vez por turno. Plantilla, TTS literal. */
+/** Carril 1 — acuse inmediato generado por el modelo (Voice Live) a partir del
+ *  enunciado del usuario. Sin plantillas: "hola" recibe un saludo, "¿en qué
+ *  quedamos?" recibe un acuse coherente con eso. Una vez por turno. */
 export function voiceLiveAck(): void {
   if (!voiceTurn.open || voiceTurn.acked) return;
   voiceTurn.acked = true;
-  const phrase = ACK_PHRASES[voiceTurn.id % ACK_PHRASES.length];
-  sendJson({ type: 'say', text: phrase });
+  sendJson({ type: 'ack', user_text: voiceTurn.userText });
 }
 
 /** Carril 2 — narración de tool en el momento. Dedupe por tool en el turno. */
@@ -212,16 +212,21 @@ export function voiceLiveNarrate(tool: string, server?: string): void {
   if (!voiceTurn.open) return;
   const key = `${server ?? ''}/${tool}`;
   if (voiceTurn.narrated.has(key)) return;
-  voiceTurn.narrated.add(key);
-  sendJson({ type: 'say', text: humanizeTool(tool, server) });
+  const phrase = humanizeTool(tool, server);
+  voiceTurn.narrated.set(key, phrase);
+  sendJson({ type: 'say', text: phrase });
 }
 
-/** Carril 3 — contenido final del MODEL ROUTER (parafraseo). Un solo speak por turno. */
+/** Carril 3 — contenido final del MODEL ROUTER (parafraseo). Un solo speak por
+ *  turno. Envía lo ya dicho en carriles 1 y 2 para que el modelo no lo repita:
+ *  esos puestos ya se ocuparon en tiempo real. */
 export function voiceLiveSpeak(text: string): void {
   if (!text) return;
   if (!voiceTurn.open) return; // sin turno abierto (2º caller, tecleado, o cancelado) → no vocea
+  const already = [...voiceTurn.narrated.values()];
+  const acked = voiceTurn.acked;
   voiceTurn = { ...voiceTurn, open: false }; // consumir el turno
-  sendJson({ type: 'speak', text });
+  sendJson({ type: 'speak', text, acked, narrated: already });
 }
 
 // ---------------------------------------------------------------------------
@@ -467,7 +472,7 @@ export function useVoiceLive(onUserTranscript?: (text: string) => void) {
               // STT del usuario → abre un turno NUEVO (una utterance = un turno) y
               // va al MODEL ROUTER vía el composer (flujo normal).
               if (msg.text) {
-                openVoiceTurn();
+                openVoiceTurn(msg.text);
                 onUserTranscriptRef.current?.(msg.text);
               }
               break;
