@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/python:3.11-bullseye AS base
+FROM mcr.microsoft.com/devcontainers/python:3.11-bookworm AS base
 WORKDIR /app
 
 FROM base AS builder
@@ -27,7 +27,7 @@ WORKDIR /app
 
 # Development environment for workspace_exec (the agents' terminal).
 # We do NOT predict which commands agents run: we ship a usable toolchain and
-# expose a generic shell. The base image (devcontainers/python:3.11-bullseye)
+# expose a generic shell. The base image (devcontainers/python:3.11-bookworm)
 # ALREADY provides bash, git, curl, wget, jq, zip/unzip, openssh-client,
 # build-essential (gcc/g++/make), procps, findutils, grep, sed and python —
 # verified in the image, so re-installing them would be pure noise.
@@ -44,7 +44,7 @@ RUN rm -f /etc/apt/sources.list.d/yarn.list \
     && curl -sLS https://packages.microsoft.com/keys/microsoft.asc \
     | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg \
     && chmod go+r /etc/apt/keyrings/microsoft.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ bullseye main" \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ bookworm main" \
     > /etc/apt/sources.list.d/azure-cli.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends azure-cli \
